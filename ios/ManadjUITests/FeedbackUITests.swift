@@ -12,6 +12,15 @@ final class FeedbackUITests: XCTestCase {
         let screen = app.frame
         capture("Before inline feedback, current workspace", app: app)
         open.tap()
+        let toolbar = app.otherElements["feedback-live-toolbar"]
+        XCTAssertTrue(toolbar.waitForExistence(timeout: 10))
+        capture("Live feedback toolbar in center FX slot, mixing controls stay active", app: app)
+        XCTAssertFalse(app.otherElements["feedback-review"].exists)
+        app.buttons["BROWSE"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
+        XCTAssertTrue(toolbar.exists)
+        app.buttons["BROWSE"].firstMatch.tap()
+        app.buttons["feedback-review-open"].tap()
         let review = app.otherElements["feedback-review"]; XCTAssertTrue(review.waitForExistence(timeout: 10))
         let card = app.otherElements["feedback-comment-card"]; XCTAssertTrue(card.exists)
         XCTAssertLessThan(card.frame.height, screen.height * 0.5, "Initial feedback must be a small card, not a new screen")
@@ -28,7 +37,7 @@ final class FeedbackUITests: XCTestCase {
         app.buttons["Move feedback card"].tap(); capture("Feedback card moved to reveal lower controls", app: app)
         app.buttons["CLEAR TARGET"].tap(); XCTAssertFalse(target.exists)
         app.buttons["CANCEL"].tap(); XCTAssertTrue(open.waitForExistence(timeout: 5))
-        open.tap(); app.buttons["feedback-open-outbox"].tap()
+        open.tap(); app.buttons["feedback-review-open"].tap(); app.buttons["feedback-open-outbox"].tap()
         XCTAssertTrue(app.staticTexts["No saved reports."].waitForExistence(timeout: 5))
     }
     @MainActor func testReviewSheetListsContextAndQueuesWithoutPairing() {

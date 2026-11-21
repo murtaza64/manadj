@@ -1,71 +1,168 @@
 import SwiftUI
+import AVFoundation
+import Speech
 import ManadjCore
 
-/// Shake → capture → review → submit, attached once at the workspace root.
-/// Shaking never sends anything by itself; the review sheet is the only path
-/// out, and it shows exactly what a report contains before filing.
-struct FeedbackReporter: ViewModifier {
-    @ObservedObject var model: AppModel
-    let browsing: Bool
-    let settings: Bool
-    /// Simulator coverage (--feedback-ui-fixture): the simulator has no
-    /// accelerometer, so the fixture presents the sheet directly.
-    let autoPresent: Bool
-    @Binding var requested: Bool
-    let targets: [FeedbackTarget]
-
-    @State private var detector = ShakeDetector()
-    @State private var capture: FeedbackCapture?
-    @State private var capturedTargets: [FeedbackTarget] = []
-    @State private var reviewing = false
-
-    func body(content: Content) -> some View {
-        content
-            .accessibilityHidden(reviewing)
-            .overlay {
-                if reviewing, let capture {
-                    FeedbackReviewView(
-                        capture: capture,
-                        targets: capturedTargets,
-                        onSubmit: { draft in
-                            let submitter = FeedbackSubmitter(
-                                queue: FeedbackQueue(directory: model.feedbackQueueRoot))
-                            return await submitter.submit(draft, via: model.syncConnection)
-                        },
-                        queueDirectory: model.feedbackQueueRoot,
-                        queueConnection: model.syncConnection,
-                        onClose: { reviewing = false; self.capture = nil })
-                }
+/// One live feedback session. Opening the toolbar never captures or freezes the app.
+@MainActor final class LiveFeedbackSession: NSObject, ObservableObject {
+    @Published var active = false
+    @Published var mode = "USE APP"
+    @Published var recording = false
+    @Published var transcript = ""
+    @Published var message: String?
+    @Published var reviewing = false
+    @Published var voiceURL: URL?
+    @Published var seconds = 0
+    @Published var strokes: [FeedbackStroke] = []
+    @Published var selectedPoint: CGPoint?
+    @Published var selectedTarget: String?
+    var startedAt = Date()
+    private var recorder: AVAudioRecorder?
+    private var timer: Task<Void, Never>?
+    private var recognition: SFSpeechRecognitionTask?
+    private var previousCategory: AVAudioSession.Category?
+    private var previousOptions: AVAudioSession.CategoryOptions = []
+    func open() { active = true; mode = "USE APP"; startedAt = Date(); message = nil }
+    func close() { stopVoice(transcribe: false); recognition?.cancel(); recognition = nil; active = false; reviewing = false; mode = "USE APP"; transcript = ""; strokes = []; selectedPoint = nil; selectedTarget = nil; if let voiceURL { try? FileManager.default.removeItem(at: voiceURL) }; voiceURL = nil }
+    func startVoice(directory: URL) async {
+        guard !recording else { return }
+        guard await AVAudioApplication.requestRecordPermission() else { message = "Microphone access is off. Enable it in iOS Settings, or add text at review."; return }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            previousCategory = session.category; previousOptions = session.categoryOptions
+            let speaker = session.currentRoute.outputs.contains { $0.portType == .builtInSpeaker }
+            var options: AVAudioSession.CategoryOptions = [.mixWithOthers, .allowBluetoothA2DP]
+            if speaker { options.insert(.defaultToSpeaker) }
+            try session.setCategory(.playAndRecord, mode: .default, options: options)
+            try session.setActive(true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            if let voiceURL { try? FileManager.default.removeItem(at: voiceURL) }
+            let url = directory.appendingPathComponent("narration-" + UUID().uuidString + ".m4a")
+            let recorder = try AVAudioRecorder(url: url, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 24000, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64000])
+            guard recorder.record(forDuration: 120) else { throw CocoaError(.fileWriteUnknown) }
+            self.recorder = recorder; voiceURL = url; seconds = 0; recording = true; transcript = ""; message = nil; mode = "USE APP"
+            timer = Task { @MainActor [weak self] in
+                for i in 1...120 { try? await Task.sleep(for: .seconds(1)); guard !Task.isCancelled else { return }; self?.seconds = i }
+                self?.stopVoice()
             }
-            .onChange(of: requested) { _, value in
-                if value { requested = false; present() }
-            }
-            .onAppear {
-                detector.onShake = { present() }
-                detector.start()
-                if autoPresent {
-                    // onAppear precedes the first rendered frame. Capture the
-                    // actual fixture workspace, not an empty launch window.
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(700))
-                        present()
-                    }
-                }
-            }
-            .onDisappear { detector.stop() }
+        } catch { message = "Voice did not start: " + error.localizedDescription; restorePlaybackSession() }
     }
-
-    @MainActor
-    private func present() {
-        guard !reviewing else { return } // a second shake must not recapture mid-review
-        capturedTargets = targets
-        capture = FeedbackCapture.capture(model: model, browsing: browsing, settings: settings)
-        reviewing = true
+    private func restorePlaybackSession() {
+        if let category = previousCategory { do { try AVAudioSession.sharedInstance().setCategory(category, mode: .default, options: previousOptions) } catch { message = "Stopped recording; audio session could not be restored: " + error.localizedDescription } }
+        previousCategory = nil
+    }
+    func stopVoice(transcribe: Bool = true) {
+        timer?.cancel(); timer = nil
+        guard recorder != nil else { return }
+        recorder?.stop(); recorder = nil; recording = false; restorePlaybackSession()
+        if transcribe, let voiceURL { Task { await transcribeLocal(voiceURL) } }
+    }
+    private func transcribeLocal(_ url: URL) async {
+        let status = await withCheckedContinuation { continuation in SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) } }
+        guard status == .authorized, let recognizer = SFSpeechRecognizer(), recognizer.supportsOnDeviceRecognition else {
+            message = "Voice is saved locally. On-device transcription is unavailable; add text at review. No voice was sent to a speech service."; return
+        }
+        let request = SFSpeechURLRecognitionRequest(url: url); request.requiresOnDeviceRecognition = true
+        recognition = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            Task { @MainActor in
+                if let result { self?.transcript = result.bestTranscription.formattedString }
+                if let error { self?.message = "Voice stays local. Transcription failed: " + error.localizedDescription }
+            }
+        }
     }
 }
 
+struct LiveFeedbackToolbar: View {
+    @ObservedObject var session: LiveFeedbackSession
+    @ObservedObject var model: AppModel
+    var body: some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 4) {
+                Text(session.recording ? "● \(session.seconds)s" : "FEEDBACK").foregroundStyle(session.recording ? Ink.danger : Ink.accent).font(Ink.font(9, bold: true))
+                Spacer(minLength: 0)
+                Button("×") { session.close() }.font(Ink.font(18)).accessibilityLabel("Close feedback toolbar")
+            }
+            HStack(spacing: 3) {
+                Button(session.recording ? "STOP" : "REC") {
+                    if session.recording { model.noteFeedbackAction("feedback-voice-stop"); session.stopVoice() }
+                    else { Task { await session.startVoice(directory: model.feedbackQueueRoot.appendingPathComponent("voice-drafts")); if session.recording { model.noteFeedbackAction("feedback-voice-start") } } }
+                }.buttonStyle(PerformanceKeyStyle(color: Ink.danger, active: session.recording)).accessibilityIdentifier("feedback-rec")
+                Button("REVIEW") { session.stopVoice(); session.mode = "USE APP"; session.reviewing = true }.buttonStyle(PerformanceKeyStyle(color: Ink.play)).accessibilityIdentifier("feedback-review-open")
+            }.frame(height: 32)
+            HStack(spacing: 2) {
+                ForEach(["USE APP", "POINT", "DRAW"], id: \.self) { mode in Button(mode) { session.mode = mode }.buttonStyle(PerformanceKeyStyle(color: Ink.accent, active: session.mode == mode)) }
+            }.frame(height: 28)
+            if let message = session.message { Text(message).font(Ink.font(8)).foregroundStyle(Ink.warning).lineLimit(3) }
+        }.padding(3).background(Ink.accent.opacity(0.06)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Ink.accent.opacity(0.5)))
+            .accessibilityIdentifier("feedback-live-toolbar")
+    }
+}
+
+struct FeedbackReporter: ViewModifier {
+    @ObservedObject var model: AppModel
+    @ObservedObject var session: LiveFeedbackSession
+    let browsing: Bool
+    let settings: Bool
+    let autoPresent: Bool
+    @Binding var requested: Bool
+    let targets: [FeedbackTarget]
+    @State private var detector = ShakeDetector()
+    @State private var capture: FeedbackCapture?
+    @State private var capturedTargets: [FeedbackTarget] = []
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                if session.active && !session.reviewing && session.mode != "USE APP" {
+                    FeedbackLiveInk(session: session, targets: targets).ignoresSafeArea()
+                }
+                if let capture, session.reviewing {
+                    FeedbackReviewView(capture: capture, targets: capturedTargets, onSubmit: { draft in
+                        await FeedbackSubmitter(queue: FeedbackQueue(directory: model.feedbackQueueRoot)).submit(draft, via: model.syncConnection)
+                    }, queueDirectory: model.feedbackQueueRoot, queueConnection: model.syncConnection, initialComment: session.transcript, initialStrokes: session.strokes, initialPoint: session.selectedPoint, initialTarget: session.selectedTarget, onClose: { session.reviewing = false; self.capture = nil })
+                }
+            }
+            .onChange(of: requested) { _, value in if value { requested = false; session.open() } }
+            .onChange(of: session.reviewing) { _, value in
+                if value {
+                    capturedTargets = targets
+                    capture = FeedbackCapture.capture(model: model, browsing: browsing, settings: settings)
+                } else { capture = nil }
+            }
+            .onAppear {
+                detector.onShake = { session.open() }; detector.start()
+                if autoPresent { session.open(); Task { @MainActor in try? await Task.sleep(for: .milliseconds(700)); session.reviewing = true } }
+            }
+            .onDisappear { detector.stop(); session.stopVoice() }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in session.stopVoice() }
+    }
+}
 extension View {
-    func feedbackReporter(model: AppModel, browsing: Bool, settings: Bool, requested: Binding<Bool>, targets: [FeedbackTarget], autoPresent: Bool = false) -> some View {
-        modifier(FeedbackReporter(model: model, browsing: browsing, settings: settings, autoPresent: autoPresent, requested: requested, targets: targets))
+    func feedbackReporter(model: AppModel, session: LiveFeedbackSession, browsing: Bool, settings: Bool, requested: Binding<Bool>, targets: [FeedbackTarget], autoPresent: Bool = false) -> some View {
+        modifier(FeedbackReporter(model: model, session: session, browsing: browsing, settings: settings, autoPresent: autoPresent, requested: requested, targets: targets))
+    }
+}
+
+private struct FeedbackLiveInk: View {
+    @ObservedObject var session: LiveFeedbackSession
+    let targets: [FeedbackTarget]
+    @State private var current: [CGPoint] = []
+    var body: some View {
+        GeometryReader { geometry in
+            Canvas { context, size in
+                for line in session.strokes + [FeedbackStroke(points: current)] where line.points.count > 1 {
+                    var p = Path(); p.addLines(line.points.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) })
+                    context.stroke(p, with: .color(Ink.warning), style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                }
+            }.contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { v in
+                if session.mode == "DRAW" { current.append(CGPoint(x: v.location.x / geometry.size.width, y: v.location.y / geometry.size.height)) }
+            }.onEnded { v in
+                if session.mode == "POINT" {
+                    let point = CGPoint(x: v.location.x / geometry.size.width, y: v.location.y / geometry.size.height)
+                    session.selectedPoint = point; session.selectedTarget = FeedbackTarget.label(at: point, viewport: geometry.size, in: targets)
+                    session.mode = "USE APP"
+                } else if current.count > 1 { session.strokes.append(FeedbackStroke(points: current)); session.mode = "USE APP" }
+                current = []
+            })
+        }.accessibilityLabel("Feedback " + session.mode.lowercased() + " mode. After marking, normal controls resume.")
     }
 }

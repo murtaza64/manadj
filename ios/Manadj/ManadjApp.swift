@@ -27,6 +27,7 @@ import CEngine
 struct WorkspaceView: View {
     @EnvironmentObject var model: AppModel
     @StateObject private var knobPopups = KnobPopups()
+    @StateObject private var feedback = LiveFeedbackSession()
     @State private var browsing = false
     @State private var feedbackRequested = false
     @State private var feedbackTargets: [FeedbackTarget] = []
@@ -71,8 +72,10 @@ struct WorkspaceView: View {
         .alert("manaDJ", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
+        .onChange(of: browsing) { _, value in model.noteFeedbackAction(value ? "browser-open" : "browser-close") }
+        .onChange(of: settings) { _, value in model.noteFeedbackAction(value ? "settings-open" : "settings-close") }
         .onPreferenceChange(FeedbackTargetPreference.self) { feedbackTargets = $0 }
-        .feedbackReporter(model: model, browsing: browsing, settings: settings, requested: $feedbackRequested, targets: feedbackTargets,
+        .feedbackReporter(model: model, session: feedback, browsing: browsing, settings: settings, requested: $feedbackRequested, targets: feedbackTargets,
                           autoPresent: ProcessInfo.processInfo.arguments.contains("--feedback-ui-fixture"))
     }
     private var portraitBody: some View {
@@ -80,7 +83,7 @@ struct WorkspaceView: View {
             let compact = geometry.size.height < 860
             let gap: CGFloat = compact ? 5 : 8
             VStack(spacing: gap) {
-                HStack(spacing: 10) { deckInfo(0); deckInfo(1); feedbackButton }.frame(height: browsing && keyboardOpen ? 36 : 44)
+                HStack(spacing: 10) { deckInfo(0); deckInfo(1) }.frame(height: browsing && keyboardOpen ? 36 : 44)
                 if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: compact ? 83 : 135) }
                 ZStack(alignment: .bottom) {
                     if !browsing && !settings { VStack(spacing: gap) {
@@ -92,6 +95,7 @@ struct WorkspaceView: View {
                     if browsing {
                         VStack(spacing: 0) {
                             if !keyboardOpen { Capsule().fill(Ink.muted.opacity(0.7)).frame(width: 40, height: 4).frame(height: 16) }
+                            if feedback.active { LiveFeedbackToolbar(session: feedback, model: model).frame(maxWidth: 300) }
                             library
                             HStack(spacing: 12) { transport(0, browser: true); transport(1, browser: true) }.frame(height: 44).padding(.horizontal, 6).background(Ink.panel)
                         }.background(Ink.base).transition(.move(edge: .bottom))
@@ -113,7 +117,7 @@ struct WorkspaceView: View {
     private var feedbackButton: some View {
         Button { feedbackRequested = true } label: {
             Image(systemName: "bubble.left.and.text.bubble.right")
-                .font(.system(size: 16, weight: .medium)).frame(width: 36, height: 44)
+                .font(.system(size: 13, weight: .medium)).frame(maxWidth: .infinity, minHeight: 28)
         }.buttonStyle(.plain).foregroundStyle(Ink.accent)
             .accessibilityLabel("Feedback").accessibilityIdentifier("feedback-open")
             .feedbackTarget("Feedback button")
@@ -128,7 +132,7 @@ struct WorkspaceView: View {
                     browseKey.frame(height: 36)
                     if !browsing && !settings { PerformanceBattery().frame(height: 14) }
                 }
-                VStack(spacing: 4) { HStack(spacing: 4) { deckInfo(1); feedbackButton }.frame(height: 36); minimap(1).frame(height: 30); deckControls(1, compact: true) }.frame(width: geometry.size.width * 0.28)
+                VStack(spacing: 4) { deckInfo(1).frame(height: 36); minimap(1).frame(height: 30); deckControls(1, compact: true) }.frame(width: geometry.size.width * 0.28)
             }.padding(.horizontal, 8)
             .overlay(alignment: .leading) {
                 if browsing { VStack { library; browseKey.frame(height: 36) }.frame(width: geometry.size.width * 0.6).background(Ink.base) }
@@ -198,7 +202,8 @@ struct WorkspaceView: View {
                 }.frame(height: 36)
                 recordingBar.frame(height: 44)
                 Spacer(minLength: 0)
-                fxCard
+                if feedback.active { LiveFeedbackToolbar(session: feedback, model: model) }
+                else { fxCard; feedbackButton.frame(height: 28) }
                 if xf { PerformanceFader(value: Binding(get: { (model.crossfade + 1) / 2 }, set: { model.crossfade = $0 * 2 - 1; model.set(MDJCrossfade, 0, model.crossfade) }), color: Ink.accent, vertical: false, label: "Crossfader").frame(height: 40).feedbackTarget("Crossfader") }
             }.padding(.horizontal, 3)
             channel(1).frame(width: 42)

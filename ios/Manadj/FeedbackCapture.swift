@@ -80,6 +80,7 @@ struct FeedbackCapture {
                 "recordings": model.recordings.count,
                 "paired_desktop": model.pairedOrigin ?? NSNull(),
                 "status": model.status,
+                "recent_operations": model.feedbackActions,
             ],
         ]
         if let window {

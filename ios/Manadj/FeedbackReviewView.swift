@@ -33,6 +33,10 @@ struct FeedbackReviewView: View {
         onSubmit: @escaping @MainActor (FeedbackDraft) async -> FeedbackOutcome,
         queueDirectory: URL? = nil,
         queueConnection: DesktopConnection? = nil,
+        initialComment: String = "",
+        initialStrokes: [FeedbackStroke] = [],
+        initialPoint: CGPoint? = nil,
+        initialTarget: String? = nil,
         onClose: @escaping () -> Void = {}
     ) {
         self.capture = capture
@@ -41,6 +45,11 @@ struct FeedbackReviewView: View {
         self.queueDirectory = queueDirectory
         self.queueConnection = queueConnection
         self.onClose = onClose
+        _strokes = State(initialValue: initialStrokes)
+        _selectedPoint = State(initialValue: initialPoint)
+        _selectedTarget = State(initialValue: initialTarget)
+        _details = State(initialValue: initialComment)
+        _title = State(initialValue: String(initialComment.prefix(100)))
         _includeScreenshot = State(initialValue: capture.screenshot != nil)
         _sections = State(initialValue: capture.sections)
     }
