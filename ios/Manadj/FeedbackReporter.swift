@@ -129,7 +129,7 @@ struct LiveFeedbackToolbar: View {
                 Button("REVIEW") { session.stopVoice(); session.mode = "USE APP"; session.reviewing = true }.buttonStyle(PerformanceKeyStyle(color: Ink.play)).accessibilityIdentifier("feedback-review-open")
             }.frame(height: 44).disabled(session.sending)
             if session.sending {
-                HStack { ProgressView().controlSize(.small); Text("SENDING TO DESKTOP…").font(Ink.font(9)) }.accessibilityIdentifier("feedback-center-sending")
+                HStack { ProgressView().controlSize(.small); Text("SENDING TO DESKTOP…").font(Ink.font(9)) }.accessibilityElement(children: .contain).accessibilityIdentifier("feedback-center-sending")
             } else if let status = session.deliveryStatus {
                 Text(status).font(Ink.font(9)).foregroundStyle(Ink.warning).accessibilityIdentifier("feedback-center-delivery")
             }
@@ -169,7 +169,7 @@ struct FeedbackReporter: ViewModifier {
                         #if DEBUG
                         if ProcessInfo.processInfo.arguments.contains("--feedback-receipt-ui-fixture") {
                             // Deterministic receipt-state UI only. No network or filing.
-                            try? await Task.sleep(for: .seconds(2))
+                            try? await Task.sleep(for: .seconds(5))
                             result = .savedOnDesktop(status: "synthetic-ui-receipt", detail: "UI test only, no report sent")
                         } else {
                             result = await FeedbackSubmitter(queue: FeedbackQueue(directory: model.feedbackQueueRoot)).submit(draft, via: model.syncConnection)
