@@ -85,7 +85,7 @@ struct BrowserTopPull: UIViewRepresentable {
             return pan
         }()
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             guard let scroll, let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
             let velocity = pan.velocity(in: scroll.window)
             return velocity.y > 0 && velocity.y > abs(velocity.x) * 1.5 && scroll.contentOffset.y <= -scroll.adjustedContentInset.top + 0.5
