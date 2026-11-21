@@ -226,13 +226,25 @@ struct WorkspaceView: View {
                         .accessibilityLabel("Lock playing waveform touch").accessibilityIdentifier("wave-touch-lock").accessibilityValue(model.waveTouchLock ? "Locked while playing" : "Unlocked")
                 }.frame(height: 44)
                 HStack(spacing: 4) {
-                    Button("FEEDBACK") { feedbackRequested = true }.buttonStyle(PerformanceKeyStyle(color: Ink.accent)).accessibilityIdentifier("feedback-open").accessibilityLabel("Feedback").feedbackTarget("Feedback button")
-                    Button("AUDIO") { feedback.contextual = feedback.contextual == "OUTPUT" ? "FX" : "OUTPUT" }.buttonStyle(PerformanceKeyStyle(color: Ink.accent)).disabled(feedback.active).accessibilityLabel("Audio output: " + outputDescription)
+                    Button("SESSIONS") { notice = "Session replay is not implemented on iOS yet" }.buttonStyle(PerformanceKeyStyle(color: Ink.muted))
                     Button { withAnimation { browsing = false; settings.toggle() } } label: { Image(systemName: "gearshape") }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 44).accessibilityLabel("Settings").feedbackTarget("Settings")
                 }.frame(height: 44)
                 recordingBar.frame(height: 44)
                 Spacer(minLength: 0)
+                HStack(spacing: 0) {
+                    ForEach(["FX", "FEEDBACK", "AUDIO", "SYNC"], id: \.self) { tab in
+                        Button {
+                            if tab == "FEEDBACK" { feedback.open() }
+                            else { feedback.contextual = tab == "AUDIO" ? "OUTPUT" : tab }
+                        } label: {
+                            Text(tab == "FEEDBACK" ? "FEEDBK" : tab).font(Ink.font(8, bold: true)).frame(maxWidth: .infinity, minHeight: 44)
+                                .background((feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")) ? Ink.accent.opacity(0.15) : .clear)
+                                .overlay(alignment: .bottom) { Rectangle().fill((feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")) ? Ink.accent : Ink.edge).frame(height: 2) }
+                        }.buttonStyle(.plain).accessibilityLabel(tab == "FEEDBACK" ? "Feedback" : tab.capitalized).accessibilityIdentifier(tab == "FEEDBACK" ? "feedback-open" : "center-tab-" + tab.lowercased())
+                    }
+                }.foregroundStyle(Ink.accent)
                 if feedback.contextual == "FEEDBACK" { LiveFeedbackToolbar(session: feedback, model: model) }
+                else if feedback.contextual == "SYNC" { SettingsView(syncOnly: true).frame(height: 160).accessibilityIdentifier("center-sync-panel") }
                 else if feedback.contextual == "OUTPUT" { outputContext }
                 else if feedback.contextual == "HEARD" { heardContext }
                 else { fxCard }
@@ -261,7 +273,7 @@ struct WorkspaceView: View {
     /// Recording belongs in the shared center panel, between channel faders.
     private var recordingBar: some View {
         HStack(spacing: 4) {
-            Button("SESSIONS") { notice = "Session replay is not implemented on iOS yet" }.buttonStyle(PerformanceKeyStyle(color: Ink.muted))
+            Spacer(minLength: 0)
             Button { model.toggleRecording() } label: {
                 HStack(spacing: 4) {
                     Image(systemName: model.recording ? "stop.fill" : "record.circle")
@@ -273,6 +285,7 @@ struct WorkspaceView: View {
                 HStack(spacing: 3) { Image(systemName: "waveform.path"); Text("\(model.recordings.count)") }
             }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 52)
                 .accessibilityLabel("Saved recordings")
+            Spacer(minLength: 0)
         }
     }
     private var outputDescription: String { outputRoute.outputs.map(\.portName).joined(separator: ", ") }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
+    var syncOnly = false
     @State private var forgetConfirmation = false
     @State private var bulkConfirmation = false
     @State private var usb = false
@@ -47,6 +48,7 @@ struct SettingsView: View {
                 Button("SYNC + ALL AUDIO") { bulkConfirmation = true }.buttonStyle(FlatButtonStyle()).disabled(model.busy || model.pairedOrigin == nil)
                 Text("Normal sync caches the library and previews. Audio downloads when loaded. All audio can use substantial storage. This slice does not automatically remove old revisions.").font(Ink.font(11)).foregroundStyle(Ink.muted)
                 if model.pairedOrigin != nil { Button("FORGET DESKTOP") { forgetConfirmation = true }.buttonStyle(FlatButtonStyle(color: Ink.danger)).disabled(model.busy) }
+                if !syncOnly {
                 Divider().overlay(Ink.edge)
                 Button("LISTEN TO LOCAL LIVE · PROTOTYPE") { liveConfirmation = true }.buttonStyle(FlatButtonStyle()).disabled(model.busy || model.pairedOrigin == nil || model.recording)
                 Text("Desktop: turn on LOCAL LIVE. Replaces this phone's playback; audio downloads first. Trusted LAN only. Sampled-state timing is experimental.").font(Ink.font(11)).foregroundStyle(Ink.warning)
@@ -76,7 +78,8 @@ struct SettingsView: View {
                 SectionLabel(title: "IMPLEMENTATION STATUS")
                 Text("Native SwiftUI interface · AVFoundation audio output and file decoding · shared C++ DSP engine · Swift library and Follow ranking. This is implementation work, not a verified release.").font(Ink.font(12)).foregroundStyle(Ink.muted)
                 Text("Still missing: desktop write-back, saved imports browser, Session replay/timeline, sync groups/phase alignment, scratch gestures, stems, heard-latency calibration, full detail-waveform editing and four-channel output. Read the Android coverage map in ios/FEATURE_COVERAGE.md.").font(Ink.font(12)).foregroundStyle(Ink.warning)
-            }.padding(16)
+                }
+            }.padding(syncOnly ? 6 : 16)
         }.background(Ink.base)
         .confirmationDialog("Replace phone playback with your paired desktop?", isPresented: $liveConfirmation) {
             Button("Listen to local live") { model.startLocalLive() }
