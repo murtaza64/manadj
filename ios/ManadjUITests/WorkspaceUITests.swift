@@ -19,9 +19,10 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
-    @MainActor func testCompactFixedTargetsAndScrollableMixerReview() {
+    @MainActor func testCompactFixedTargetsAndScrollableMixerReview() throws {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        guard app.frame.height < 760 else { throw XCTSkip("Compact arrangement is verified by the dedicated SE pass") }
         let scroll = app.scrollViews["compact-mixer-scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 15))
         for name in ["A play pause", "B play pause", "A PITCH panel", "B PITCH panel"] {
