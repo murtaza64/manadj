@@ -129,16 +129,20 @@ final class WorkspaceUITests: XCTestCase {
         let beforeTransport = app.buttons["A play pause"].frame
         let beforePitch = app.buttons["A PITCH panel"].frame
         app.buttons["center-tab-sync"].tap()
-        XCTAssertTrue(app.otherElements["center-sync-panel"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["center-sync-panel"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons["A play pause"].frame.minY, beforeTransport.minY, accuracy: 2, "Panel changes must not move transport")
         XCTAssertEqual(app.buttons["A PITCH panel"].frame.minY, beforePitch.minY, accuracy: 2, "Panel changes must not move pitch")
         XCTAssertTrue(app.buttons["A play pause"].isHittable)
         XCTAssertTrue(app.buttons["A PITCH panel"].isHittable)
         let address = app.textFields["Desktop address"]
         XCTAssertTrue(address.exists)
-        let panel = app.otherElements["center-sync-panel"]
+        let panel = app.descendants(matching: .any)["center-sync-panel"].firstMatch
         for _ in 0..<5 where !address.isHittable { panel.swipeUp(velocity: .slow) }
         XCTAssertTrue(address.isHittable, "Actual pairing address must be reachable inside Sync")
+        let pair = app.buttons["PAIR IPHONE"]
+        for _ in 0..<8 where !pair.isHittable { panel.swipeUp(velocity: .slow) }
+        XCTAssertTrue(pair.isHittable, "Pair action must remain reachable inside bounded Sync scroll")
+        XCTAssertEqual(app.buttons["A play pause"].frame.minY, beforeTransport.minY, accuracy: 2)
         shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Actual Sync tab reuses desktop pairing and library sync"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["center-tab-fx"].tap()
         XCTAssertFalse(panel.exists)
