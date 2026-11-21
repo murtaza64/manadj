@@ -73,6 +73,12 @@ private struct DirectionLockedRow<Content: View>: UIViewControllerRepresentable 
             if recognizer is UITapGestureRecognizer { return touch.location(in: recognizer.view).x >= 44 }
             return true
         }
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            // A vertical-only UIScrollView may begin its ancestor pan before
+            // this child gets direction-lock. Share recognition, not decisions:
+            // vertical rows still fail shouldBegin and can never load.
+            recognizer is UIPanGestureRecognizer && other is UIPanGestureRecognizer
+        }
         func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
             guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
             let t = pan.translation(in: pan.view)

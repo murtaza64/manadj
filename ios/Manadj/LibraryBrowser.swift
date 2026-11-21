@@ -34,7 +34,7 @@ struct LibraryBrowser: View {
                     Text("SWIPE A TRACK TO LOAD").font(Ink.font(9, bold: true)).foregroundStyle(Ink.muted).lineLimit(1).minimumScaleFactor(0.7)
                     Spacer(minLength: 0)
                     Button("B →") { model.loadTarget = 1 }.foregroundStyle(Ink.decks[1]).frame(minWidth: 44, minHeight: 44)
-                    Button("BROWSE", action: onClose).buttonStyle(LibraryChipStyle(active: true)).frame(width: 66, height: 44)
+                    Button("BROWSE", action: onClose).accessibilityIdentifier("browser-close").buttonStyle(LibraryChipStyle(active: true)).frame(width: 66, height: 44)
                 }
                 // Match Android Library.kt: compact search capsule plus a separate FILTER key.
                 // Keep a 44pt interaction row without inheriting the oversized system body font.

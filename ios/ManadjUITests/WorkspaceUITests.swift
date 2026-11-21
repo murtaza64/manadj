@@ -57,7 +57,7 @@ final class WorkspaceUITests: XCTestCase {
             let timing = NSPredicate(format: "value BEGINSWITH %@", "nativeTapToRowAppearMs=")
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: timing, object: list)], timeout: 5), .completed)
             print("SYNTHETIC_BROWSER_NATIVE \(list.value ?? "missing") excludesAutomationTapOverhead=true rowAppearNotPixels=true")
-            app.buttons["BROWSE"].firstMatch.tap()
+            app.buttons["browser-close"].tap()
         }
     }
 
@@ -349,8 +349,8 @@ final class WorkspaceUITests: XCTestCase {
         }
         let after = XCTAttachment(screenshot: app.screenshot()); after.name = "Vertical diagonal and reversed browser scroll without deck load"; after.lifetime = .keepAlways; add(after)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Scroll fixture'")).firstMatch.exists)
-        app.buttons["BROWSE"].firstMatch.tap()
-        app.buttons["BROWSE"].firstMatch.tap()
+        app.buttons["browser-close"].tap()
+        app.buttons["browser-close"].tap()
         XCTAssertTrue(list.waitForExistence(timeout: 10))
     }
 

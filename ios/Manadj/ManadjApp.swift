@@ -82,7 +82,7 @@ struct WorkspaceView: View {
                         mixer.frame(maxHeight: .infinity)
                         HStack(spacing: 6) { minimap(0); browseKey.frame(width: 84); minimap(1) }.frame(height: compact ? 36 : 44)
                         HStack(alignment: .top, spacing: 14) { deckControls(0, compact: compact); deckControls(1, compact: compact) }
-                    }.allowsHitTesting(!browsing).accessibilityHidden(browsing)
+                    }.allowsHitTesting(!browsing).accessibilityHidden(browsing).opacity(browsing ? 0 : 1)
                     }
                     if browsing {
                         VStack(spacing: 0) {
