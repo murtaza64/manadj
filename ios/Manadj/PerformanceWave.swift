@@ -296,7 +296,7 @@ struct PerformanceWave: UIViewRepresentable {
             }
             // Tile origins are whole device pixels. Adjacent tiles meet exactly
             // and never interpolate at seams, including negative window starts.
-            let origin = ((Double(tile * tileColumns) * seconds - start) / span * Double(along) * Double(scale)).rounded() / Double(scale)
+            let origin = ((Double(tile * tileColumns) * seconds - start) / span * Double(along) * Double(scale)).rounded() / Double(scale) - Double(step / 2)
             image.draw(at: vertical ? CGPoint(x: 0, y: origin) : CGPoint(x: origin, y: 0))
         }
     }
