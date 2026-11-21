@@ -133,10 +133,12 @@ final class FeedbackReportTests: XCTestCase {
         try queue.save(["id": unbound, "title": "B"], id: unbound, origin: nil)
         let pending = queue.pending()
         XCTAssertEqual(pending.count, 2)
-        XCTAssertEqual(pending[0].id, bound)
-        XCTAssertEqual(pending[0].origin, "http://192.168.1.20:48127")
-        XCTAssertNil(pending[1].origin)
-        let payload = try JSONSerialization.jsonObject(with: pending[0].payload) as? [String: Any]
+        // Millisecond timestamps can tie; preserve identity/origin, not insertion order.
+        let boundEntry = try XCTUnwrap(pending.first { $0.id == bound })
+        let unboundEntry = try XCTUnwrap(pending.first { $0.id == unbound })
+        XCTAssertEqual(boundEntry.origin, "http://192.168.1.20:48127")
+        XCTAssertNil(unboundEntry.origin)
+        let payload = try JSONSerialization.jsonObject(with: boundEntry.payload) as? [String: Any]
         XCTAssertEqual(payload?["title"] as? String, "A")
         queue.remove(id: bound)
         XCTAssertEqual(queue.pending().map { $0.id }, [unbound])
