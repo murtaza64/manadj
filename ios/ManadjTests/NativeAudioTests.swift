@@ -7,6 +7,38 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    @MainActor func testNativeOutputClockAndSourceRateAgainstRenderedFrames() async throws {
+        for rate in [44_100.0, 48_000.0] {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+            defer { try? FileManager.default.removeItem(at: url) }
+            let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2))
+            do {
+                let file = try AVAudioFile(forWriting: url, settings: format.settings)
+                let pcm = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(rate * 6)))
+                pcm.frameLength = pcm.frameCapacity
+                let channels = try XCTUnwrap(pcm.floatChannelData)
+                for i in 0..<Int(pcm.frameLength) { let v = Float(sin(Double(i) * .pi * 2 * 440 / rate)) * 0.05; channels[0][i] = v; channels[1][i] = v }
+                try file.write(from: pcm)
+            }
+            let audio = try NativeAudio()
+            _ = try await audio.load(url, deck: 0)
+            XCTAssertTrue(audio.send(MDJPlay))
+            try await Task.sleep(for: .milliseconds(100))
+            let startFrames = audio.renderedFrames, startPosition = audio.state(0).position
+            let begin = ProcessInfo.processInfo.systemUptime
+            try await Task.sleep(for: .seconds(2))
+            let wall = ProcessInfo.processInfo.systemUptime - begin
+            let rendered = Double(audio.renderedFrames - startFrames) / 48_000
+            let moved = audio.state(0).position - startPosition
+            print("SYNTHETIC_AUDIO_TIMING source=\(rate) wall=\(wall) outputSeconds=\(rendered) playheadSeconds=\(moved) starvedFrames=\(audio.starvedFrames)")
+            XCTAssertEqual(moved, rendered, accuracy: 0.05, "Source-rate conversion must follow output frames")
+            XCTAssertGreaterThan(rendered, wall * 0.70, "Simulator output clock is unexpectedly stalled; not a phone benchmark")
+            XCTAssertLessThan(rendered, wall * 1.30)
+            XCTAssertEqual(audio.starvedFrames, 0)
+            audio.send(MDJPause)
+        }
+    }
+
     @MainActor func testCueFlagGeometryKeepsEdgesVisibleAndMinimapsCompact() {
         let lane = CGRect(x: 0, y: 0, width: 300, height: 48)
         for vertical in [false, true] {

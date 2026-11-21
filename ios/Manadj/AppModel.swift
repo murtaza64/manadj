@@ -27,6 +27,14 @@ struct DeckViewState {
     @Published var recordings: [URL] = []
     @Published var loadTarget = 0
     @Published var crossfade = 0.0
+    @Published var syncStatuses = Array(repeating: TempoSyncStatus.off, count: 4)
+    @Published var groupTempo: Double?
+    private var sentSyncMasks: (Int, Int)?
+    private lazy var tempoSync = TempoSyncGroup(write: { [weak self] deck, pitch in
+        if self?.audio?.send(MDJPitch, deck: deck, value: pitch) != true { self?.error = "Tempo control was not accepted. Try again." }
+    }, align: { [weak self] deck, peer, ratio in
+        if self?.audio?.alignPhase(deck, reference: peer, ratio: ratio) != true { self?.error = "Phase alignment was not accepted. Try again." }
+    })
     @Published var quantize = false
     @Published var waveSeconds = 12.0
     @Published var splitOutput = false
@@ -122,6 +130,7 @@ struct DeckViewState {
             }
         }
         decks = updated
+        if !liveListening { updateTempoSync() }
         if recording && audio.recordingState != 1 {
             recording = false
             if audio.recordingState == 4 { error = "Recording stopped with error \(audio.recordingError). The partial file was not marked saved." }
@@ -409,8 +418,26 @@ struct DeckViewState {
         do { try audio?.start(); audio?.send(decks[deck].engine.playing ? MDJPause : MDJPlay, deck: deck) }
         catch { self.error = error.localizedDescription }
     }
+    private func updateTempoSync() {
+        tempoSync.update(decks.map { TempoSyncDeck(ready: $0.engine.ready, playing: $0.engine.playing, bpm: $0.engine.bpm, pitch: Double($0.engine.pitch), source: $0.engine.load) })
+        publishTempoSync()
+    }
+    private func publishTempoSync() {
+        if syncStatuses != tempoSync.statuses { syncStatuses = tempoSync.statuses }
+        if groupTempo != tempoSync.tempo { groupTempo = tempoSync.tempo }
+        let members = syncStatuses.indices.reduce(0) { $0 | (syncStatuses[$1] != .off ? 1 << $1 : 0) }
+        let synced = syncStatuses.indices.reduce(0) { $0 | (syncStatuses[$1] == .synced ? 1 << $1 : 0) }
+        if sentSyncMasks?.0 != members || sentSyncMasks?.1 != synced, audio?.syncMembers(members, synced: synced) == true { sentSyncMasks = (members, synced) }
+    }
+    func toggleTempoSync(_ deck: Int) {
+        guard !liveListening else { error = "Stop local live before changing sync"; return }
+        updateTempoSync()
+        if !tempoSync.toggle(deck, quantize: quantize) { error = "SYNC needs a loaded track with BPM and a reachable tempo within ±8%, including half/double time." }
+        publishTempoSync()
+    }
     func set(_ op: MDJOp, _ deck: Int, _ value: Double, slot: Int = 0) {
         do {
+            if op == MDJPitch && !liveListening { updateTempoSync(); tempoSync.setPitch(deck, percent: value); publishTempoSync(); return }
             if op == MDJCueDown || op == MDJHotCueDown { try audio?.start() }
             audio?.send(op, deck: deck, value: value, slot: slot)
         } catch { self.error = error.localizedDescription }

@@ -22,9 +22,7 @@ struct PerformanceDeckControls: View {
             VStack(spacing: 4) {
                 HStack(spacing: 0) {
                     if index == 0 { shiftKey }
-                    ForEach(0..<4) { i in
-                        Text(["VOC", "DRM", "BAS", "OTH"][i]).font(Ink.font(8, bold: true)).foregroundStyle(Ink.muted.opacity(0.4)).frame(maxWidth: .infinity)
-                    }
+                    Text("STEMS · WIP").font(Ink.font(8, bold: true)).foregroundStyle(Ink.muted.opacity(0.6)).frame(maxWidth: .infinity)
                     if index == 1 { shiftKey }
                 }.frame(height: 24).accessibilityLabel("Stem controls unavailable on iOS")
                 VStack(spacing: 0) {
@@ -83,7 +81,7 @@ struct PerformanceDeckControls: View {
                         }.foregroundStyle(color).frame(height: 36)
                         HStack(spacing: 0) {
                             Button(state.keyLock ? "KEY ON" : "KEY OFF") { model.set(MDJKeyLock, index, state.keyLock ? 0 : 1) }.buttonStyle(PerformanceKeyStyle(color: color, active: state.keyLock))
-                            Button("SYNC") {}.buttonStyle(PerformanceKeyStyle(color: color)).disabled(true).accessibilityHint("Sync groups not implemented on iOS")
+                            Button(model.syncStatuses[index] == .outOfLock ? "OUT OF LOCK" : model.syncStatuses[index] == .waiting ? "WAITING" : "SYNC") { model.toggleTempoSync(index) }.buttonStyle(PerformanceKeyStyle(color: color, active: model.syncStatuses[index] != .off)).disabled(model.liveListening || (!state.ready && model.syncStatuses[index] == .off)).accessibilityLabel("\(Ink.deckName(index)) tempo sync").accessibilityValue(model.syncStatuses[index].rawValue).accessibilityHint("Join or leave the tempo group. Quantize aligns phase once.")
                             Button("0") { model.set(MDJPitch, index, 0) }.buttonStyle(PerformanceKeyStyle(color: color)).frame(width: 36).accessibilityLabel("Reset pitch")
                         }.frame(height: 38)
                         HStack(spacing: 6) {
