@@ -19,14 +19,16 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
-    @MainActor func testKnobDetentFullscreenAndSquarePads() {
+    @MainActor func testKnobDetentFullscreenAndSquarePads() { verifyKnobWorkspace(reduced: false) }
+    @MainActor func testKnobReducedMotionOpaqueFallback() { verifyKnobWorkspace(reduced: true) }
+    @MainActor private func verifyKnobWorkspace(reduced: Bool) {
         defer { captureFailure() }
-        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"] + (reduced ? ["--popup-accessibility-fixture"] : [])
         app.launch()
         waitForReadyTransport(app.buttons["A play pause"], app: app)
         let knob = app.otherElements["knob-Deck A HI"]
         XCTAssertTrue(knob.waitForExistence(timeout: 10))
-        let before = XCTAttachment(screenshot: app.screenshot()); before.name = "Fullscreen square pads and neutral EQ notch"; before.lifetime = .keepAlways; add(before)
+        let before = XCTAttachment(screenshot: app.screenshot()); before.name = (reduced ? "Reduced motion transparency and high contrast fixture: " : "") + "Fullscreen square pads and neutral EQ notch"; before.lifetime = .keepAlways; add(before)
         let p = knob.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         // Real touch-hold is recorded by the simulator video. It must not jump.
         p.press(forDuration: 2)
@@ -47,7 +49,8 @@ final class WorkspaceUITests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(knob.waitForExistence(timeout: 10))
         let landscape = XCTAttachment(screenshot: app.screenshot()); landscape.name = "Landscape square hotcues and fullscreen safe edges"; landscape.lifetime = .keepAlways; add(landscape)
-        p.press(forDuration: 2)
+        XCTAssertTrue(app.otherElements["performance-battery"].exists)
+        knob.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 2)
         XCUIDevice.shared.orientation = .portrait
     }
 

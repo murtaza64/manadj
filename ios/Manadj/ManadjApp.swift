@@ -10,7 +10,7 @@ import CEngine
             Group {
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("--local-live-ui-fixture") { LocalLiveView() }
-                else { WorkspaceView() }
+                else { WorkspaceView().modifier(PopupAccessibilityFixture()) }
                 #else
                 WorkspaceView()
                 #endif
@@ -264,3 +264,18 @@ struct WorkspaceView: View {
         PerformanceDeckControls(index: index, pitch: Binding(get: { pitch == index }, set: { pitch = $0 ? index : nil }), compact: compact, onTransport: { AnyView(transport(index)) })
     }
 }
+
+#if DEBUG
+/// Deterministic UI-test coverage for the same environment branches used by system accessibility.
+private struct PopupAccessibilityFixture: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reducedMotion
+    @Environment(\.accessibilityReduceTransparency) private var reducedTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+    private var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--popup-accessibility-fixture") }
+    func body(content: Content) -> some View {
+        content.environment(\.accessibilityReduceMotion, enabled || reducedMotion)
+            .environment(\.accessibilityReduceTransparency, enabled || reducedTransparency)
+            .environment(\.colorSchemeContrast, enabled ? .increased : contrast)
+    }
+}
+#endif

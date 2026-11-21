@@ -38,7 +38,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          /tmp/manadj-lan-venv/bin/python ios/scripts/with_lan_fixture.py 2>&1 | tee ios-verification.log
+          CHECK_COMPACT_PHONE=1 /tmp/manadj-lan-venv/bin/python ios/scripts/with_lan_fixture.py 2>&1 | tee ios-verification.log
       - name: Export simulator diagnostics and attachments
         if: always()
         shell: bash

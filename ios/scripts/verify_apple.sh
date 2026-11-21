@@ -51,7 +51,7 @@ xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
 touch "$STOP"
 wait "$MONITOR_PID" || true
 trap - EXIT
-# Compact-phone support is backlog, not current acceptance. Opt in to its diagnostic explicitly.
+# Optional compact-phone checks include interaction geometry and actual workspace screenshots.
 SMALL_STATUS=0
 if [[ "${CHECK_COMPACT_PHONE:-0}" == "1" ]]; then
   SMALL_UDID=$(xcrun simctl list devices available --json | python3 -c '
@@ -68,7 +68,7 @@ for group in json.load(sys.stdin)["devices"].values():
     xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
       -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
       -destination "platform=iOS Simulator,id=$SMALL_UDID" -derivedDataPath ios/.derived-data \
-      -only-testing:ManadjUITests/WorkspaceUITests/testStandardWorkspaceSettingsAndPitch \
+      -only-testing:ManadjUITests/WorkspaceUITests/testStandardWorkspaceSettingsAndPitch -only-testing:ManadjUITests/WorkspaceUITests/testKnobDetentFullscreenAndSquarePads \
       -resultBundlePath ios/.test-results/SmallPhone.xcresult CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$HOST_ARCH" test || SMALL_STATUS=$?
   fi
 fi
