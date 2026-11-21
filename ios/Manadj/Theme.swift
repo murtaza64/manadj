@@ -97,19 +97,28 @@ struct LibraryPreviewWave: View {
                 WaveformView(waveform: waveform, color: Ink.accent, background: .clear)
                     .accessibilityLabel("Peak preview, spectral data unavailable")
             } else if let raster { Image(uiImage: raster).resizable().interpolation(.none) }
-            Canvas { context, size in
-                let duration = waveform.durationSecs > 0 ? waveform.durationSecs : track.durationSecs ?? 0
-                guard duration > 0 else { return }
-                for cue in track.hotCues where cue.slot >= 0 && cue.slot < Ink.cues.count && cue.time.isFinite && cue.time >= 0 && cue.time <= duration {
-                    let x = min(size.width - 3, CGFloat(cue.time / duration) * size.width)
-                    let color = cue.color.flatMap { ManadjCore.parseHexColor($0) }.map { Color(red: Double(($0 >> 16) & 255) / 255, green: Double(($0 >> 8) & 255) / 255, blue: Double($0 & 255) / 255) } ?? Ink.cues[cue.slot]
-                    context.fill(Path(CGRect(x: x, y: 0, width: 1, height: size.height)), with: .color(color))
-                    context.fill(Path(CGRect(x: x, y: 0, width: 3, height: 3)), with: .color(color))
-                }
-            }
+            Canvas { context, size in drawCues(context: context, size: size) }
         }.frame(width: 110, height: 19)
             .task(id: key) { raster = BrowserPreviewRaster.shared.image(key: key, wave: waveform, json: styleJSON, scale: scale) }
             .accessibilityLabel("Spectral track preview and saved hotcues")
+    }
+    private func cueColor(slot: Int, hex: String?) -> Color {
+        guard let hex, let rgb = ManadjCore.parseHexColor(hex) else { return Ink.cues[slot] }
+        let red = Double((rgb >> 16) & 255) / 255.0
+        let green = Double((rgb >> 8) & 255) / 255.0
+        let blue = Double(rgb & 255) / 255.0
+        return Color(red: red, green: green, blue: blue)
+    }
+    private func drawCues(context: GraphicsContext, size: CGSize) {
+        let duration: Double = waveform.durationSecs > 0 ? waveform.durationSecs : (track.durationSecs ?? 0)
+        guard duration > 0 else { return }
+        for cue in track.hotCues {
+            guard cue.slot >= 0, cue.slot < Ink.cues.count, cue.time.isFinite, cue.time >= 0, cue.time <= duration else { continue }
+            let x = min(size.width - 3, CGFloat(cue.time / duration) * size.width)
+            let color = cueColor(slot: cue.slot, hex: cue.color)
+            context.fill(Path(CGRect(x: x, y: 0, width: 1, height: size.height)), with: .color(color))
+            context.fill(Path(CGRect(x: x, y: 0, width: 3, height: 3)), with: .color(color))
+        }
     }
 }
 
