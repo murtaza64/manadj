@@ -10,12 +10,16 @@ import { PlaylistExportInspector } from './PlaylistExportInspector';
 import TrackRow from './TrackRow';
 import { COLUMN_CONFIG } from './columnConfig';
 import './SyncWorkspace.css';
+import { useFitColumns } from './FitColumnHeaders';
+const COLUMN_IDS = ['title', 'artist', 'key', 'bpm', 'energy'];
+const COLUMN_SHARES = [35, 29, 12, 12, 12];
 
 const DEFAULT_FIELDS: FieldName[] = ['key', 'hotcues', 'maincue'];
 const COLUMNS = ['title', 'artist', 'key', 'bpm', 'energy'].map(id => ({ ...COLUMN_CONFIG.find(column => column.id === id)!, sticky: false, showShadow: false }));
 const validTracks = (value: unknown): value is Track[] => Array.isArray(value) && value.every(track => Number.isSafeInteger(track?.id) && track.id > 0 && typeof track.filename === 'string' && Array.isArray(track.tags));
 
 export function SyncWorkspace({ request, onPendingChange }: { request: WorkspaceEnvelope | null; onPendingChange: (pending: boolean) => void }) {
+  const fit = useFitColumns(COLUMN_IDS, COLUMN_SHARES);
   const capture = request?.kind === 'fields' ? request : null;
   const [kind, setKind] = useState<'fields' | 'playlist'>(request?.kind || 'fields');
   const [surface, setSurface] = useState<'engine' | 'rekordbox'>(capture?.surface || 'engine');
@@ -126,10 +130,10 @@ export function SyncWorkspace({ request, onPendingChange }: { request: Workspace
       {(library.error || playlists.error || playlist.error) && <p role="alert">Library data unavailable; no scope is inferred.</p>}
       {!complete && !library.isLoading && <p className="sw-warning">The returned Library list is incomplete. Filtered/all review is blocked; exact selected/captured IDs remain explicit.</p>}
       {rows.length > shown.length && <p>Showing first1000 rows; complete filtered/all scope still includes {rows.length} tracks. Filter to inspect another row.</p>}
-      <p className="sw-muted">Click inspects one track; Ctrl/Cmd-click or Space toggles selection. Arrow keys move through rows. No playback or curation sidebar.</p>
+      <p className="sw-muted">Checkbox selects · click reviews one track · arrow keys move.</p>
       <div className="sw-table-scroll" ref={table}>
-        <table className="sw-track-table" aria-label="Workspace Library tracks"><thead><tr>{COLUMNS.map(column => <th key={column.id}>{column.id}</th>)}</tr></thead><tbody>
-          {shown.map((track, index) => <TrackRow key={`${track.id}:${index}`} track={track} columns={COLUMNS} isSelected={selected.has(track.id)} loadedOn="none" getDragIds={() => []} onSelect={(item, mods) => choose(item, mods.toggle)} onLoad={item => choose(item)} rowId={`sw-track-${track.id}`} rowTabIndex={busy ? -1 : (focused === track.id || !focusedShown && index === 0) ? 0 : -1} onRowKeyDown={event => rowKey(event, track)} />)}
+        <table className="sw-track-table" ref={fit.tableRef} style={fit.variables} aria-label="Workspace Library tracks"><thead>{fit.headers(COLUMN_IDS)}</thead><tbody>
+          {shown.map((track, index) => <TrackRow selectionCheckbox={{ checked: selected.has(track.id), disabled: busy, onChange: () => choose(track, true) }} key={`${track.id}:${index}`} track={track} columns={COLUMNS} isSelected={selected.has(track.id)} loadedOn="none" getDragIds={() => []} onSelect={(item, mods) => choose(item, mods.toggle)} onLoad={item => choose(item)} rowId={`sw-track-${track.id}`} rowTabIndex={busy ? -1 : (focused === track.id || !focusedShown && index === 0) ? 0 : -1} onRowKeyDown={event => rowKey(event, track)} />)}
         </tbody></table>
         {!rows.length && !library.isLoading && <p>No tracks in this view. No empty scope becomes the whole Library.</p>}
       </div>

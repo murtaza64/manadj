@@ -62,7 +62,29 @@ struct PerformanceWave: UIViewRepresentable {
     var body: UIImage?
     private var bodyKey = ""
     private var cachedStep = 0.0
+    // Source-space raster tiles move at the display clock. Amplitude reduction,
+    // color math and path building run only for newly exposed tiles.
+    private var detailTiles: [Int: UIImage] = [:]
+    private var detailTileKey = ""
+    private let tileColumns = 64
+    private let tileLimit = 96
+    var cachedDetailTileCount: Int { detailTiles.count }
+    func invalidateDetailTiles() { detailTiles.removeAll(); detailTileKey = "" }
     private var clock = WaveClock()
+    #if DEBUG
+    private let measureBody = ProcessInfo.processInfo.arguments.contains("--wave-body-metrics")
+    private var bodySamples: [Double] = []
+    private var bodyWarmup = 0
+    private var bodyMetrics = ""
+    #endif
+    private var metalBody: MetalWaveBody?
+    private var metalOverlay: MetalWaveOverlay?
+    private var triedMetal = false
+    private var metalPrototype: Bool { ProcessInfo.processInfo.arguments.contains("--metal-waveform-prototype") && !overview }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        metalBody?.frame = bounds; metalOverlay?.frame = bounds
+    }
     private var link: CADisplayLink?
     private var proxy: DisplayProxy?
     var spanSeconds = 12.0
@@ -146,7 +168,12 @@ struct PerformanceWave: UIViewRepresentable {
     override var accessibilityValue: String? {
         get {
             guard duration > 0, let state = state?() else { return "not loaded" }
-            return String(format: "%@ %.2f seconds", state.playing ? "playing" : "paused", state.position)
+            let transport = String(format: "%@ %.2f seconds", state.playing ? "playing" : "paused", state.position)
+            #if DEBUG
+            return transport + bodyMetrics
+            #else
+            return transport
+            #endif
         }
         set { }
     }
@@ -163,6 +190,7 @@ struct PerformanceWave: UIViewRepresentable {
             for m in 0..<3 where groups[m] >= amplitude { mask |= 1 << m }
             var bucket = style.bucket(mask: mask, groups: groups)
             if dim < 1 { bucket = WaveStyle.dimmed(bucket, factor: dim) }
+            bucket |= level << 15 // Keep outer-to-inner nesting, as Android Lines does.
             let path = paths[bucket] ?? CGMutablePath()
             if anchored {
                 // Android minimap body is bottom-anchored (left edge when vertical).
@@ -213,9 +241,103 @@ struct PerformanceWave: UIViewRepresentable {
         }
     }
 
+    private func drawDetailTiles(_ wave: PreviewWaveform, context: CGContext,
+                                 along: CGFloat, across: CGFloat, scale: CGFloat,
+                                 start: Double, span: Double) {
+        let step = 2 / scale // Android detail columns are two physical pixels.
+        let seconds = span / max(1, Double(along)) * Double(step)
+        let key = "\(source)-\(wave.bands.count)-\(wave.durationSecs)-\(duration)-\(seconds)-\(across)-\(scale)-\(vertical)-\(fillGain)"
+        if detailTileKey != key { detailTileKey = key; detailTiles.removeAll() }
+        let firstColumn = Int(floor(start / seconds))
+        let lastColumn = Int(ceil((start + span) / seconds))
+        let firstTile = Int(floor(Double(max(0, firstColumn)) / Double(tileColumns)))
+        let lastTile = Int(floor(Double(min(Int(ceil(duration / seconds)), lastColumn)) / Double(tileColumns)))
+        guard firstTile <= lastTile else { return }
+        context.saveGState(); context.interpolationQuality = .none
+        defer { context.restoreGState() }
+        // Keep the most recent visible neighborhood. No unbounded song cache.
+        if detailTiles.count + lastTile - firstTile + 1 > tileLimit {
+            detailTiles = detailTiles.filter { abs($0.key - firstTile) < tileLimit / 2 }
+        }
+        for tile in firstTile...lastTile {
+            let image: UIImage
+            if let cached = detailTiles[tile] { image = cached }
+            else {
+                let size = vertical ? CGSize(width: across, height: CGFloat(tileColumns) * step)
+                                    : CGSize(width: CGFloat(tileColumns) * step, height: across)
+                let format = UIGraphicsImageRendererFormat(); format.scale = scale; format.opaque = false
+                image = UIGraphicsImageRenderer(size: size, format: format).image { renderer in
+                    var levels = [[Int: CGMutablePath]](repeating: [:], count: 3)
+                    for offset in 0..<tileColumns {
+                        let column = tile * tileColumns + offset
+                        let time = Double(column) * seconds
+                        guard time <= duration else { continue }
+                        let groups = wave.columnGroups(from: time, to: time + seconds).map { min(1, $0 * fillGain) }
+                        let order = (0..<3).sorted { groups[$0] > groups[$1] }
+                        let p = (CGFloat(offset) + 0.5) * step
+                        for level in 0..<3 {
+                            let amplitude = groups[order[level]]
+                            if amplitude <= 0.002 { break }
+                            var mask = 0
+                            for m in 0..<3 where groups[m] >= amplitude { mask |= 1 << m }
+                            let bucket = WaveStyle.full.bucket(mask: mask, groups: groups)
+                            let path = levels[level][bucket] ?? CGMutablePath()
+                            let half = across / 2, extent = CGFloat(amplitude) * half
+                            if vertical { path.move(to: CGPoint(x: half - extent, y: p)); path.addLine(to: CGPoint(x: half + extent, y: p)) }
+                            else { path.move(to: CGPoint(x: p, y: half - extent)); path.addLine(to: CGPoint(x: p, y: half + extent)) }
+                            levels[level][bucket] = path
+                        }
+                    }
+                    // Android Lines batches within nesting level, never across
+                    // levels: inner colors must paint after their outer bands.
+                    for paths in levels { stroke(renderer.cgContext, paths, width: step) }
+                }
+                detailTiles[tile] = image
+            }
+            // Tile origins are whole device pixels. Adjacent tiles meet exactly
+            // and never interpolate at seams, including negative window starts.
+            let origin = ((Double(tile * tileColumns) * seconds - start) / span * Double(along) * Double(scale)).rounded() / Double(scale) - Double(step / 2)
+            image.draw(at: vertical ? CGPoint(x: 0, y: origin) : CGPoint(x: origin, y: 0))
+        }
+    }
+
     override func draw(_ rect: CGRect) {
+        if metalPrototype && wave != nil {
+            if !triedMetal {
+                triedMetal = true
+                if let gpu = MetalWaveBody(experimentFrame: bounds) {
+                    metalBody = gpu; addSubview(gpu)
+                    let overlay = MetalWaveOverlay(frame: bounds); overlay.owner = self
+                    overlay.isOpaque = false; overlay.backgroundColor = .clear; overlay.isUserInteractionEnabled = false
+                    metalOverlay = overlay; addSubview(overlay)
+                    accessibilityHint = "Metal waveform experiment"
+                } else { accessibilityHint = "Core Graphics fallback: Metal unavailable" }
+            }
+            if let overlay = metalOverlay { overlay.setNeedsDisplay(); return }
+        }
+        metalBody?.isHidden = true; metalOverlay?.isHidden = true
+        drawContent(rect, cpuWave: true)
+    }
+    fileprivate func drawContent(_ rect: CGRect, cpuWave: Bool) {
+        #if DEBUG
+        let began = measureBody ? ProcessInfo.processInfo.systemUptime : 0
+        defer {
+            if measureBody && !overview && wave != nil {
+                bodyWarmup += 1
+                if bodyWarmup > 30 && bodySamples.count < 120 {
+                    bodySamples.append((ProcessInfo.processInfo.systemUptime - began) * 1000)
+                    if bodySamples.count == 120 {
+                        let sorted = bodySamples.sorted(), mean = bodySamples.reduce(0, +) / 120
+                        bodyMetrics = String(format: " waveBodySamples=120 renderer=%@ cpuMeanMS=%.3f cpuP95MS=%.3f cpuMaxMS=%.3f", cpuWave ? "coregraphics" : "metal", mean, sorted[113], sorted[119])
+                        print("SYNTHETIC_LIVE_WAVE_BODY" + bodyMetrics + " includesCueOverlay=true excludesGPUCompletionAndComposition=true simulatorNotPhone=true")
+                    }
+                }
+            }
+        }
+        #endif
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
-        ctx.setFillColor(UIColor.black.cgColor); ctx.fill(bounds)
+        if cpuWave { ctx.setFillColor(UIColor.black.cgColor); ctx.fill(bounds) }
+        else { ctx.clear(bounds) }
         guard duration > 0, let state = state?() else { return }
         let rate = (1 + Double(state.pitch) / 100) * (1 + Double(state.bend) / 100)
         let moving = (state.playing || state.preview) && !scrubbing
@@ -235,7 +357,11 @@ struct PerformanceWave: UIViewRepresentable {
             ctx.move(to: vertical ? CGPoint(x: 0, y: value) : CGPoint(x: value, y: 0))
             ctx.addLine(to: vertical ? CGPoint(x: across, y: value) : CGPoint(x: value, y: across)); ctx.strokePath()
         }
-        if let wave, wave.nBands == 8 {
+        if !cpuWave, let wave {
+            metalBody?.isHidden = false; metalOverlay?.isHidden = false
+            metalBody?.render(wave: wave, source: source, start: start, span: span, gain: fillGain, vertical: vertical)
+        }
+        if cpuWave, let wave, wave.nBands == 8 {
             if overview {
                 let key = "\(source)-\(Int(along * scale))x\(Int(across * scale))-\(wave.bands.count)-\(wave.durationSecs)"
                 if key != bodyKey || body == nil { bodyKey = key; body = overviewBody(wave, size: bounds.size, scale: scale) }
@@ -246,41 +372,8 @@ struct PerformanceWave: UIViewRepresentable {
                 ctx.fill(vertical ? CGRect(x: 0, y: 0, width: across, height: played)
                                   : CGRect(x: 0, y: 0, width: played, height: across))
             } else {
-                let step = 2 / scale // Android detail columns are 2 physical pixels
-                let secondsPerColumn = span / max(1, Double(along)) * Double(step)
-                if abs(secondsPerColumn - cachedStep) > 0.000001 { cachedStep = secondsPerColumn; columns.removeAll(); preparedColumns.removeAll() }
-                let first = Int(floor(start / secondsPerColumn))
-                let count = Int(Double(along) / Double(step)) + 2
-                // Whole-device-pixel translation so scrolling never resamples columns.
-                let base = ((Double(first) * secondsPerColumn - start) / span * Double(along) * scale).rounded() / scale
-                var paths: [Int: CGMutablePath] = [:]
-                for i in 0..<count {
-                    let k = first + i; let t0 = Double(k) * secondsPerColumn
-                    if t0 + secondsPerColumn < 0 || t0 > duration { continue }
-                    // Cache amplitude ordering and color math with each source column.
-                    // Only translation/path appending belongs on the display clock.
-                    let segments: [(Double, Int)]
-                    if let cached = preparedColumns[k] { segments = cached }
-                    else {
-                        let groups = wave.columnGroups(from: t0, to: t0 + secondsPerColumn).map { min(1, $0 * fillGain) }
-                        segments = (0..<3).sorted { groups[$0] > groups[$1] }.compactMap { n in
-                            guard groups[n] > 0.002 else { return nil }
-                            var mask = 0
-                            for m in 0..<3 where groups[m] >= groups[n] { mask |= 1 << m }
-                            return (groups[n], WaveStyle.full.bucket(mask: mask, groups: groups))
-                        }
-                        preparedColumns[k] = segments
-                    }
-                    let p = CGFloat(base + Double(i) * Double(step)), half = across / 2
-                    for (amplitude, bucket) in segments {
-                        let path = paths[bucket] ?? CGMutablePath(), size = CGFloat(amplitude) * half
-                        if vertical { path.move(to: CGPoint(x: half - size, y: p)); path.addLine(to: CGPoint(x: half + size, y: p)) }
-                        else { path.move(to: CGPoint(x: p, y: half - size)); path.addLine(to: CGPoint(x: p, y: half + size)) }
-                        paths[bucket] = path
-                    }
-                }
-                stroke(ctx, paths, width: step)
-                if preparedColumns.count > 24000 { columns.removeAll(keepingCapacity: true); preparedColumns.removeAll(keepingCapacity: true) }
+                drawDetailTiles(wave, context: ctx, along: along, across: across,
+                                scale: scale, start: start, span: span)
             }
         }
         if !overview && state.bpm > 0 {
@@ -336,4 +429,9 @@ struct PerformanceWave: UIViewRepresentable {
 @MainActor private final class DisplayProxy: NSObject {
     weak var owner: PerformanceWaveView?
     @objc func frame(_ link: CADisplayLink) { owner?.frame(link) }
+}
+
+@MainActor private final class MetalWaveOverlay: UIView {
+    weak var owner: PerformanceWaveView?
+    override func draw(_ rect: CGRect) { owner?.drawContent(rect, cpuWave: false) }
 }

@@ -1,0 +1,1946 @@
+{
+  "review_date": "2026-11-19",
+  "base_commit": "be557dd5f2e3ab5f8628832e643dacf27d6196e3",
+  "components": [
+    {
+      "name": "alembic",
+      "version": "1.18.5",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/alembic/1.18.5/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/alembic-1.18.5/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/1a/cc/ac0bed8e562e7407fe55c3ba85a4dce86e6dbd8730887bd1e406a6c5c18a/alembic-1.18.5.tar.gz",
+      "archive_sha256": "1554982221dd17e9a749b53902407578eb305e453f71999e8c7f0a48389fff8e",
+      "license_hashes": {
+        "licenses/third-party/alembic-1.18.5/0-LICENSE": "6e68d94a03a0e3e327ddf3e86d1ebedc14eece3922022618fc246a36296fd0cc"
+      }
+    },
+    {
+      "name": "annotated-doc",
+      "version": "0.0.4",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/annotated-doc/0.0.4/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/annotated-doc-0.0.4/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/57/ba/046ceea27344560984e26a590f90bc7f4a75b06701f653222458922b558c/annotated_doc-0.0.4.tar.gz",
+      "archive_sha256": "fbcda96e87e9c92ad167c2e53839e57503ecfda18804ea28102353485033faa4",
+      "license_hashes": {
+        "licenses/third-party/annotated-doc-0.0.4/0-LICENSE": "fff170779a6acbf65abdb405c087f1cee1786691e4a96a4034517e4a504a0cdf"
+      }
+    },
+    {
+      "name": "annotated-types",
+      "version": "0.7.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/annotated-types/0.7.0/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/annotated-types-0.7.0/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/ee/67/531ea369ba64dcff5ec9c3402f9f51bf748cec26dde048a2f973a4eea7f5/annotated_types-0.7.0.tar.gz",
+      "archive_sha256": "aff07c09a53a08bc8cfccb9c85b05f1aa9a2a6f23728d790723543408344ce89",
+      "license_hashes": {
+        "licenses/third-party/annotated-types-0.7.0/0-LICENSE": "fe1049884b1a0d9342901e88e07f32925d24b3121d9972b6a6805fb9824b095d"
+      }
+    },
+    {
+      "name": "antlr4-python3-runtime",
+      "version": "4.9.3",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/antlr4-python3-runtime/4.9.3/json",
+      "marker": "platform_machine == 'x86_64' and sys_platform == 'darwin'",
+      "license_evidence": "pinned upstream project license text; binary and bundled third-party coverage incomplete",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/antlr4-python3-runtime/LICENSE.txt"
+      ],
+      "metadata_license": "BSD",
+      "metadata_classifiers": [],
+      "license_hashes": {
+        "licenses/third-party/antlr4-python3-runtime/LICENSE.txt": "b1b379fcaf3219593a4c433feb1b35c780bed23fafaae440b1ae2771a9521e3a"
+      },
+      "upstream_license_url": "https://raw.githubusercontent.com/antlr/antlr4/4.9.3/LICENSE.txt"
+    },
+    {
+      "name": "anyio",
+      "version": "4.11.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/anyio/4.11.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/anyio-4.11.0/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/c6/78/7d432127c41b50bccba979505f272c16cbcadcc33645d5fa3a738110ae75/anyio-4.11.0.tar.gz",
+      "archive_sha256": "82a8d0b81e318cc5ce71a5f1f8b5c4e63619620b63141ef8c995fa0db95a57c4",
+      "license_hashes": {
+        "licenses/third-party/anyio-4.11.0/0-LICENSE": "5361ac9dc58f2ef5fd2e9b09c68297c17f04950909bbc8023bdb82eacf22c2b0"
+      }
+    },
+    {
+      "name": "beat-this",
+      "version": "b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c",
+      "ecosystem": "github",
+      "source_url": "https://github.com/CPJKU/beat_this@b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c",
+      "marker": "",
+      "license_evidence": "pinned upstream license text",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/beat-this/LICENSE.txt"
+      ],
+      "repository": "CPJKU/beat_this",
+      "license_hashes": {
+        "licenses/third-party/beat-this/LICENSE.txt": "909ab6549794a18e9bb243aacfadda4a5f308436fc2846f350755c53c4f06ae1"
+      }
+    },
+    {
+      "name": "bidict",
+      "version": "0.23.1",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/bidict/0.23.1/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "MPL-2.0",
+      "license_files": [
+        "licenses/third-party/bidict-0.23.1/0-LICENSE"
+      ],
+      "metadata_license": "MPL 2.0",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/9a/6e/026678aa5a830e07cd9498a05d3e7e650a4f56a42f267a53d22bcda1bdc9/bidict-0.23.1.tar.gz",
+      "archive_sha256": "03069d763bc387bbd20e7d49914e75fc4132a41937fa3405417e1a5a2d006d71",
+      "license_hashes": {
+        "licenses/third-party/bidict-0.23.1/0-LICENSE": "f3f53adcecaa48d73a66e238fa5ba906cb41876783b45d28a1346b3142eebd9a"
+      }
+    },
+    {
+      "name": "certifi",
+      "version": "2025.11.12",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/certifi/2025.11.12/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MPL-2.0",
+      "license_files": [
+        "licenses/third-party/certifi-2025.11.12/0-LICENSE"
+      ],
+      "metadata_license": "MPL-2.0",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/a2/8c/58f469717fa48465e4a50c014a0400602d3c437d7c0c468e17ada824da3a/certifi-2025.11.12.tar.gz",
+      "archive_sha256": "d8ab5478f2ecd78af242878415affce761ca6bc54a22a27e026d7c25357c3316",
+      "license_hashes": {
+        "licenses/third-party/certifi-2025.11.12/0-LICENSE": "e93716da6b9c0d5a4a1df60fe695b370f0695603d21f6f83f053e42cfc10caf7"
+      }
+    },
+    {
+      "name": "cffi",
+      "version": "2.0.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/cffi/2.0.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/cffi-2.0.0/0-AUTHORS",
+        "licenses/third-party/cffi-2.0.0/1-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz",
+      "archive_sha256": "44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529",
+      "license_hashes": {
+        "licenses/third-party/cffi-2.0.0/0-AUTHORS": "2a67a60bbfb33759d67d645ff131b8e6d6bc4cafc232d751fcac3eda4d314cc8",
+        "licenses/third-party/cffi-2.0.0/1-LICENSE": "5ba24ddc57067f9249add644c3afc41a5d6dc37e23433ef759d95df370b0af63"
+      }
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.4.4",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/charset-normalizer/3.4.4/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/charset-normalizer-3.4.4/0-LICENSE",
+        "licenses/third-party/charset-normalizer-3.4.4/1-NOTICE.md"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/13/69/33ddede1939fdd074bce5434295f38fae7136463422fe4fd3e0e89b98062/charset_normalizer-3.4.4.tar.gz",
+      "archive_sha256": "94537985111c35f28720e43603b8e7b43a6ecfb2ce1d3058bbe955b73404e21a",
+      "license_hashes": {
+        "licenses/third-party/charset-normalizer-3.4.4/0-LICENSE": "6d0d41bfe170ac6c7dc248c9a63e254d0fb45a60d50a8257d0af92c6e249b887",
+        "licenses/third-party/charset-normalizer-3.4.4/1-NOTICE.md": "0cb3efcfd8f7a02a337e98dc3de4b0b57424d7208a332b26e7deb8cb94c13922"
+      }
+    },
+    {
+      "name": "click",
+      "version": "8.3.1",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/click/8.3.1/json",
+      "marker": "platform_machine == 'x86_64' and sys_platform == 'darwin'",
+      "license_evidence": "pinned package metadata",
+      "license": "BSD-3-Clause",
+      "license_files": [],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "license_hashes": {}
+    },
+    {
+      "name": "click",
+      "version": "8.5.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/click/8.5.0/json",
+      "marker": "platform_machine != 'x86_64' or sys_platform != 'darwin'",
+      "license_evidence": "pinned package metadata",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/click-8.5.0/0-LICENSE.txt",
+        "licenses/third-party/click-8.5.0/1-license.md"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/c7/0e/7fa0ef50764b67090eca4114772a2abf8b6148198475e54c660b97caeee6/click-8.5.0.tar.gz",
+      "archive_sha256": "ba0d2089de75ea0310e2dde03160e6ca10009947fb95a182f9b54021bb272e34",
+      "license_hashes": {
+        "licenses/third-party/click-8.5.0/0-LICENSE.txt": "9a8ad106a394e853bfe21f42f4e72d592819a22805d991b5f3275029292b658d",
+        "licenses/third-party/click-8.5.0/1-license.md": "b4aa3a8b0dfd4c8cea97ea65b3f19ef54bd280665533478f35c0a5d205a7d341"
+      }
+    },
+    {
+      "name": "cloudpickle",
+      "version": "3.1.2",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/cloudpickle/3.1.2/json",
+      "marker": "platform_machine == 'x86_64' and sys_platform == 'darwin'",
+      "license_evidence": "pinned package metadata license field",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/cloudpickle-3.1.2/0-LICENSE"
+      ],
+      "metadata_license": "BSD-3-Clause",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/27/fb/576f067976d320f5f0114a8d9fa1215425441bb35627b1993e5afd8111e5/cloudpickle-3.1.2.tar.gz",
+      "archive_sha256": "7fda9eb655c9c230dab534f1983763de5835249750e85fbcef43aaa30a9a2414",
+      "license_hashes": {
+        "licenses/third-party/cloudpickle-3.1.2/0-LICENSE": "3029ea34173e9fdc233ad315dc6b100bd1ea71f529b1c1af97664a272fdc55f5"
+      }
+    },
+    {
+      "name": "colorama",
+      "version": "0.4.6",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/colorama/0.4.6/json",
+      "marker": "sys_platform == 'win32'",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/colorama-0.4.6/0-LICENSE.txt"
+      ],
+      "metadata_license": "",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz",
+      "archive_sha256": "08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44",
+      "license_hashes": {
+        "licenses/third-party/colorama-0.4.6/0-LICENSE.txt": "cac35c02686e5d04a5a7140bfb3b36e73aed496656e891102e428886d7930318"
+      }
+    },
+    {
+      "name": "construct",
+      "version": "2.10.70",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/construct/2.10.70/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/construct-2.10.70/0-LICENSE"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/02/77/8c84b98eca70d245a2a956452f21d57930d22ab88cbeed9290ca630cf03f/construct-2.10.70.tar.gz",
+      "archive_sha256": "4d2472f9684731e58cc9c56c463be63baa1447d674e0d66aeb5627b22f512c29",
+      "license_hashes": {
+        "licenses/third-party/construct-2.10.70/0-LICENSE": "1552d70acfd0d3fe464ce13d30113ddc6fe4bac21e52212acc98509e3cc1a8f4"
+      }
+    },
+    {
+      "name": "cryptography",
+      "version": "50.0.2",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/cryptography/50.0.2/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "Apache-2.0 OR BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/cryptography-50.0.2/0-LICENSE",
+        "licenses/third-party/cryptography-50.0.2/1-LICENSE.APACHE",
+        "licenses/third-party/cryptography-50.0.2/2-LICENSE.BSD"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/9d/af/182eb91b0df3fe75c4d9f26fe70684569566745f6ba7e5c9c73a862c5252/cryptography-50.0.2.tar.gz",
+      "archive_sha256": "7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5",
+      "license_hashes": {
+        "licenses/third-party/cryptography-50.0.2/0-LICENSE": "3e0c7c091a948b82533ba98fd7cbb40432d6f1a9acbf85f5922d2f99a93ae6bb",
+        "licenses/third-party/cryptography-50.0.2/1-LICENSE.APACHE": "aac73b3148f6d1d7111dbca32099f68d26c644c6813ae1e4f05f6579aa2663fe",
+        "licenses/third-party/cryptography-50.0.2/2-LICENSE.BSD": "602c4c7482de6479dd2e9793cda275e5e63d773dacd1eca689232ab7008fb4fb"
+      }
+    },
+    {
+      "name": "demucs",
+      "version": "4.0.1",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/demucs/4.0.1/json",
+      "marker": "platform_machine == 'x86_64' and sys_platform == 'darwin'",
+      "license_evidence": "license classification pending",
+      "license": null,
+      "license_files": [],
+      "metadata_license": "MIT License",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "license_hashes": {}
+    },
+    {
+      "name": "demucs",
+      "version": "4.1.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/demucs/4.1.0/json",
+      "marker": "platform_machine != 'x86_64' or sys_platform != 'darwin'",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/demucs-4.1.0/0-LICENSE"
+      ],
+      "metadata_license": "MIT License",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/cd/0a/fe873fc9d9576de2b20fd6421857b189dee951b89305977f6c37416a8d42/demucs-4.1.0.tar.gz",
+      "archive_sha256": "d94c4f7dac886595b66af405c0fd1756fa00c297183f1cf021fd2eeedeeb67b2",
+      "license_hashes": {
+        "licenses/third-party/demucs-4.1.0/0-LICENSE": "cf9b17822d1fcd4ff32ccbe14183386fb3adf6f2ff92dc184130823f7fc28173"
+      }
+    },
+    {
+      "name": "dora-search",
+      "version": "0.1.12",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/dora-search/0.1.12/json",
+      "marker": "platform_machine == 'x86_64' and sys_platform == 'darwin'",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/dora-search-0.1.12/0-LICENSE"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/d5/9d/9a13947db237375486c0690f4741dd2b7e1eee20e0ffcb55dbd1b21cc600/dora_search-0.1.12.tar.gz",
+      "archive_sha256": "2956fd2c4c7e4b9a4830e83f0d4cf961be45cfba1a2f0570281e91d15ac516fb",
+      "license_hashes": {
+        "licenses/third-party/dora-search-0.1.12/0-LICENSE": "a80c79b8f80e824c8ea0612b7abadb9c92c48673cf0adc20b2a7f43e2b19faa0"
+      }
+    },
+    {
+      "name": "einops",
+      "version": "0.8.2",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/einops/0.8.2/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/einops-0.8.2/0-LICENSE"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/2c/77/850bef8d72ffb9219f0b1aac23fbc1bf7d038ee6ea666f331fa273031aa2/einops-0.8.2.tar.gz",
+      "archive_sha256": "609da665570e5e265e27283aab09e7f279ade90c4f01bcfca111f3d3e13f2827",
+      "license_hashes": {
+        "licenses/third-party/einops-0.8.2/0-LICENSE": "30d984364296f51ffaecad4b01ee127e95250c5068918d4b66fc96206723e434"
+      }
+    },
+    {
+      "name": "fastapi",
+      "version": "0.122.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/fastapi/0.122.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/fastapi-0.122.0/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/b2/de/3ee97a4f6ffef1fb70bf20561e4f88531633bb5045dc6cebc0f8471f764d/fastapi-0.122.0.tar.gz",
+      "archive_sha256": "cd9b5352031f93773228af8b4c443eedc2ac2aa74b27780387b853c3726fb94b",
+      "license_hashes": {
+        "licenses/third-party/fastapi-0.122.0/0-LICENSE": "4ec89ffc81485b97fec584b2d4a961032eeffe834453894fd9c1274906cc744e"
+      }
+    },
+    {
+      "name": "filelock",
+      "version": "3.20.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/filelock/3.20.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "Unlicense",
+      "license_files": [
+        "licenses/third-party/filelock-3.20.0/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [
+        "License :: OSI Approved :: The Unlicense (Unlicense)"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/58/46/0028a82567109b5ef6e4d2a1f04a583fb513e6cf9527fcdd09afd817deeb/filelock-3.20.0.tar.gz",
+      "archive_sha256": "711e943b4ec6be42e1d4e6690b48dc175c822967466bb31c0c293f34334c13f4",
+      "license_hashes": {
+        "licenses/third-party/filelock-3.20.0/0-LICENSE": "88d9b4eb60579c191ec391ca04c16130572d7eedc4a86daa58bf28c6e14c9bcd"
+      }
+    },
+    {
+      "name": "fsspec",
+      "version": "2025.10.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/fsspec/2025.10.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/fsspec-2025.10.0/0-copying.rst",
+        "licenses/third-party/fsspec-2025.10.0/1-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/24/7f/2747c0d332b9acfa75dc84447a066fdf812b5a6b8d30472b74d309bfe8cb/fsspec-2025.10.0.tar.gz",
+      "archive_sha256": "b6789427626f068f9a83ca4e8a3cc050850b6c0f71f99ddb4f542b8266a26a59",
+      "license_hashes": {
+        "licenses/third-party/fsspec-2025.10.0/0-copying.rst": "f5ad318fa586440ffe87d4e876f6bf1d84172857891547c650dbc7e2bb535aed",
+        "licenses/third-party/fsspec-2025.10.0/1-LICENSE": "2dc35496ce53a7307915c008a844aad53e772b49b34cdd00445067691407ec94"
+      }
+    },
+    {
+      "name": "greenlet",
+      "version": "3.2.4",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/greenlet/3.2.4/json",
+      "marker": "platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64'",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "MIT AND PSF-2.0",
+      "license_files": [
+        "licenses/third-party/greenlet-3.2.4/0-AUTHORS",
+        "licenses/third-party/greenlet-3.2.4/1-LICENSE",
+        "licenses/third-party/greenlet-3.2.4/2-LICENSE.PSF"
+      ],
+      "metadata_license": "MIT AND Python-2.0",
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/03/b8/704d753a5a45507a7aab61f18db9509302ed3d0a27ac7e0359ec2905b1a6/greenlet-3.2.4.tar.gz",
+      "archive_sha256": "0dca0d95ff849f9a364385f36ab49f50065d76964944638be9691e1832e9f86d",
+      "license_hashes": {
+        "licenses/third-party/greenlet-3.2.4/0-AUTHORS": "b305b6f2dda49d547146468440d66d3bb30ff52827a26a5bec1e9c36024cf069",
+        "licenses/third-party/greenlet-3.2.4/1-LICENSE": "769831d6e5dfaf2c20802faccff1fafb4c2025dd8f6253dfa47fcad59d4d0979",
+        "licenses/third-party/greenlet-3.2.4/2-LICENSE.PSF": "e5ff3c23c110e494cd7d736c10fd96d462457bafeca310840db6527298c7d46b"
+      }
+    },
+    {
+      "name": "h11",
+      "version": "0.16.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/h11/0.16.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/h11-0.16.0/0-LICENSE.txt"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/01/ee/02a2c011bdab74c6fb3c75474d40b3052059d95df7e73351460c8588d963/h11-0.16.0.tar.gz",
+      "archive_sha256": "4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1",
+      "license_hashes": {
+        "licenses/third-party/h11-0.16.0/0-LICENSE.txt": "37db5bb85926db28a427a25867f10b1232003aea1be69ccb851138adb8e6f361"
+      }
+    },
+    {
+      "name": "hf-xet",
+      "version": "1.6.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/hf-xet/1.6.0/json",
+      "marker": "platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or (platform_machine == 'x86_64' and sys_platform != 'darwin')",
+      "license_evidence": "pinned package metadata",
+      "license": "Apache-2.0",
+      "license_files": [
+        "licenses/third-party/hf-xet-1.6.0/0-LICENSE",
+        "licenses/third-party/hf-xet-1.6.0/1-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [
+        "License :: OSI Approved :: Apache Software License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/1b/ab/522a2ab67f27971a9d48ca666d4fca85ef7d5282d142e31fd087e27b1bbe/hf_xet-1.6.0.tar.gz",
+      "archive_sha256": "2e58454a340b3556dfa4972d5451aff4fba8dd42a236600ba1a1d2b1514f0fef",
+      "license_hashes": {
+        "licenses/third-party/hf-xet-1.6.0/0-LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "licenses/third-party/hf-xet-1.6.0/1-LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+      }
+    },
+    {
+      "name": "httpcore",
+      "version": "1.0.9",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/httpcore/1.0.9/json",
+      "marker": "platform_machine != 'x86_64' or sys_platform != 'darwin'",
+      "license_evidence": "pinned package metadata",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/httpcore-1.0.9/0-LICENSE.md"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/06/94/82699a10bca87a5556c9c59b5963f2d039dbd239f25bc2a63907a05a14cb/httpcore-1.0.9.tar.gz",
+      "archive_sha256": "6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8",
+      "license_hashes": {
+        "licenses/third-party/httpcore-1.0.9/0-LICENSE.md": "fdcb59154c74cbaba16a11242f7740bea9f23d6feb5547917d8c5f94a80392a5"
+      }
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/httpx/0.28.1/json",
+      "marker": "platform_machine != 'x86_64' or sys_platform != 'darwin'",
+      "license_evidence": "pinned package metadata license field",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/httpx-0.28.1/0-LICENSE.md"
+      ],
+      "metadata_license": "BSD-3-Clause",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/b1/df/48c586a5fe32a0f01324ee087459e112ebb7224f646c0b5023f5e79e9956/httpx-0.28.1.tar.gz",
+      "archive_sha256": "75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc",
+      "license_hashes": {
+        "licenses/third-party/httpx-0.28.1/0-LICENSE.md": "4ec59d544f12b5f539a3a716fd321ac58ccd8030b465221f2c880200cdf28d8d"
+      }
+    },
+    {
+      "name": "huggingface-hub",
+      "version": "1.28.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/huggingface-hub/1.28.0/json",
+      "marker": "platform_machine != 'x86_64' or sys_platform != 'darwin'",
+      "license_evidence": "pinned package metadata license field",
+      "license": "Apache-2.0",
+      "license_files": [
+        "licenses/third-party/huggingface-hub-1.28.0/0-LICENSE"
+      ],
+      "metadata_license": "Apache-2.0",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: Apache Software License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/c6/ae/222a91937ebee7f62c0ca8f5ee0afd97577caf24c0abb927d1f5c7e9f6d2/huggingface_hub-1.28.0.tar.gz",
+      "archive_sha256": "46a2e950c09234de54093d587d1675382f0d08dbd600d9fb599b5932f5b2c6cb",
+      "license_hashes": {
+        "licenses/third-party/huggingface-hub-1.28.0/0-LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+      }
+    },
+    {
+      "name": "idna",
+      "version": "3.11",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/idna/3.11/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/idna-3.11/0-LICENSE.md"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/6f/6d/0703ccc57f3a7233505399edb88de3cbd678da106337b9fcde432b65ed60/idna-3.11.tar.gz",
+      "archive_sha256": "795dafcc9c04ed0c1fb032c2aa73654d8e8c5023a7df64a53f39190ada629902",
+      "license_hashes": {
+        "licenses/third-party/idna-3.11/0-LICENSE.md": "b7a336abf3b04e180ec065cdd16e705d079e1cc7a14f910aa6e9187f36b9cd87"
+      }
+    },
+    {
+      "name": "ifaddr",
+      "version": "0.2.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/ifaddr/0.2.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/ifaddr-0.2.0/0-LICENSE.txt"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/e8/ac/fb4c578f4a3256561548cd825646680edcadb9440f3f68add95ade1eb791/ifaddr-0.2.0.tar.gz",
+      "archive_sha256": "cc0cbfcaabf765d44595825fb96a99bb12c79716b73b44330ea38ee2b0c4aed4",
+      "license_hashes": {
+        "licenses/third-party/ifaddr-0.2.0/0-LICENSE.txt": "8700856576ae2bc80c63bc970250510d9213fb02fed006d5f22742c9ddde24d7"
+      }
+    },
+    {
+      "name": "jinja2",
+      "version": "3.1.6",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/jinja2/3.1.6/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/jinja2-3.1.6/0-LICENSE.txt",
+        "licenses/third-party/jinja2-3.1.6/1-license.rst"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/df/bf/f7da0350254c0ed7c72f3e33cef02e048281fec7ecec5f032d4aac52226b/jinja2-3.1.6.tar.gz",
+      "archive_sha256": "0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d",
+      "license_hashes": {
+        "licenses/third-party/jinja2-3.1.6/0-LICENSE.txt": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b",
+        "licenses/third-party/jinja2-3.1.6/1-license.rst": "1e07e9c25f2618a040560b70e63f42259eab24e558d0f3532e6163d751cb4eea"
+      }
+    },
+    {
+      "name": "julius",
+      "version": "0.2.8",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/julius/0.2.8/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/julius-0.2.8/0-LICENSE"
+      ],
+      "metadata_license": "MIT License",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/1d/c6/5c2aea2b11ead1680bb5b17c996def31f8ccade471cada37cdb93855e06f/julius-0.2.8.tar.gz",
+      "archive_sha256": "d691e651200930affea4f6c849c26e95fec846087281ae3d1a7757eac90253d5",
+      "license_hashes": {
+        "licenses/third-party/julius-0.2.8/0-LICENSE": "60f83da40026e37e259b69158852384ff2ee20615d9103a3f86b6cff48784661"
+      }
+    },
+    {
+      "name": "kaitaistruct",
+      "version": "0.11",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/kaitaistruct/0.11/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/kaitaistruct-0.11/0-LICENSE"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/27/b8/ca7319556912f68832daa4b81425314857ec08dfccd8dbc8c0f65c992108/kaitaistruct-0.11.tar.gz",
+      "archive_sha256": "053ee764288e78b8e53acf748e9733268acbd579b8d82a427b1805453625d74b",
+      "license_hashes": {
+        "licenses/third-party/kaitaistruct-0.11/0-LICENSE": "3c18fba8b8e1c6846e4fa18082adc1b46668950bb29f1c3eac5de042234c3b81"
+      }
+    },
+    {
+      "name": "lameenc",
+      "version": "1.8.4",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/lameenc/1.8.4/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "LGPL-3.0-or-later",
+      "license_files": [
+        "licenses/third-party/lameenc-1.8.4/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/b5/26/36a989c6c87d6edf2841985b8c23de4f9a1be54d1f8d2345851f2287c124/lameenc-1.8.4-cp310-cp310-macosx_10_9_universal2.whl",
+      "archive_sha256": "79d6c7e4e243c630c8367e6c22e9085e1b1650b9b97debad29d8e0218d88c609",
+      "license_hashes": {
+        "licenses/third-party/lameenc-1.8.4/0-LICENSE": "6039b8a570773eb83c43a7d3b332bbc9f805c6975411eaefd4120a39d9c5daeb"
+      }
+    },
+    {
+      "name": "madmom",
+      "version": "27f032e8947204902c675e5e341a3faf5dc86dae",
+      "ecosystem": "github",
+      "source_url": "https://github.com/CPJKU/madmom@27f032e8947204902c675e5e341a3faf5dc86dae",
+      "marker": "",
+      "license_evidence": "pinned upstream license text",
+      "license": "BSD-2-Clause AND CC-BY-NC-SA-4.0",
+      "license_files": [
+        "licenses/third-party/madmom/LICENSE.txt"
+      ],
+      "repository": "CPJKU/madmom",
+      "license_hashes": {
+        "licenses/third-party/madmom/LICENSE.txt": "dbcc5a4d6c0dbc5ecb3d41ef98a5432b356073ee11d97c9c4eef507238ffb56a"
+      }
+    },
+    {
+      "name": "mako",
+      "version": "1.3.12",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/mako/1.3.12/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/mako-1.3.12/0-AUTHORS",
+        "licenses/third-party/mako-1.3.12/1-LICENSE"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/00/62/791b31e69ae182791ec67f04850f2f062716bbd205483d63a215f3e062d3/mako-1.3.12.tar.gz",
+      "archive_sha256": "9f778e93289bd410bb35daadeb4fc66d95a746f0b75777b942088b7fd7af550a",
+      "license_hashes": {
+        "licenses/third-party/mako-1.3.12/0-AUTHORS": "228d95c3bd268d84bbc85714b89c6120688c510b7c15626ec628b0c945b55918",
+        "licenses/third-party/mako-1.3.12/1-LICENSE": "68d7064e53e3ffa8e9f420a9e604bd2e2059d9c330492fa6ebd4eb3d48111689"
+      }
+    },
+    {
+      "name": "markupsafe",
+      "version": "3.0.3",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/markupsafe/3.0.3/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/markupsafe-3.0.3/0-LICENSE.txt",
+        "licenses/third-party/markupsafe-3.0.3/1-license.rst"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/7e/99/7690b6d4034fffd95959cbe0c02de8deb3098cc577c67bb6a24fe5d7caa7/markupsafe-3.0.3.tar.gz",
+      "archive_sha256": "722695808f4b6457b320fdc131280796bdceb04ab50fe1795cd540799ebe1698",
+      "license_hashes": {
+        "licenses/third-party/markupsafe-3.0.3/0-LICENSE.txt": "489a8e1108509ed98a37bb983e11e0f7e1d31f0bd8f99a79c8448e7ff37d07ea",
+        "licenses/third-party/markupsafe-3.0.3/1-license.rst": "6fc7e80b75b5999783a328d90976a2585e0956c4a348c3c888453938ceca742d"
+      }
+    },
+    {
+      "name": "mido",
+      "version": "1.3.3",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/mido/1.3.3/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/mido-1.3.3/0-LICENSE",
+        "licenses/third-party/mido-1.3.3/1-authors.rst"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/23/14/cfda3fe61ce4c0f50a9f707ae02b46cb53211732b2cd4522bf06272848f4/mido-1.3.3.tar.gz",
+      "archive_sha256": "1aecb30b7f282404f17e43768cbf74a6a31bf22b3b783bdd117a1ce9d22cb74c",
+      "license_hashes": {
+        "licenses/third-party/mido-1.3.3/0-LICENSE": "bd038e5ad24b8d703970b51c070669e8ab0d06f4efb008665261b0183af7eb1c",
+        "licenses/third-party/mido-1.3.3/1-authors.rst": "f0b33597bb0e841df24e7d7d5497a6e806376d6de4f5767f42d2fcfeb912dfea"
+      }
+    },
+    {
+      "name": "mpmath",
+      "version": "1.3.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/mpmath/1.3.0/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/mpmath-1.3.0/0-LICENSE"
+      ],
+      "metadata_license": "BSD",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/e0/47/dd32fa426cc72114383ac549964eecb20ecfd886d1e5ccf5340b55b02f57/mpmath-1.3.0.tar.gz",
+      "archive_sha256": "7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f",
+      "license_hashes": {
+        "licenses/third-party/mpmath-1.3.0/0-LICENSE": "c26cae81da4508e5e249985777a33821f183223ebb74d7f8cfbf90fe7eef2fb7"
+      }
+    },
+    {
+      "name": "mutagen",
+      "version": "1.47.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/mutagen/1.47.0/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "GPL-2.0-or-later",
+      "license_files": [
+        "licenses/third-party/mutagen-1.47.0/0-COPYING"
+      ],
+      "metadata_license": "GPL-2.0-or-later",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/81/e6/64bc71b74eef4b68e61eb921dcf72dabd9e4ec4af1e11891bbd312ccbb77/mutagen-1.47.0.tar.gz",
+      "archive_sha256": "719fadef0a978c31b4cf3c956261b3c58b6948b32023078a2117b1de09f0fc99",
+      "license_hashes": {
+        "licenses/third-party/mutagen-1.47.0/0-COPYING": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+      }
+    },
+    {
+      "name": "networkx",
+      "version": "3.6",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/networkx/3.6/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/networkx-3.6/0-LICENSE.txt"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/e8/fc/7b6fd4d22c8c4dc5704430140d8b3f520531d4fe7328b8f8d03f5a7950e8/networkx-3.6.tar.gz",
+      "archive_sha256": "285276002ad1f7f7da0f7b42f004bcba70d381e936559166363707fdad3d72ad",
+      "license_hashes": {
+        "licenses/third-party/networkx-3.6/0-LICENSE.txt": "3cf7c3a179d817b23b8b8568211769fefdf93797d207d984b8b2fa24d0220b33"
+      }
+    },
+    {
+      "name": "numpy",
+      "version": "2.3.5",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/numpy/2.3.5/json",
+      "marker": "",
+      "license_evidence": "pinned upstream project license text; binary and bundled third-party coverage incomplete",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/numpy/LICENSE.txt"
+      ],
+      "metadata_license": "See retained source-license text",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "license_hashes": {
+        "licenses/third-party/numpy/LICENSE.txt": "1be1df33863f97a7bc1c4d67980bd6c69c9a6fef0a5ee76e6ad6cb91e56e8491"
+      },
+      "upstream_license_url": "https://raw.githubusercontent.com/numpy/numpy/v2.3.5/LICENSE.txt"
+    },
+    {
+      "name": "omegaconf",
+      "version": "2.3.1",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/omegaconf/2.3.1/json",
+      "marker": "platform_machine == 'x86_64' and sys_platform == 'darwin'",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/omegaconf-2.3.1/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/ce/3d/e4b57b8d9008c6ebe0d5eff901f91d5700cf7bdb8c8863df817463a7fd5e/omegaconf-2.3.1.tar.gz",
+      "archive_sha256": "e5e7de64aeebeddaf8e6d3f7a783b32ac2a01c0fbd9c878012caecb891a1f42a",
+      "license_hashes": {
+        "licenses/third-party/omegaconf-2.3.1/0-LICENSE": "b31375ed5d5cbe7ec2d0c4c14df8afa7a8e5501bbe25f70b6cbc461685f4b91a"
+      }
+    },
+    {
+      "name": "openunmix",
+      "version": "1.3.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/openunmix/1.3.0/json",
+      "marker": "platform_machine == 'x86_64' and sys_platform == 'darwin'",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/openunmix-1.3.0/0-LICENSE"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/42/ef/4ad54e3ecb1e89f7f7bdb4c7b751e43754e892d3c32a8550e5d0882565df/openunmix-1.3.0.tar.gz",
+      "archive_sha256": "cc9245ce728700f5d0b72c67f01be4162777e617cdc47f9b035963afac180fc8",
+      "license_hashes": {
+        "licenses/third-party/openunmix-1.3.0/0-LICENSE": "4f7b047ffafb9fbb39a40d605bab961b9b030711addce6e9d23886c2ae3b105e"
+      }
+    },
+    {
+      "name": "packaging",
+      "version": "25.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/packaging/25.0/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "Apache-2.0 OR BSD-2-Clause",
+      "license_files": [
+        "licenses/third-party/packaging-25.0/0-LICENSE",
+        "licenses/third-party/packaging-25.0/1-LICENSE.APACHE",
+        "licenses/third-party/packaging-25.0/2-LICENSE.BSD"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [
+        "License :: OSI Approved :: Apache Software License",
+        "License :: OSI Approved :: BSD License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/a1/d4/1fc4078c65507b51b96ca8f8c3ba19e6a61c8253c72794544580a7b6c24d/packaging-25.0.tar.gz",
+      "archive_sha256": "d443872c98d677bf60f6a1f2f8c1cb748e8fe762d2bf9d3148b5599295b0fc4f",
+      "license_hashes": {
+        "licenses/third-party/packaging-25.0/0-LICENSE": "cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48",
+        "licenses/third-party/packaging-25.0/1-LICENSE.APACHE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "licenses/third-party/packaging-25.0/2-LICENSE.BSD": "b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5"
+      }
+    },
+    {
+      "name": "pillow",
+      "version": "12.0.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/pillow/12.0.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "MIT-CMU",
+      "license_files": [
+        "licenses/third-party/pillow-12.0.0/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/b2/d2/5f675067ba82da7a1c238a73b32e3fd78d67f9d9f80fbadd33a40b9c0481/pillow-12.0.0-cp310-cp310-win_arm64.whl",
+      "archive_sha256": "6ace95230bfb7cd79ef66caa064bbe2f2a1e63d93471c3a2e1f1348d9f22d6b7",
+      "license_hashes": {
+        "licenses/third-party/pillow-12.0.0/0-LICENSE": "0f94788edbab0e00bc258f97e0d24abd1488ccc1fa27aa9ee94b67a047c976c1"
+      }
+    },
+    {
+      "name": "psutil",
+      "version": "7.1.3",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/psutil/7.1.3/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/psutil-7.1.3/0-LICENSE"
+      ],
+      "metadata_license": "BSD-3-Clause",
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/e1/88/bdd0a41e5857d5d703287598cbf08dad90aed56774ea52ae071bae9071b6/psutil-7.1.3.tar.gz",
+      "archive_sha256": "6c86281738d77335af7aec228328e944b30930899ea760ecf33a4dba66be5e74",
+      "license_hashes": {
+        "licenses/third-party/psutil-7.1.3/0-LICENSE": "b89c063b3786e28e0c0a38f1931db61fed35e69dd2a2966fbecffee0f46c8d10"
+      }
+    },
+    {
+      "name": "pycparser",
+      "version": "2.23",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/pycparser/2.23/json",
+      "marker": "implementation_name != 'PyPy'",
+      "license_evidence": "pinned package metadata license field",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/pycparser-2.23/0-LICENSE"
+      ],
+      "metadata_license": "BSD-3-Clause",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/fe/cf/d2d3b9f5699fb1e4615c8e32ff220203e43b248e1dfcc6736ad9057731ca/pycparser-2.23.tar.gz",
+      "archive_sha256": "78816d4f24add8f10a06d6f05b4d424ad9e96cfebf68a4ddc99c65c0720d00c2",
+      "license_hashes": {
+        "licenses/third-party/pycparser-2.23/0-LICENSE": "0c846399369ea76ddd7b5c44fe6d16497415fcf015f5cbb508c24bf98b81c5b1"
+      }
+    },
+    {
+      "name": "pydantic",
+      "version": "2.12.4",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/pydantic/2.12.4/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/pydantic-2.12.4/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/96/ad/a17bc283d7d81837c061c49e3eaa27a45991759a1b7eae1031921c6bd924/pydantic-2.12.4.tar.gz",
+      "archive_sha256": "0f8cb9555000a4b5b617f66bfd2566264c4984b27589d3b845685983e8ea85ac",
+      "license_hashes": {
+        "licenses/third-party/pydantic-2.12.4/0-LICENSE": "a9e186f3ca16b5eef84318e7a701721351a00cb7b8ae3a4394b67b49e3529ef3"
+      }
+    },
+    {
+      "name": "pydantic-core",
+      "version": "2.41.5",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/pydantic-core/2.41.5/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/pydantic-core-2.41.5/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/71/70/23b021c950c2addd24ec408e9ab05d59b035b39d97cdc1130e1bce647bb6/pydantic_core-2.41.5.tar.gz",
+      "archive_sha256": "08daa51ea16ad373ffd5e7606252cc32f07bc72b28284b6bc9c6df804816476e",
+      "license_hashes": {
+        "licenses/third-party/pydantic-core-2.41.5/0-LICENSE": "2afdd30d54b4d62b6f488a6bcc1546e84ec5061f13f4209c03d012348783795a"
+      }
+    },
+    {
+      "name": "pyrekordbox",
+      "version": "0.4.4",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/pyrekordbox/0.4.4/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/pyrekordbox-0.4.4/0-LICENSE"
+      ],
+      "metadata_license": "See retained source-license text",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/39/8b/8fb7f21f4eb676df35c53214129ad33624634e2b678069abbf6a88509c6b/pyrekordbox-0.4.4.tar.gz",
+      "archive_sha256": "8bdb59f7c45c743bd2021613a72604b7607092d386e25f20cce78adfe30bf9a4",
+      "license_hashes": {
+        "licenses/third-party/pyrekordbox-0.4.4/0-LICENSE": "25f5ab35823b250a45c8f4e76499adb4326aac92c824a37da950119fd9bd1f29"
+      }
+    },
+    {
+      "name": "python-dateutil",
+      "version": "2.9.0.post0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/python-dateutil/2.9.0.post0/json",
+      "marker": "",
+      "license_evidence": "retained pinned LICENSE explicitly applies BSD terms to all code; Apache option is contribution-dependent",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/python-dateutil-2.9.0.post0/0-AUTHORS.md",
+        "licenses/third-party/python-dateutil-2.9.0.post0/1-LICENSE"
+      ],
+      "metadata_license": "Dual License",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: Apache Software License",
+        "License :: OSI Approved :: BSD License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz",
+      "archive_sha256": "37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3",
+      "license_hashes": {
+        "licenses/third-party/python-dateutil-2.9.0.post0/0-AUTHORS.md": "8747ac728d6aa5d1f66949b9f57513f0be05080c8ff0d3be26ffb94ebb4d437d",
+        "licenses/third-party/python-dateutil-2.9.0.post0/1-LICENSE": "ba00f51a0d92823b5a1cde27d8b5b9d2321e67ed8da9bc163eff96d5e17e577e"
+      }
+    },
+    {
+      "name": "pyyaml",
+      "version": "6.0.3",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/pyyaml/6.0.3/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/pyyaml-6.0.3/0-LICENSE"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/05/8e/961c0007c59b8dd7729d542c61a4d537767a59645b82a0b521206e1e25c2/pyyaml-6.0.3.tar.gz",
+      "archive_sha256": "d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f",
+      "license_hashes": {
+        "licenses/third-party/pyyaml-6.0.3/0-LICENSE": "8d3928f9dc4490fd635707cb88eb26bd764102a7282954307d3e5167a577e8a4"
+      }
+    },
+    {
+      "name": "requests",
+      "version": "2.32.5",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/requests/2.32.5/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "Apache-2.0",
+      "license_files": [
+        "licenses/third-party/requests-2.32.5/0-LICENSE",
+        "licenses/third-party/requests-2.32.5/1-NOTICE"
+      ],
+      "metadata_license": "Apache-2.0",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: Apache Software License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/c9/74/b3ff8e6c8446842c3f5c837e9c3dfcfe2018ea6ecef224c710c85ef728f4/requests-2.32.5.tar.gz",
+      "archive_sha256": "dbba0bac56e100853db0ea71b82b4dfd5fe2bf6d3754a8893c3af500cec7d7cf",
+      "license_hashes": {
+        "licenses/third-party/requests-2.32.5/0-LICENSE": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b",
+        "licenses/third-party/requests-2.32.5/1-NOTICE": "f5110972dedad2b4e9d314518daf3b7d72d6e02e499acd802181de6f74571dcc"
+      }
+    },
+    {
+      "name": "retrying",
+      "version": "1.4.2",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/retrying/1.4.2/json",
+      "marker": "platform_machine == 'x86_64' and sys_platform == 'darwin'",
+      "license_evidence": "pinned package metadata",
+      "license": "Apache-2.0",
+      "license_files": [
+        "licenses/third-party/retrying-1.4.2/0-LICENSE.txt",
+        "licenses/third-party/retrying-1.4.2/1-NOTICE.txt"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/c8/5a/b17e1e257d3e6f2e7758930e1256832c9ddd576f8631781e6a072914befa/retrying-1.4.2.tar.gz",
+      "archive_sha256": "d102e75d53d8d30b88562d45361d6c6c934da06fab31bd81c0420acb97a8ba39",
+      "license_hashes": {
+        "licenses/third-party/retrying-1.4.2/0-LICENSE.txt": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+        "licenses/third-party/retrying-1.4.2/1-NOTICE.txt": "4d722127c6beefc17e7a86bebeb74f91dfa877778bda8d7f8e88bc23694a508b"
+      }
+    },
+    {
+      "name": "rfc8785",
+      "version": "0.1.4",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/rfc8785/0.1.4/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "Apache-2.0",
+      "license_files": [
+        "licenses/third-party/rfc8785-0.1.4/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [
+        "License :: OSI Approved :: Apache Software License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/ef/2f/fa1d2e740c490191b572d33dbca5daa180cb423c24396b856f5886371d8b/rfc8785-0.1.4.tar.gz",
+      "archive_sha256": "e545841329fe0eee4f6a3b44e7034343100c12b4ec566dc06ca9735681deb4da",
+      "license_hashes": {
+        "licenses/third-party/rfc8785-0.1.4/0-LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+      }
+    },
+    {
+      "name": "rotary-embedding-torch",
+      "version": "0.9.1",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/rotary-embedding-torch/0.9.1/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/rotary-embedding-torch-0.9.1/0-LICENSE"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/fc/63/776d55b395aed9d2815afc1740056e919691d1be1ceee203d101d33d1674/rotary_embedding_torch-0.9.1.tar.gz",
+      "archive_sha256": "f43c39cd9c0aaa17d47e876db89a552a203dd8af35e7980f484ab7ad7ea8bf69",
+      "license_hashes": {
+        "licenses/third-party/rotary-embedding-torch-0.9.1/0-LICENSE": "fe74654058fe2ba069808dbf36defd6e207baf8859f36366a6a3ceae5aa6ecc5"
+      }
+    },
+    {
+      "name": "safetensors",
+      "version": "0.8.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/safetensors/0.8.0/json",
+      "marker": "platform_machine != 'x86_64' or sys_platform != 'darwin'",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "Apache-2.0",
+      "license_files": [
+        "licenses/third-party/safetensors-0.8.0/0-LICENSE",
+        "licenses/third-party/safetensors-0.8.0/1-LICENSE",
+        "licenses/third-party/safetensors-0.8.0/2-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [
+        "License :: OSI Approved :: Apache Software License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/45/06/f955dbbb1859e3bd23c8ac6141af5106e7ad5fedec4a3a6e3d60f94b7001/safetensors-0.8.0.tar.gz",
+      "archive_sha256": "fabaf3e0f18a6618d9b36560682562157f77c2b71fcffc7b432be2baed9d753d",
+      "license_hashes": {
+        "licenses/third-party/safetensors-0.8.0/0-LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "licenses/third-party/safetensors-0.8.0/1-LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "licenses/third-party/safetensors-0.8.0/2-LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+      }
+    },
+    {
+      "name": "scipy",
+      "version": "1.16.3",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/scipy/1.16.3/json",
+      "marker": "",
+      "license_evidence": "pinned upstream project license text; binary and bundled third-party coverage incomplete",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/scipy/LICENSE.txt"
+      ],
+      "metadata_license": "See retained source-license text",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "license_hashes": {
+        "licenses/third-party/scipy/LICENSE.txt": "221e59f5e910fd7f94e44f0dac77436a11338c285c6346232e4a850a50da0e94"
+      },
+      "upstream_license_url": "https://raw.githubusercontent.com/scipy/scipy/v1.16.3/LICENSE.txt"
+    },
+    {
+      "name": "setuptools",
+      "version": "80.9.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/setuptools/80.9.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/setuptools-80.9.0/0-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/1-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/2-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/3-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/4-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/5-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/6-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/7-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/8-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/9-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/10-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/11-LICENSE.APACHE",
+        "licenses/third-party/setuptools-80.9.0/12-LICENSE.BSD",
+        "licenses/third-party/setuptools-80.9.0/13-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/14-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/15-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/16-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/17-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/18-LICENSE.APACHE",
+        "licenses/third-party/setuptools-80.9.0/19-LICENSE.BSD",
+        "licenses/third-party/setuptools-80.9.0/20-LICENSE.txt",
+        "licenses/third-party/setuptools-80.9.0/21-LICENSE",
+        "licenses/third-party/setuptools-80.9.0/22-NOTICE",
+        "licenses/third-party/setuptools-80.9.0/23-NOTICE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/18/5d/3bf57dcd21979b887f014ea83c24ae194cfcd12b9e0fda66b957c69d1fca/setuptools-80.9.0.tar.gz",
+      "archive_sha256": "f36b47402ecde768dbfafc46e8e4207b4360c654f1f3bb84475f0a28628fb19c",
+      "license_hashes": {
+        "licenses/third-party/setuptools-80.9.0/0-LICENSE": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+        "licenses/third-party/setuptools-80.9.0/1-LICENSE": "ade78d04982d69972d444a8e14a94f87a2334dd3855cc80348ea8e240aa0df2d",
+        "licenses/third-party/setuptools-80.9.0/2-LICENSE": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+        "licenses/third-party/setuptools-80.9.0/3-LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "licenses/third-party/setuptools-80.9.0/4-LICENSE": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+        "licenses/third-party/setuptools-80.9.0/5-LICENSE": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+        "licenses/third-party/setuptools-80.9.0/6-LICENSE": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+        "licenses/third-party/setuptools-80.9.0/7-LICENSE": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+        "licenses/third-party/setuptools-80.9.0/8-LICENSE": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+        "licenses/third-party/setuptools-80.9.0/9-LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "licenses/third-party/setuptools-80.9.0/10-LICENSE": "cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48",
+        "licenses/third-party/setuptools-80.9.0/11-LICENSE.APACHE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "licenses/third-party/setuptools-80.9.0/12-LICENSE.BSD": "b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5",
+        "licenses/third-party/setuptools-80.9.0/13-LICENSE": "29e0fd62e929850e86eb28c3fdccf0cefdf4fa94879011cffb3d0d4bed6d4db6",
+        "licenses/third-party/setuptools-80.9.0/14-LICENSE": "b80816b0d530b8accb4c2211783790984a6e3b61922c2b5ee92f3372ab2742fe",
+        "licenses/third-party/setuptools-80.9.0/15-LICENSE": "6163f7987dfb38d6bc320ce2b70b2f02b862bc41126516d552ef1cd43247e758",
+        "licenses/third-party/setuptools-80.9.0/16-LICENSE": "3b2f81fe21d181c499c59a256c8e1968455d6689d269aa85373bfb6af41da3bf",
+        "licenses/third-party/setuptools-80.9.0/17-LICENSE": "cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48",
+        "licenses/third-party/setuptools-80.9.0/18-LICENSE.APACHE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "licenses/third-party/setuptools-80.9.0/19-LICENSE.BSD": "b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5",
+        "licenses/third-party/setuptools-80.9.0/20-LICENSE.txt": "30c23618679108f3e8ea1d2a658c7ca417bdfc891c98ef1a89fa4ff0c9828654",
+        "licenses/third-party/setuptools-80.9.0/21-LICENSE": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+        "licenses/third-party/setuptools-80.9.0/22-NOTICE": "2dddf08818297a3b89d43d95ff659d8da85741108c9136dfa3a4d856c0623bd8",
+        "licenses/third-party/setuptools-80.9.0/23-NOTICE": "5d300dbfa643138b013b75ac9caeee591f951b8b0ee24288c34ccd926c4780c8"
+      }
+    },
+    {
+      "name": "six",
+      "version": "1.17.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/six/1.17.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/six-1.17.0/0-LICENSE"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz",
+      "archive_sha256": "ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81",
+      "license_hashes": {
+        "licenses/third-party/six-1.17.0/0-LICENSE": "4375ba20e2b9c6c4e7cad2940a628fd90e95cc3d50ee92aae755715d8ba1fbd0"
+      }
+    },
+    {
+      "name": "sniffio",
+      "version": "1.3.1",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/sniffio/1.3.1/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "MIT OR Apache-2.0",
+      "license_files": [
+        "licenses/third-party/sniffio-1.3.1/0-LICENSE",
+        "licenses/third-party/sniffio-1.3.1/1-LICENSE.APACHE2",
+        "licenses/third-party/sniffio-1.3.1/2-LICENSE.MIT"
+      ],
+      "metadata_license": "MIT OR Apache-2.0",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: Apache Software License",
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz",
+      "archive_sha256": "f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc",
+      "license_hashes": {
+        "licenses/third-party/sniffio-1.3.1/0-LICENSE": "652c878488d1456361e08c3f8607fd7ba59892a14103d15cce4ff93c85b5cc8b",
+        "licenses/third-party/sniffio-1.3.1/1-LICENSE.APACHE2": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "licenses/third-party/sniffio-1.3.1/2-LICENSE.MIT": "3e6dae555eb92787fc82d1d48355677f454c7f65aeb38d3f9e72bf9a3daf034b"
+      }
+    },
+    {
+      "name": "soundfile",
+      "version": "0.13.1",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/soundfile/0.13.1/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/soundfile-0.13.1/0-LICENSE"
+      ],
+      "metadata_license": "BSD 3-Clause License",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/e1/41/9b873a8c055582859b239be17902a85339bec6a30ad162f98c9b0288a2cc/soundfile-0.13.1.tar.gz",
+      "archive_sha256": "b2c68dab1e30297317080a5b43df57e302584c49e2942defdde0acccc53f0e5b",
+      "license_hashes": {
+        "licenses/third-party/soundfile-0.13.1/0-LICENSE": "0dd2e411fed553ba891845077e5a32c5b726d1bbc46ff31a2118ae1ccf816752"
+      }
+    },
+    {
+      "name": "soxr",
+      "version": "1.0.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/soxr/1.0.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "LGPL-2.1-or-later",
+      "license_files": [
+        "licenses/third-party/soxr-1.0.0/0-COPYING.LGPL",
+        "licenses/third-party/soxr-1.0.0/1-LICENSE.txt",
+        "licenses/third-party/soxr-1.0.0/2-LICENSE-PFFFT.txt",
+        "licenses/third-party/soxr-1.0.0/3-AUTHORS",
+        "licenses/third-party/soxr-1.0.0/4-COPYING.LGPL",
+        "licenses/third-party/soxr-1.0.0/5-LICENCE",
+        "licenses/third-party/soxr-1.0.0/6-COPYING"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/42/7e/f4b461944662ad75036df65277d6130f9411002bfb79e9df7dff40a31db9/soxr-1.0.0.tar.gz",
+      "archive_sha256": "e07ee6c1d659bc6957034f4800c60cb8b98de798823e34d2a2bba1caa85a4509",
+      "license_hashes": {
+        "licenses/third-party/soxr-1.0.0/0-COPYING.LGPL": "f2f118b9029ec1871b953639ecc46651b2fc7b62e295e6cf3ef2ac4c9a058b33",
+        "licenses/third-party/soxr-1.0.0/1-LICENSE.txt": "aeeb7bce59a3dcc7bb08a48a2f012f340c6b28ec50cd22f0ad93194a7d254420",
+        "licenses/third-party/soxr-1.0.0/2-LICENSE-PFFFT.txt": "a9f3d236f3c14a41a1293f176d4c7c46d85404403417fcb8df6d6c9707104e42",
+        "licenses/third-party/soxr-1.0.0/3-AUTHORS": "e5d53cd6c716dfeabe47a9f3613a8c6815aa4a67f0f77900787c59445396aeff",
+        "licenses/third-party/soxr-1.0.0/4-COPYING.LGPL": "f2f118b9029ec1871b953639ecc46651b2fc7b62e295e6cf3ef2ac4c9a058b33",
+        "licenses/third-party/soxr-1.0.0/5-LICENCE": "dc98676341fdcd29d9f279c9679d6a75288785b174ded8d1b2e316c366166135",
+        "licenses/third-party/soxr-1.0.0/6-COPYING": "32b1062f7da84967e7019d01ab805935caa7ab7321a7ced0e30ebe75e5df1670"
+      }
+    },
+    {
+      "name": "sphn",
+      "version": "0.2.1",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/sphn/0.2.1/json",
+      "marker": "platform_machine != 'x86_64' or sys_platform != 'darwin'",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "Apache-2.0",
+      "license_files": [
+        "licenses/third-party/sphn-0.2.1/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/b7/94/0957f866030d6071bcfd285977ff3652bacf85e663a634d3172cf47055a7/sphn-0.2.1.tar.gz",
+      "archive_sha256": "3b19b1fece67d979d84080458bed545d1f55ddc5abac6ca5deae2672a184c7fe",
+      "license_hashes": {
+        "licenses/third-party/sphn-0.2.1/0-LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+      }
+    },
+    {
+      "name": "sqlalchemy",
+      "version": "2.0.44",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/sqlalchemy/2.0.44/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/sqlalchemy-2.0.44/0-AUTHORS",
+        "licenses/third-party/sqlalchemy-2.0.44/1-LICENSE",
+        "licenses/third-party/sqlalchemy-2.0.44/2-copyright.rst",
+        "licenses/third-party/sqlalchemy-2.0.44/3-copyright.html"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/f0/f2/840d7b9496825333f532d2e3976b8eadbf52034178aac53630d09fe6e1ef/sqlalchemy-2.0.44.tar.gz",
+      "archive_sha256": "0ae7454e1ab1d780aee69fd2aae7d6b8670a581d8847f2d1e0f7ddfbf47e5a22",
+      "license_hashes": {
+        "licenses/third-party/sqlalchemy-2.0.44/0-AUTHORS": "dc1db0b5d17455adc37b693ff8e409c9a80f603e441695825518c36f786c963e",
+        "licenses/third-party/sqlalchemy-2.0.44/1-LICENSE": "9821720b58d4a565b61321007a8ad43ab6991a3959e66cd5db4dd9eae69c7dfc",
+        "licenses/third-party/sqlalchemy-2.0.44/2-copyright.rst": "a33076c9f325d58f1dfb85e120eb36ea8d1c5b1a7e9a52efc48b06be59b67750",
+        "licenses/third-party/sqlalchemy-2.0.44/3-copyright.html": "d226796e3f1dac40e6f47e784c9ebe4729479efcbbc3af7252f4f6efc49f2112"
+      }
+    },
+    {
+      "name": "sqlcipher3-wheels",
+      "version": "0.5.6",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/sqlcipher3-wheels/0.5.6/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "Zlib",
+      "license_files": [
+        "licenses/third-party/sqlcipher3-wheels-0.5.6/0-LICENSE"
+      ],
+      "metadata_license": "zlib/libpng",
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/e7/81/1c58bfb37da1419bb0aaf9c1d0a05f620b585a74f49ed665408c2fc9e6cb/sqlcipher3_wheels-0.5.6.tar.gz",
+      "archive_sha256": "1d232c14be44db95a7f3018433cae01ecd18803fa2468fce3cc45ebd5e034942",
+      "license_hashes": {
+        "licenses/third-party/sqlcipher3-wheels-0.5.6/0-LICENSE": "fa23cf250126548e90008fe92de4ee76d485bfbb3592f5be8aa731775892a960"
+      }
+    },
+    {
+      "name": "starlette",
+      "version": "0.50.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/starlette/0.50.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/starlette-0.50.0/0-LICENSE.md"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/ba/b8/73a0e6a6e079a9d9cfa64113d771e421640b6f679a52eeb9b32f72d871a1/starlette-0.50.0.tar.gz",
+      "archive_sha256": "a2a17b22203254bcbc2e1f926d2d55f3f9497f769416b3190768befe598fa3ca",
+      "license_hashes": {
+        "licenses/third-party/starlette-0.50.0/0-LICENSE.md": "dcb95677a02240243187e964f941847d19b17821cf99e5afae684fab328c19bf"
+      }
+    },
+    {
+      "name": "submitit",
+      "version": "1.5.4",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/submitit/1.5.4/json",
+      "marker": "platform_machine == 'x86_64' and sys_platform == 'darwin'",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/submitit-1.5.4/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/47/86/497018fb3b74e71bef45df82762b176e6b3d159f29941c20d2f141ec4096/submitit-1.5.4.tar.gz",
+      "archive_sha256": "7100848bd1cdda79c7196e54ee830793ae75fd7adde0c5bef738d72360a07508",
+      "license_hashes": {
+        "licenses/third-party/submitit-1.5.4/0-LICENSE": "52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85"
+      }
+    },
+    {
+      "name": "sympy",
+      "version": "1.14.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/sympy/1.14.0/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/sympy-1.14.0/0-AUTHORS",
+        "licenses/third-party/sympy-1.14.0/1-LICENSE",
+        "licenses/third-party/sympy-1.14.0/2-LICENSE",
+        "licenses/third-party/sympy-1.14.0/3-LICENSE.txt"
+      ],
+      "metadata_license": "BSD",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2bb238361cd4ae6125a569b4db67cd9e79846ba2d68c/sympy-1.14.0.tar.gz",
+      "archive_sha256": "d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517",
+      "license_hashes": {
+        "licenses/third-party/sympy-1.14.0/0-AUTHORS": "82b1038521b0696c63c90b31ed4a0a2c9c4c16871c648b157b07ca44b6f18f8d",
+        "licenses/third-party/sympy-1.14.0/1-LICENSE": "07a5e9819f727b4986ad2829c7a29a6320d42575f720eb24d71b7fef573a0286",
+        "licenses/third-party/sympy-1.14.0/2-LICENSE": "596639d3681fdb67bb2f05a9fcd2503d88bc549471a89b2e500cd9759ae2a3fa",
+        "licenses/third-party/sympy-1.14.0/3-LICENSE.txt": "007bc30a58fa40a996e772047120de4eaf31f5110e4f9c3b5f93fcdfbe2eaca1"
+      }
+    },
+    {
+      "name": "tomlkit",
+      "version": "0.15.1",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/tomlkit/0.15.1/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata license field",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/tomlkit-0.15.1/0-LICENSE",
+        "licenses/third-party/tomlkit-0.15.1/1-LICENSE"
+      ],
+      "metadata_license": "MIT",
+      "metadata_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "archive_url": "https://files.pythonhosted.org/packages/94/96/e07752635b98536177fa1f37671c8f3cdde2e724c6bcf6034b2cfb571565/tomlkit-0.15.1.tar.gz",
+      "archive_sha256": "e25bbf38843005246210a12982776f27f99cb9be67160e14434d0c0d21ee1e97",
+      "license_hashes": {
+        "licenses/third-party/tomlkit-0.15.1/0-LICENSE": "f2f9b460ba719da6626add264d3782f275a4ff7aab677beda08b330911e23adb",
+        "licenses/third-party/tomlkit-0.15.1/1-LICENSE": "01ef58ee6449fa01a284c10808e27800d66bfea271bc29281125ff8e5642b86f"
+      }
+    },
+    {
+      "name": "torch",
+      "version": "2.9.1",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/torch/2.9.1/json",
+      "marker": "sys_platform != 'linux'",
+      "license_evidence": "pinned package metadata license field",
+      "license": "BSD-3-Clause",
+      "license_files": [],
+      "metadata_license": "BSD-3-Clause",
+      "metadata_classifiers": [],
+      "license_hashes": {}
+    },
+    {
+      "name": "torch",
+      "version": "2.9.1+cpu",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/torch/2.9.1/json",
+      "marker": "sys_platform == 'linux'",
+      "license_evidence": "pinned package metadata license field; CPU artifact contents not audited",
+      "license": "BSD-3-Clause",
+      "license_files": [],
+      "metadata_license": "BSD-3-Clause",
+      "metadata_classifiers": [],
+      "license_hashes": {}
+    },
+    {
+      "name": "torchaudio",
+      "version": "2.9.1",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/torchaudio/2.9.1/json",
+      "marker": "(python_full_version < '3.15' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (sys_platform != 'linux')",
+      "license_evidence": "pinned upstream project license text; binary and bundled third-party coverage incomplete",
+      "license": "BSD-2-Clause",
+      "license_files": [
+        "licenses/third-party/torchaudio/LICENSE.txt"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "license_hashes": {
+        "licenses/third-party/torchaudio/LICENSE.txt": "93a58861a858cc108e6b6b833e08e76e8b2a66339e4a8007c8a5a8c1ff9c40d6"
+      },
+      "upstream_license_url": "https://raw.githubusercontent.com/pytorch/audio/v2.9.1/LICENSE"
+    },
+    {
+      "name": "torchaudio",
+      "version": "2.9.1+cpu",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/torchaudio/2.9.1/json",
+      "marker": "(python_full_version >= '3.15' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux')",
+      "license_evidence": "pinned upstream project license text; binary and bundled third-party coverage incomplete",
+      "license": "BSD-2-Clause",
+      "license_files": [
+        "licenses/third-party/torchaudio/LICENSE.txt"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "license_hashes": {
+        "licenses/third-party/torchaudio/LICENSE.txt": "93a58861a858cc108e6b6b833e08e76e8b2a66339e4a8007c8a5a8c1ff9c40d6"
+      },
+      "upstream_license_url": "https://raw.githubusercontent.com/pytorch/audio/v2.9.1/LICENSE"
+    },
+    {
+      "name": "tqdm",
+      "version": "4.70.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/tqdm/4.70.0/json",
+      "marker": "",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "MPL-2.0 AND MIT",
+      "license_files": [
+        "licenses/third-party/tqdm-4.70.0/0-LICENCE"
+      ],
+      "metadata_license": "MPL-2.0 AND MIT",
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/21/3b/6c24bec5be5e743ffd99576daa5cc077722fc7d5bbc00bd133fa0c698dc6/tqdm-4.70.0.tar.gz",
+      "archive_sha256": "55b0b0dbd97462d06ebee91e4dac24ed4d4702be82b24f07e6c1d27e08cea220",
+      "license_hashes": {
+        "licenses/third-party/tqdm-4.70.0/0-LICENCE": "fcff87c3a47ce8028a8512aa182d4fcf0ad1c90544ee75cf9b343684cac194de"
+      }
+    },
+    {
+      "name": "treetable",
+      "version": "0.2.6",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/treetable/0.2.6/json",
+      "marker": "platform_machine == 'x86_64' and sys_platform == 'darwin'",
+      "license_evidence": "retained pinned source/archive license text; bundled native files not fully audited",
+      "license": "Unlicense",
+      "license_files": [
+        "licenses/third-party/treetable-0.2.6/0-LICENSE"
+      ],
+      "metadata_license": "Unlicense license",
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/8d/f1/e5f28b2485d8d3169ff0167e3e560fa912a96e71916bf11365c9e40f11f5/treetable-0.2.6.tar.gz",
+      "archive_sha256": "7e1d62dbce503fbf24561aee1461b8fbcc2c232ff45661c3b9d0c2081c795bdf",
+      "license_hashes": {
+        "licenses/third-party/treetable-0.2.6/0-LICENSE": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c"
+      }
+    },
+    {
+      "name": "types-requests",
+      "version": "2.33.0.20260518",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/types-requests/2.33.0.20260518/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "Apache-2.0",
+      "license_files": [
+        "licenses/third-party/types-requests-2.33.0.20260518/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/e0/01/c5a19253fe1ac159159ddf9a3a07cec8bb5e486ec4d9002ad2821da0e5d2/types_requests-2.33.0.20260518.tar.gz",
+      "archive_sha256": "df7bd3bfe0ca8402dfb841e7d9be714bb5578203283d66d7dc4ef69343449a5e",
+      "license_hashes": {
+        "licenses/third-party/types-requests-2.33.0.20260518/0-LICENSE": "295f8538c94ae5c3043301cf7cff1c852dab6a786a8ddee471e061b40d5ecabe"
+      }
+    },
+    {
+      "name": "typing-extensions",
+      "version": "4.15.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/typing-extensions/4.15.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "PSF-2.0",
+      "license_files": [
+        "licenses/third-party/typing-extensions-4.15.0/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/72/94/1a15dd82efb362ac84269196e94cf00f187f7ed21c242792a923cdb1c61f/typing_extensions-4.15.0.tar.gz",
+      "archive_sha256": "0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466",
+      "license_hashes": {
+        "licenses/third-party/typing-extensions-4.15.0/0-LICENSE": "3b2f81fe21d181c499c59a256c8e1968455d6689d269aa85373bfb6af41da3bf"
+      }
+    },
+    {
+      "name": "typing-inspection",
+      "version": "0.4.2",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/typing-inspection/0.4.2/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/typing-inspection-0.4.2/0-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/55/e3/70399cb7dd41c10ac53367ae42139cf4b1ca5f36bb3dc6c9d33acdb43655/typing_inspection-0.4.2.tar.gz",
+      "archive_sha256": "ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464",
+      "license_hashes": {
+        "licenses/third-party/typing-inspection-0.4.2/0-LICENSE": "804b59b25f2c31bd278f9202a19ae49a3945aa2664387e2d0a128c7cacc61ec3"
+      }
+    },
+    {
+      "name": "urllib3",
+      "version": "2.5.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/urllib3/2.5.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "MIT",
+      "license_files": [
+        "licenses/third-party/urllib3-2.5.0/0-LICENSE.txt"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/15/22/9ee70a2574a4f4599c47dd506532914ce044817c7752a79b6a51286319bc/urllib3-2.5.0.tar.gz",
+      "archive_sha256": "3fc47733c7e419d4bc3f6b3dc2b4f890bb743906a30d56ba4a5bfa4bbff92760",
+      "license_hashes": {
+        "licenses/third-party/urllib3-2.5.0/0-LICENSE.txt": "130e3a64d5fdd5d096a752694634a7d9df284469de86e5732100268041e3d686"
+      }
+    },
+    {
+      "name": "uvicorn",
+      "version": "0.38.0",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/uvicorn/0.38.0/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        "licenses/third-party/uvicorn-0.38.0/0-LICENSE.md"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/cb/ce/f06b84e2697fef4688ca63bdb2fdf113ca0a3be33f94488f2cadb690b0cf/uvicorn-0.38.0.tar.gz",
+      "archive_sha256": "fd97093bdd120a2609fc0d3afe931d4d4ad688b6e75f0f929fde1bc36fe0e91d",
+      "license_hashes": {
+        "licenses/third-party/uvicorn-0.38.0/0-LICENSE.md": "efe1acf3e62fb99c288b0ec73e5a773b7268ef4320fe757ea994214e4b63c371"
+      }
+    },
+    {
+      "name": "yt-dlp",
+      "version": "2026.8.19",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/yt-dlp/2026.8.19/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "Unlicense",
+      "license_files": [
+        "licenses/third-party/yt-dlp-2026.8.19/0-AUTHORS",
+        "licenses/third-party/yt-dlp-2026.8.19/1-LICENSE"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/1e/e0/832fa4ca334b766a06933a196066edc3dba37cdb6f14cd98d59bcc69a4b4/yt_dlp-2026.8.19.tar.gz",
+      "archive_sha256": "9e213e48cea35c66b378e4447903f118f6392a5fa380a2b6d7070ec86f4e0af1",
+      "license_hashes": {
+        "licenses/third-party/yt-dlp-2026.8.19/0-AUTHORS": "2339b1d1b9a12e9ba1d99d1ca44c5bc09fdb2af3a361f8336cb7df6255376062",
+        "licenses/third-party/yt-dlp-2026.8.19/1-LICENSE": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c"
+      }
+    },
+    {
+      "name": "zeroconf",
+      "version": "0.151.5",
+      "ecosystem": "pypi",
+      "source_url": "https://pypi.org/pypi/zeroconf/0.151.5/json",
+      "marker": "",
+      "license_evidence": "pinned package metadata",
+      "license": "LGPL-2.1-or-later",
+      "license_files": [
+        "licenses/third-party/zeroconf-0.151.5/0-COPYING"
+      ],
+      "metadata_license": null,
+      "metadata_classifiers": [],
+      "archive_url": "https://files.pythonhosted.org/packages/93/20/69744d9de9d375dae2639dda9add7dae85d52d690b68c61b23b8a6468434/zeroconf-0.151.5.tar.gz",
+      "archive_sha256": "28c2ec9d772007eedf11b41a9c9fd3d5c684c17b00721ff8f1ee31b20ad286a1",
+      "license_hashes": {
+        "licenses/third-party/zeroconf-0.151.5/0-COPYING": "73b9e1d4dc992630bbc22b4519f437020446bc8e913d0ad81a3292a79275a251"
+      }
+    },
+    {
+      "name": "@tanstack/query-core",
+      "version": "5.90.11",
+      "ecosystem": "npm",
+      "source_url": "https://registry.npmjs.org/@tanstack/query-core/-/query-core-5.90.11.tgz",
+      "license": "MIT",
+      "license_evidence": "exact package-lock metadata; package license text retained",
+      "license_files": [
+        "licenses/third-party/npm-tanstack-query-core/LICENSE"
+      ],
+      "license_hashes": {
+        "licenses/third-party/npm-tanstack-query-core/LICENSE": "a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7"
+      }
+    },
+    {
+      "name": "@tanstack/react-query",
+      "version": "5.90.11",
+      "ecosystem": "npm",
+      "source_url": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.90.11.tgz",
+      "license": "MIT",
+      "license_evidence": "exact package-lock metadata; package license text retained",
+      "license_files": [
+        "licenses/third-party/npm-tanstack-react-query/LICENSE"
+      ],
+      "license_hashes": {
+        "licenses/third-party/npm-tanstack-react-query/LICENSE": "a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7"
+      }
+    },
+    {
+      "name": "html-to-image",
+      "version": "1.11.13",
+      "ecosystem": "npm",
+      "source_url": "https://registry.npmjs.org/html-to-image/-/html-to-image-1.11.13.tgz",
+      "license": "MIT",
+      "license_evidence": "exact package-lock metadata; package license text retained",
+      "license_files": [
+        "licenses/third-party/npm-html-to-image/LICENSE"
+      ],
+      "license_hashes": {
+        "licenses/third-party/npm-html-to-image/LICENSE": "9fe73723f7a9e91057f73aafc9b6a3c3b2174db2b3ddc0a3a6a8ddf2bad68e37"
+      }
+    },
+    {
+      "name": "react",
+      "version": "19.2.0",
+      "ecosystem": "npm",
+      "source_url": "https://registry.npmjs.org/react/-/react-19.2.0.tgz",
+      "license": "MIT",
+      "license_evidence": "exact package-lock metadata; package license text retained",
+      "license_files": [
+        "licenses/third-party/npm-react/LICENSE"
+      ],
+      "license_hashes": {
+        "licenses/third-party/npm-react/LICENSE": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+      }
+    },
+    {
+      "name": "react-dom",
+      "version": "19.2.0",
+      "ecosystem": "npm",
+      "source_url": "https://registry.npmjs.org/react-dom/-/react-dom-19.2.0.tgz",
+      "license": "MIT",
+      "license_evidence": "exact package-lock metadata; package license text retained",
+      "license_files": [
+        "licenses/third-party/npm-react-dom/LICENSE"
+      ],
+      "license_hashes": {
+        "licenses/third-party/npm-react-dom/LICENSE": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+      }
+    },
+    {
+      "name": "scheduler",
+      "version": "0.27.0",
+      "ecosystem": "npm",
+      "source_url": "https://registry.npmjs.org/scheduler/-/scheduler-0.27.0.tgz",
+      "license": "MIT",
+      "license_evidence": "exact package-lock metadata; package license text retained",
+      "license_files": [
+        "licenses/third-party/npm-scheduler/LICENSE"
+      ],
+      "license_hashes": {
+        "licenses/third-party/npm-scheduler/LICENSE": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+      }
+    },
+    {
+      "name": "electron",
+      "version": "37.10.3",
+      "ecosystem": "npm",
+      "source_url": "https://registry.npmjs.org/electron/-/electron-37.10.3.tgz",
+      "license": "MIT",
+      "license_evidence": "exact package-lock metadata; Electron/Chromium distributed notices still require artifact audit",
+      "license_files": [],
+      "license_hashes": {}
+    },
+    {
+      "name": "signalsmith-stretch",
+      "version": "1.3.2",
+      "ecosystem": "vendored",
+      "source_url": "android/audio-engine/src/main/cpp/third_party/signalsmith-stretch/LICENSE.txt",
+      "license": "MIT",
+      "license_evidence": "license text retained in repository; vendored commit not established",
+      "license_files": [
+        "android/audio-engine/src/main/cpp/third_party/signalsmith-stretch/LICENSE.txt"
+      ],
+      "license_hashes": {
+        "android/audio-engine/src/main/cpp/third_party/signalsmith-stretch/LICENSE.txt": "ee2ef82481ffb445ecdd4b3a4c1f82c0cddb2da8fe39d8e8dc384fffb3e7f06f"
+      }
+    },
+    {
+      "name": "signalsmith-linear",
+      "version": null,
+      "ecosystem": "vendored",
+      "source_url": "android/audio-engine/src/main/cpp/third_party/signalsmith-linear/LICENSE.txt",
+      "license": "MIT",
+      "license_evidence": "license text retained in repository; vendored commit not established",
+      "license_files": [
+        "android/audio-engine/src/main/cpp/third_party/signalsmith-linear/LICENSE.txt"
+      ],
+      "license_hashes": {
+        "android/audio-engine/src/main/cpp/third_party/signalsmith-linear/LICENSE.txt": "072b5e9eb5b22880bdf6256324654cf3ce53dba828edb911921121e1be09d9c3"
+      }
+    },
+    {
+      "name": "ubuntu-mono",
+      "version": null,
+      "ecosystem": "vendored",
+      "source_url": "android/app/UBUNTU_FONT_LICENCE.txt",
+      "license": "Ubuntu-font-1.0",
+      "license_evidence": "license text retained in repository; vendored commit not established",
+      "license_files": [
+        "android/app/UBUNTU_FONT_LICENCE.txt"
+      ],
+      "license_hashes": {
+        "android/app/UBUNTU_FONT_LICENCE.txt": "2f0015108d68627bd788d313f529c21ff4da2c2c42a5e1f3883acc83480f9002"
+      }
+    },
+    {
+      "name": "oboe",
+      "version": "1.11.0",
+      "ecosystem": "maven",
+      "source_url": "https://raw.githubusercontent.com/google/oboe/1.11.0/LICENSE",
+      "license": "Apache-2.0",
+      "license_evidence": "pinned upstream license text; Android binary dependency tree not audited",
+      "license_files": [
+        "licenses/third-party/oboe/LICENSE.txt"
+      ],
+      "license_hashes": {
+        "licenses/third-party/oboe/LICENSE.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      }
+    }
+  ],
+  "export_lines_sha256": "38f821b019cc14edff1ee1763942e4070e469460389b48647e10a817657bfede"
+}

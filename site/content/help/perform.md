@@ -54,6 +54,14 @@ With browser focus, **Home/End** jump to the first/last entry; **PageUp/PageDown
 
 Beatjump moves by the Deck's selected jump size (initially 32 beats, 1–128); Shift+the jump key changes that size, not the loop length. A jump during a loop translates the loop instead of exiting it. **B/N** engages or releases an auto-loop of the selected length (initially 4 beats, ⅛–128). Change that length with Cmd/Ctrl+Shift+the jump keys. The loop needs a Beatgrid. Quantize snaps eligible cue placement and loop entry to beats; it does not change the jump-size keys.
 
+## Heard quantization {#heard}
+
+On a high-latency output such as Bluetooth, what you hear lags what the Deck is doing. **HEARD** in the Mixer strip reads your gestures at the heard instant instead of the rendered one: a quantized Hot Cue press or loop entry snaps to the beat you were hearing, then lands the same audible distance past it, so the move sounds on-beat. Beatjump, Sync and scratching are unchanged. Without **QUANT**, a Hot Cue still enters one latency interval past its marker so the press sounds placed where you heard it.
+
+Each output route uses its reported output latency by default. Adjust it with the **+5ms/−5ms** stepper beside **HEARD** — double-click the readout to return to the reported value — or per route under **Settings → Performance → Heard**. Bluetooth latency is often higher than the reported figure; nudge the value until a tapped Hot Cue lands where you hear the beat.
+
+Sync remembers your choice: a Deck you join to **SYNC** rejoins when its next Track is ready, and a Deck you leave stays out, across app launches. An empty Deck records nothing.
+
 **MATCH** applies a one-time tempo match to a playing reference. **SYNC** joins/leaves a shared tempo that you can ride with the pitch fader. With Quantize and suitable playing/gridded Decks, either can also align phase once; a pitch move or jog nudge does not repeatedly realign it. Sync entry needs a ready Track with BPM. These are independent of selecting a Deck for keyboard focus.
 
 ## Mixer {#mixer}

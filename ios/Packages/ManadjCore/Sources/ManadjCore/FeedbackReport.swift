@@ -1,0 +1,360 @@
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
+/// Phone shake-to-report feedback, platform-neutral half (capture, drawing and
+/// the review sheet live in the app target). A reviewed report POSTs to the
+/// paired desktop's scoped POST /api/device-sync/feedback; the desktop files
+/// it through the same FeedbackService as the loopback feedback router
+/// (scrubbed, durable; the GitHub issue is text-only, evidence stays local).
+/// These limits and scrubs mirror backend/feedback.py so the desktop accepts
+/// what the phone sends; the desktop re-validates and re-scrubs everything.
+public enum FeedbackKind: String, Codable, CaseIterable, Sendable {
+    case bug
+    case feature
+}
+
+public struct FeedbackFailure: Error, LocalizedError, Equatable, Sendable {
+    public let message: String
+    public var errorDescription: String? { message }
+    public init(_ message: String) { self.message = message }
+}
+
+public enum FeedbackLimits {
+    public static let snapshotBytes = 256 * 1024
+    public static let snapshotString = 16384
+    public static let snapshotKey = 200
+    public static let snapshotDepth = 12
+    public static let snapshotNodes = 10000
+    public static let screenshotDataURL = 4 * 1024 * 1024
+    public static let screenshotPixels = 32_000_000
+    public static let title = 200
+    public static let description = 10000
+    public static let warnings = 30
+    public static let warning = 1000
+    /// backend/feedback.py SNAPSHOT_FIELDS: the closed set the desktop accepts.
+    public static let snapshotFields: Set<String> = [
+        "captured_at", "view", "viewport", "user_agent", "browse", "filters",
+        "decks", "mixer", "editor", "set", "session", "audible_surface",
+        "errors", "crash",
+    ]
+    public static let pngPrefix = "data:image/png;base64,"
+}
+
+public enum FeedbackScrub {
+    private static func expression(_ pattern: String) -> NSRegularExpression {
+        // Fixed patterns; a failure here is a programming error, not user input.
+        try! NSRegularExpression(pattern: pattern)
+    }
+    private static let secretKey = expression(#"(?i)(password|passwd|secret|token|authorization|api[_-]?key|cookie)"#)
+    private static let privateKey = expression(#"(?s)-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----"#)
+    private static let secretText = expression(#"(?i)(?:bearer\s+\S+|(?:gh[pousr]_[\w]+|github_pat_[\w]+|sk-[\w-]{16,})|(?:password|passwd|secret|token|authorization|api[_-]?key|cookie)\s*[\"']?\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)|https?://[^\s/@]+:[^\s/@]+@)"#)
+    private static let controlCharacters = expression(#"[\x00-\x08\x0b-\x1f\x7f]"#)
+
+    /// Mirrors backend scrub(): secrets out, hidden markers unforgeable.
+    public static func text(_ value: String) -> String {
+        var text = value
+        for pattern in [privateKey, secretText] {
+            text = pattern.stringByReplacingMatches(
+                in: text, range: NSRange(text.startIndex..., in: text),
+                withTemplate: "[REDACTED]")
+        }
+        text = text.replacingOccurrences(of: "<!--", with: "&lt;!--")
+        text = text.replacingOccurrences(of: "MANADJ_FEEDBACK_", with: "MANADJ-FEEDBACK-")
+        return controlCharacters.stringByReplacingMatches(
+            in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
+    }
+
+    static func redacts(key: String) -> Bool {
+        secretKey.firstMatch(in: key, range: NSRange(key.startIndex..., in: key)) != nil
+    }
+
+    /// Recursive scrub of a JSON value, mirroring the desktop's clean():
+    /// secret-patterned keys redact their whole value; all strings scrub.
+    /// The review sheet renders this exact output, so the preview IS the payload.
+    public static func json(_ value: Any) -> Any {
+        if let dict = value as? [String: Any] {
+            var out: [String: Any] = [:]
+            for (key, child) in dict {
+                out[text(key)] = redacts(key: key) ? "[REDACTED]" : json(child)
+            }
+            return out
+        }
+        if let list = value as? [Any] { return list.map(json) }
+        if let string = value as? String { return text(string) }
+        return value
+    }
+}
+
+/// One reviewed report. `snapshot` holds JSON values only (String, NSNumber,
+/// Bool, NSNull, [String: Any], [Any]); validatedPayload() enforces that.
+public struct FeedbackDraft {
+    public var id: UUID
+    public var kind: FeedbackKind
+    public var title: String
+    public var description: String
+    public var snapshot: [String: Any]
+    /// PNG data URL, already annotated. Nil means the reporter removed it.
+    public var screenshot: String?
+    public var captureWarnings: [String]
+
+    public init(
+        id: UUID = UUID(), kind: FeedbackKind, title: String = "", description: String = "",
+        snapshot: [String: Any] = [:], screenshot: String? = nil, captureWarnings: [String] = []
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.description = description
+        self.snapshot = snapshot
+        self.screenshot = screenshot
+        self.captureWarnings = captureWarnings
+    }
+
+    private static func checkSnapshot(_ value: Any, depth: Int, nodes: inout Int) throws {
+        nodes += 1
+        guard depth <= FeedbackLimits.snapshotDepth, nodes <= FeedbackLimits.snapshotNodes else {
+            throw FeedbackFailure("Feedback context is too large to file")
+        }
+        switch value {
+        case let string as String:
+            guard string.count <= FeedbackLimits.snapshotString else {
+                throw FeedbackFailure("Feedback context has an oversized entry")
+            }
+        case let dict as [String: Any]:
+            for (key, child) in dict {
+                guard key.count <= FeedbackLimits.snapshotKey else {
+                    throw FeedbackFailure("Feedback context has an oversized key")
+                }
+                try checkSnapshot(child, depth: depth + 1, nodes: &nodes)
+            }
+        case let list as [Any]:
+            for child in list { try checkSnapshot(child, depth: depth + 1, nodes: &nodes) }
+        case is NSNull, is Bool:
+            break
+        case let number as NSNumber:
+            // Booleans arrive as NSNumbers from JSONSerialization; objCType "c"
+            // is the portable check (Linux corelibs has no isBoolValue).
+            if String(cString: number.objCType) != "c", !number.doubleValue.isFinite {
+                throw FeedbackFailure("Feedback context holds a non-finite number")
+            }
+        default:
+            throw FeedbackFailure("Feedback context must contain JSON values only")
+        }
+    }
+
+    static func validateScreenshot(_ screenshot: String) throws {
+        guard screenshot.hasPrefix(FeedbackLimits.pngPrefix) else {
+            throw FeedbackFailure("Screenshot must be a PNG image")
+        }
+        guard screenshot.count <= FeedbackLimits.screenshotDataURL,
+              let data = Data(base64Encoded: String(screenshot.dropFirst(FeedbackLimits.pngPrefix.count))),
+              data.count > 24
+        else { throw FeedbackFailure("Screenshot is too large to file") }
+        let bytes = [UInt8](data)
+        let signature: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        guard Array(bytes[0..<8]) == signature, Array(bytes[12..<16]) == [0x49, 0x48, 0x44, 0x52] else {
+            throw FeedbackFailure("Screenshot must be a PNG image")
+        }
+        let width = bytes[16..<20].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+        let height = bytes[20..<24].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+        // Widen before multiplying: UInt32 dimensions can overflow the product.
+        guard width > 0, height > 0,
+              UInt64(width) * UInt64(height) <= UInt64(FeedbackLimits.screenshotPixels) else {
+            throw FeedbackFailure("Screenshot dimensions are too large to file")
+        }
+    }
+
+    /// Scrubbed, limit-checked JSON body for POST /api/device-sync/feedback.
+    /// Throws FeedbackFailure with a reporter-facing message on any violation.
+    public func validatedPayload() throws -> [String: Any] {
+        let title = FeedbackScrub.text(self.title)
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              title.count <= FeedbackLimits.title
+        else { throw FeedbackFailure("Give the report a short title (1-200 characters)") }
+        let description = FeedbackScrub.text(self.description)
+        guard description.count <= FeedbackLimits.description else {
+            throw FeedbackFailure("The description is too long (10,000 characters max)")
+        }
+        guard Set(snapshot.keys).isSubset(of: FeedbackLimits.snapshotFields) else {
+            throw FeedbackFailure("Feedback context holds a field the desktop does not accept")
+        }
+        var nodes = 0
+        try Self.checkSnapshot(snapshot, depth: 0, nodes: &nodes)
+        if let screenshot { try Self.validateScreenshot(screenshot) }
+        var warnings = captureWarnings.prefix(FeedbackLimits.warnings).map(FeedbackScrub.text)
+        warnings = warnings.map { String($0.prefix(FeedbackLimits.warning)) }
+        let cleanedSnapshot = FeedbackScrub.json(snapshot) as? [String: Any] ?? [:]
+        let payload: [String: Any] = [
+            "id": id.uuidString.lowercased(),
+            "kind": kind.rawValue,
+            "title": String(title.prefix(FeedbackLimits.title)),
+            "description": description,
+            "snapshot": cleanedSnapshot,
+            "screenshot": screenshot.map { $0 as Any } ?? NSNull(),
+            "capture_warnings": warnings,
+        ]
+        let snapshotData = try JSONSerialization.data(withJSONObject: cleanedSnapshot)
+        guard snapshotData.count <= FeedbackLimits.snapshotBytes else {
+            throw FeedbackFailure("Feedback context is too large to file")
+        }
+        guard JSONSerialization.isValidJSONObject(payload) else {
+            throw FeedbackFailure("Feedback report must contain JSON values only")
+        }
+        return payload
+    }
+}
+
+public struct FeedbackFiling: Sendable, Equatable {
+    public let id: String
+    public let status: String
+    public let issueURL: String?
+    public let detail: String?
+}
+
+extension SyncClient {
+    /// POST one validated report payload to the paired desktop. The desktop
+    /// files it via its own credentials; the phone never holds any.
+    public func submitFeedback(_ payload: Data) async throws -> FeedbackFiling {
+        final class NoRedirect: NSObject, URLSessionTaskDelegate, Sendable {
+            func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                            newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) { completionHandler(nil) }
+        }
+        let session = URLSession(configuration: .ephemeral, delegate: NoRedirect(), delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        let (data, response) = try await session.data(for: connection.request(path: "/feedback", method: "POST", body: payload))
+        guard let http = response as? HTTPURLResponse else { throw SyncError("Invalid desktop response") }
+        if http.statusCode == 401 { throw SyncError("Not paired, or this phone was unpaired on the desktop. Pair again.", status: 401) }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SyncError("Desktop returned HTTP \(http.statusCode)", status: http.statusCode)
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = object["id"] as? String, let status = object["status"] as? String
+        else { throw SyncError("Invalid feedback response from the desktop") }
+        return FeedbackFiling(
+            id: id, status: status,
+            issueURL: object["issue_url"] as? String, detail: object["error"] as? String)
+    }
+}
+
+public enum FeedbackOutcome: Equatable, Sendable {
+    /// GitHub issue created; the link is returned to show the reporter.
+    case filed(issueURL: String?)
+    /// Stored durably on the desktop, but GitHub filing needs a desktop-side retry.
+    case savedOnDesktop(status: String, detail: String?)
+    /// No usable desktop right now; kept on this iPhone for the retry paths
+    /// named in the reason. Only ever reached after an explicit File.
+    case queuedLocally(reason: String)
+    /// Refused before saving; retrying the identical report cannot succeed.
+    case rejected(reason: String)
+    /// The desktop never saw it AND the iPhone could not keep it (storage
+    /// failure or a full outbox). Nothing is filed or queued.
+    case saveFailed(reason: String)
+}
+
+/// Disk-backed outbox for explicitly filed reports that could not reach the
+/// desktop. Each entry is an envelope binding the payload to the desktop
+/// origin it was filed against, so a re-pair to a different desktop never
+/// receives it. Full means full: saving refuses rather than evicting a
+/// reviewed report silently.
+public final class FeedbackQueue: Sendable {
+    public static let capacity = 10
+    public let directory: URL
+
+    public init(directory: URL) { self.directory = directory }
+
+    /// Unbound entries never drain. A later pairing is not consent to disclose
+    /// private context captured before the destination was known.
+    static func drains(_ entryOrigin: String?, to connectionOrigin: String) -> Bool {
+        entryOrigin != nil && entryOrigin == connectionOrigin
+    }
+
+    public func save(_ payload: [String: Any], id: String, origin: String?) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard try pendingFiles().count < Self.capacity else {
+            throw FeedbackFailure(
+                "\(Self.capacity) reports are already waiting for the desktop. Nothing was saved; review and send or discard saved reports before queueing more.")
+        }
+        let envelope: [String: Any] = ["origin": origin.map { $0 as Any } ?? NSNull(), "payload": payload]
+        let data = try JSONSerialization.data(withJSONObject: envelope)
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let stamp = iso.string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let target = directory.appendingPathComponent("\(stamp)-\(id).json")
+        let staging = directory.appendingPathComponent(".\(UUID().uuidString).part")
+        try data.write(to: staging)
+        // POSIX rename atomically replaces the target on the same filesystem.
+        guard rename(staging.path, target.path) == 0 else {
+            try? FileManager.default.removeItem(at: staging)
+            throw FeedbackFailure("Could not save the report on this iPhone")
+        }
+    }
+
+    private func pendingFiles() throws -> [URL] {
+        try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    public func pending() -> [(id: String, origin: String?, payload: Data)] {
+        (try? pendingFiles())?.compactMap { file in
+            // Filename is <ISO stamp>-<uuid>; the uuid is the last 36 characters.
+            let base = file.deletingPathExtension().lastPathComponent
+            guard base.count > 36, let raw = try? Data(contentsOf: file),
+                  let envelope = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
+                  let payload = envelope["payload"] as? [String: Any],
+                  let data = try? JSONSerialization.data(withJSONObject: payload)
+            else { return nil }
+            return (String(base.suffix(36)), envelope["origin"] as? String, data)
+        } ?? []
+    }
+
+    public func remove(id: String) {
+        for file in (try? pendingFiles()) ?? [] where file.deletingPathExtension().lastPathComponent.hasSuffix(id) {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+}
+
+@MainActor
+public final class FeedbackSubmitter {
+    private let queue: FeedbackQueue
+    public init(queue: FeedbackQueue) { self.queue = queue }
+
+    /// Validate, then file through the desktop or keep locally. Throws only
+    /// for payload violations the reporter can fix in the review sheet.
+    public func submit(_ draft: FeedbackDraft, via connection: DesktopConnection?) async -> FeedbackOutcome {
+        let payload: [String: Any]
+        do { payload = try draft.validatedPayload() } catch let failure as FeedbackFailure {
+            return .rejected(reason: failure.message)
+        } catch { return .rejected(reason: "The report could not be prepared") }
+        let id = draft.id.uuidString.lowercased()
+        let origin = connection?.baseURL.absoluteString
+        func keepLocally(_ reason: String) -> FeedbackOutcome {
+            do { try queue.save(payload, id: id, origin: origin) }
+            catch let failure as FeedbackFailure { return .saveFailed(reason: failure.message) }
+            catch { return .saveFailed(reason: "Could not save the report on this iPhone; it was not filed either.") }
+            return .queuedLocally(reason: reason)
+        }
+        guard let connection else {
+            return keepLocally("No desktop is paired. Saved on this iPhone; this report will not send after pairing unless you use REVIEW SAVED REPORTS and approve its destination.")
+        }
+        let body: Data
+        do { body = try JSONSerialization.data(withJSONObject: payload) }
+        catch { return .rejected(reason: "The report could not be prepared") }
+        do {
+            let filing = try await SyncClient(connection).submitFeedback(body)
+            if filing.status == "filed" {
+                return .filed(issueURL: filing.issueURL)
+            }
+            return .savedOnDesktop(status: filing.status, detail: filing.detail)
+        } catch let error as SyncError where error.status != nil && (400..<500).contains(error.status!) && error.status != 401 {
+            // A validation refusal will never succeed; do not queue it.
+            return .rejected(reason: error.message)
+        } catch {
+            return keepLocally("The desktop is unreachable. Saved on this iPhone; open REVIEW SAVED REPORTS to inspect it and approve sending when the desktop is reachable.")
+        }
+    }
+
+}

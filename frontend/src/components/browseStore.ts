@@ -15,6 +15,7 @@
  */
 
 import { EMPTY_SELECTION, type Selection } from '../selection/selectionModel';
+import { recordTrail } from '../feedback/diagnostics';
 import type { BrowseArea } from './browseNav';
 import type { ViewType } from './PlaylistSidebar';
 
@@ -47,7 +48,15 @@ export function browseSession(): Readonly<BrowseSession> {
 }
 
 export function updateBrowseSession(patch: Partial<BrowseSession>): void {
+  const navigated =
+    (patch.view !== undefined && patch.view !== session.view) ||
+    (patch.playlistId !== undefined && patch.playlistId !== session.playlistId);
   session = { ...session, ...patch };
+  // Recent-navigation trail (feedback #518): playlist ids, never titles.
+  if (navigated) {
+    recordTrail('browse', session.view === 'playlist' && session.playlistId !== null
+      ? `${session.view} playlist ${session.playlistId}` : session.view);
+  }
 }
 
 /**

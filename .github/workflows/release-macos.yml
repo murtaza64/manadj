@@ -1,0 +1,70 @@
+# macOS arm64 DMG build (companion to release-windows.yml, #298/#317).
+#
+# The documented release flow (scripts/release/release.py) builds the macOS
+# DMG locally on a Mac. This workflow exists so a testable DMG can also be
+# built on CI - e.g. for a prerelease candidate cut from a branch - without
+# changing that flow. It is dispatch-only on purpose: it never fires on a
+# release/** push, so release.py's locally built DMG stays the one true
+# artifact for real releases and nothing here publishes or attaches a
+# release on its own (the attach step only fills an already-existing draft,
+# same convention as release-windows.yml).
+#
+# Output is ad-hoc signed, matching docs/install.md (right-click -> Open;
+# manaDJ is not notarized).
+
+name: release-macos
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "version to stamp (X.Y.Z or X.Y.Z-rc.N); default from pyproject"
+        required: false
+
+permissions:
+  contents: write # attach to an existing draft release only
+
+concurrency:
+  group: release-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: version
+        id: v
+        run: |
+          v="${{ inputs.version }}"
+          if [ -z "$v" ]; then v=$(sed -nE 's/^version *= *"([^"]+)".*/\1/p' pyproject.toml | head -1); fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "## manaDJ $v (macOS arm64) — CI-built candidate DMG, ad-hoc signed" >> "$GITHUB_STEP_SUMMARY"
+      - name: build DMG
+        run: uv run scripts/release/build_dmg.py --version "${{ steps.v.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manaDJ-${{ steps.v.outputs.version }}-macos-arm64
+          path: build/release/out/*.dmg
+          compression-level: 0
+          retention-days: 14
+      - name: attach to release
+        run: |
+          tag="v${{ steps.v.outputs.version }}"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" build/release/out/*.dmg --clobber
+            echo "attached to $tag" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "no release $tag yet — DMG is in the workflow artifact" >> "$GITHUB_STEP_SUMMARY"
+          fi

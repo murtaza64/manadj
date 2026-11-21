@@ -41,6 +41,7 @@ export interface SelectMods {
 export type LoadedMark = string;
 
 interface Props {
+  selectionCheckbox?: { checked: boolean; disabled?: boolean; onChange: () => void };
   rowId?: string;
   rowTabIndex?: number;
   onRowKeyDown?: KeyboardEventHandler<HTMLTableRowElement>;
@@ -129,7 +130,7 @@ function markSlot(mark: TransitionMark, linked: boolean): ReactNode {
 /** Memoized: the table is large, and rows must not re-render on deck/selection
  * churn unless their own props changed. */
 const TrackRow = memo(function TrackRow({
-  rowId, rowTabIndex, onRowKeyDown,
+  rowId, rowTabIndex, onRowKeyDown, selectionCheckbox,
   track,
   previewCues,
   isSelected,
@@ -389,6 +390,7 @@ const TrackRow = memo(function TrackRow({
           }}
           title={config.id === 'marks' ? rowEvidenceTitle(deckEvidence) : undefined}
         >
+          {config.id === 'title' && selectionCheckbox && <input type="checkbox" className="track-selection-checkbox" aria-label={`Select ${track.title ?? track.filename}`} checked={selectionCheckbox.checked} disabled={selectionCheckbox.disabled} onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onChange={selectionCheckbox.onChange} />}
           {cells[config.id]}
         </td>
       ))}

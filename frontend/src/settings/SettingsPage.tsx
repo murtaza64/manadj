@@ -34,7 +34,10 @@ const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibrationSettings'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
+const WallpaperThemeSettings = lazy(() => import('./WallpaperThemeSettings'));
+const HeardSettings = lazy(() => import('./HeardSettings'));
 const PhoneSyncSettings = lazy(() => import('./PhoneSyncSettings'));
+const RemoteLibrarySettings = lazy(() => import('./RemoteLibrarySettings'));
 const ExchangeSettings = lazy(() => import('./ExchangeSettings'));
 const SetupSettings = lazy(() => import('../setup/SetupSettings'));
 const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
@@ -441,6 +444,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     sections: [
       { id: 'library', title: 'Library', render: () => <LibrarySettings /> },
       { id: 'phone-sync', title: 'Phone sync', render: () => <PhoneSyncSettings /> },
+      { id: 'remote-library', title: 'Remote library', render: () => <RemoteLibrarySettings /> },
       { id: 'session-exchange', title: 'Session exchange', render: () => <ExchangeSettings /> },
     ],
   },
@@ -451,6 +455,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     sections: [
       { id: 'filters', title: 'Filters', render: () => <FilterSettingsPanel /> },
       { id: 'effects', title: 'Beat FX', render: () => <BeatFxSettingsPanel /> },
+      { id: 'heard', title: 'Heard', render: () => <HeardSettings /> },
       // slot: Cue mode (#289)
     ],
   },
@@ -458,7 +463,10 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     id: 'display',
     title: 'Display',
     detail: 'Waveforms and visuals',
-    sections: [{ id: 'waveforms', title: 'Waveforms', render: () => <WaveformSettings /> }],
+    sections: [
+      { id: 'waveforms', title: 'Waveforms', render: () => <WaveformSettings /> },
+      { id: 'wallpaper-theme', title: 'Wallpaper theme', render: () => <WallpaperThemeSettings /> },
+    ],
   },
   {
     id: 'controllers',

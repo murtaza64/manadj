@@ -33,6 +33,15 @@ class PlaylistInfo:
     hierarchy_parts: list[str] | None  # Original hierarchy for potential recreation
     last_modified: datetime | None     # When available
     color: str | None = None           # manadj only
+    # Entries the reader could not turn into a file path (missing track row or
+    # path). They are NOT in `tracks`; a non-zero count means the list is partial.
+    skipped_tracks: int = 0
+    # True when the source itself says this is a folder container; None when the
+    # source gives no reliable type (never guessed from names).
+    is_folder: bool | None = None
+    # Typed identity: folder names then the playlist's own name, taken from the
+    # source's parent chain. `name` is a display string only; never split it.
+    path_parts: list[str] | None = None
 
 
 @dataclass

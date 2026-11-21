@@ -11,7 +11,7 @@
  * midi-controller 09) and pushing changes through the setters. The shared
  * rotary Knob lives here too (used by the deck MIX zones).
  */
-import { useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { knobAppearance, type KnobControl } from './knobAppearance';
 import { useStyleSlot } from '../../waveform/styleSlots';
 import { useMixer, useMixerValue } from '../../hooks/useMixer';
@@ -28,6 +28,12 @@ import {
   type BeatFxTarget,
 } from '../../playback/beatFx';
 import { isQuantizeOn, setQuantize, subscribeQuantize } from '../../playback/quantizeStore';
+import {
+  heardRoute,
+  setHeard,
+  subscribeHeard,
+} from '../../playback/heardStore';
+import { HeardCalibrator } from './HeardCalibrator';
 import type { ChannelId } from '../../playback/mixer';
 import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
 import { AutoBlurSelect } from '../AutoBlurSelect';
@@ -492,6 +498,61 @@ function BeatFxRow({ deckCount }: { deckCount: DeckCount }) {
   );
 }
 
+/**
+ * Heard (#382 desktop port, #510 UX): mixer-first toggle + a compact
+ * readout chip for the current route's latency. Calibration lives in an
+ * anchored, non-modal popover off the chip (HeardCalibrator) so the
+ * performer nudges while mixing — never a Settings detour or a dialog.
+ * Android parity: SettingsPanel's "Heard (lag compensation)" + the
+ * HeardLatency sheet.
+ */
+function HeardCluster() {
+  const route = useSyncExternalStore(subscribeHeard, heardRoute);
+  const [calibrating, setCalibrating] = useState(false);
+  const cluster = useRef<HTMLSpanElement>(null);
+  const ms = Math.round(route.seconds * 1000);
+  // Switching Heard off ends any open calibration (adjust-during-render:
+  // an effect setState is banned by react-hooks/set-state-in-effect).
+  const [wasOn, setWasOn] = useState(route.on);
+  if (wasOn !== route.on) {
+    setWasOn(route.on);
+    if (!route.on) setCalibrating(false);
+  }
+  return (
+    <span className="perf-heard-latency" ref={cluster}>
+      <button
+        className={`player-button perf-strip-toggle${route.on ? ' on' : ''}`}
+        aria-label="Heard"
+        aria-pressed={route.on}
+        title={
+          route.on
+            ? `Heard on: launches, hot cues and loops line up with what you hear (${route.label}, ${ms} ms)`
+            : 'Heard: line gestures up with what you hear, not the render position (for Bluetooth)'
+        }
+        onClick={() => setHeard(!route.on)}
+      >
+        HEARD
+      </button>
+      {route.on && (
+        <button
+          className="player-button perf-heard-ms perf-heard-chip"
+          aria-haspopup="dialog"
+          aria-expanded={calibrating}
+          title={`${route.label}: ${ms} ms ${
+            route.overridden ? '(yours — click to calibrate)' : '(reported — click to calibrate)'
+          }`}
+          onClick={() => setCalibrating((open) => !open)}
+        >
+          {ms}ms
+        </button>
+      )}
+      {route.on && calibrating && (
+        <HeardCalibrator anchorRef={cluster} onClose={() => setCalibrating(false)} />
+      )}
+    </span>
+  );
+}
+
 export function MixerStrip({
   hintsOn = true,
   onToggleHints,
@@ -570,6 +631,7 @@ export function MixerStrip({
         >
           QUANT
         </button>
+        <HeardCluster />
         <button
           className={`player-button perf-strip-toggle${softTakeoverOn ? ' on' : ''}`}
           aria-pressed={softTakeoverOn}

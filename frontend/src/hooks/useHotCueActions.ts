@@ -124,7 +124,9 @@ export function useHotCueActions(trackId: number | null): HotCueActions {
   const actions = useHotCueSlots(trackId, {
     enabled: ready,
     canAct: () => deckReadyNow(engine, trackId),
-    getPlayhead: () => engine.getPlayhead(),
+    // gesturePlayhead: a SET while playing marks the HEARD position when
+    // Heard mode is on (#382); the render playhead otherwise.
+    getPlayhead: () => engine.gesturePlayhead(),
     trigger: (slot, t) => engine.hotCueDown(slot, t),
     release: (slot, t) => engine.hotCueUp(slot, t),
     onPlaced: () => {

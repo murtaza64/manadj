@@ -76,7 +76,7 @@ public struct LibraryStore: Sendable {
     public init(root: URL) throws {
         guard root.isFileURL else { throw SyncError("Cache root must be a file URL") }
         self.root = root.standardizedFileURL
-        for dir in ["audio", "previews"] { try FileManager.default.createDirectory(at: root.appendingPathComponent(dir), withIntermediateDirectories: true) }
+        for dir in ["audio", "previews", "waveforms"] { try FileManager.default.createDirectory(at: root.appendingPathComponent(dir), withIntermediateDirectories: true) }
     }
     private func safe(_ value: String) -> String {
         // Hex-encoding UTF-8 is collision-free, unlike slash replacement.
@@ -90,6 +90,18 @@ public struct LibraryStore: Sendable {
     }
     public func previewFile(_ track: LibraryTrack) -> URL? {
         track.previewRev.map { root.appendingPathComponent("previews/\(track.id)-\(safe($0)).mwf") }
+    }
+    public func detailFile(_ track: LibraryTrack) -> URL? {
+        track.waveformRev.map { root.appendingPathComponent("waveforms/\(track.id)-\(safe($0)).mwf") }
+    }
+    public func detail(_ track: LibraryTrack) -> PreviewWaveform? {
+        guard let url = detailFile(track), let data = try? Data(contentsOf: url) else { return nil }
+        return try? PreviewWaveform.parse(data)
+    }
+    public func saveDetail(_ data: Data, track: LibraryTrack) throws {
+        guard let url = detailFile(track) else { throw SyncError("No full waveform revision advertised") }
+        _ = try PreviewWaveform.parse(data)
+        try data.write(to: url, options: .atomic)
     }
     public func hasAudio(_ track: LibraryTrack) -> Bool {
         guard let url = audioFile(track),

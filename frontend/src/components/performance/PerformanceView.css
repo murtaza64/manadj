@@ -391,6 +391,30 @@
   }
 }
 
+/* The heard latency chip widens the left cluster; before the strip would
+ * overlap the centered crossfader group, wrap early while the chip shows. */
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .perf-strip:has(.perf-heard-latency) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-8) var(--space-12);
+  }
+  .perf-strip:has(.perf-heard-latency) .perf-strip-left,
+  .perf-strip:has(.perf-heard-latency) .perf-xf-tools,
+  .perf-strip:has(.perf-heard-latency) .perf-xf-fader,
+  .perf-strip:has(.perf-heard-latency) .perf-xf-right,
+  .perf-strip:has(.perf-heard-latency) .perf-strip-right {
+    position: static;
+    transform: none;
+  }
+  .perf-strip:has(.perf-heard-latency) .perf-strip-left { flex-wrap: wrap; }
+  .perf-strip:has(.perf-heard-latency) .perf-strip-right {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: var(--space-8);
+  }
+}
+
 .perf-strip-toggle {
   padding: 1px var(--space-6);
   font-size: var(--font-micro);
@@ -410,6 +434,100 @@
 }
 
 .perf-strip-ghost { visibility: hidden; }
+
+/* Heard (#382, #510): the HEARD cluster anchors the calibration popover.
+   The chip shows the active route's output latency and opens the popover. */
+.perf-heard-latency {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.perf-heard-ms {
+  min-width: 44px;
+  text-align: center;
+  font-size: var(--font-micro);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--overlay0);
+  user-select: none;
+}
+
+.perf-heard-chip {
+  padding: 1px var(--space-6);
+  border-color: var(--surface1);
+}
+
+/* Non-modal calibration popover: floats above the strip without a backdrop,
+   so deck keys and playback keep working while the route is nudged.
+   Stacking: .perf-strip-left's translateY(-50%) centering makes it a
+   stacking context, trapping the popover's z-index inside it — and the
+   waveform focus frame (z 5) paints over z-auto contexts. Lift the whole
+   cluster above the frame only while the popover is open. */
+.perf-strip:has(.perf-heardpop) .perf-strip-left {
+  z-index: 6;
+}
+.perf-heardpop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-12);
+  background: var(--mantle);
+  border: 1px solid var(--overlay1);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+}
+
+.perf-heardpop-route {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--font-micro);
+  color: var(--subtext0);
+}
+
+.perf-heardpop-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.perf-heardpop-ms {
+  min-width: 52px;
+  text-align: center;
+  font-size: var(--font-title);
+  font-weight: 800;
+  color: var(--text);
+  user-select: none;
+}
+
+.perf-heardpop-step {
+  padding: 1px var(--space-8);
+  font-size: var(--font-body);
+  font-weight: 800;
+  color: var(--overlay0);
+  border-color: var(--surface1);
+}
+
+.perf-heardpop-note {
+  font-size: var(--font-micro);
+  color: var(--overlay0);
+}
+
+.perf-heardpop-reset {
+  padding: 1px var(--space-6);
+  font-size: var(--font-micro);
+  border-color: var(--surface1);
+}
 
 /* Waveform/deck section toggles (perf-layout 12 / gh#68): WAVE / DECK next
    to KBD, same .perf-strip-toggle language (lit green while shown). The

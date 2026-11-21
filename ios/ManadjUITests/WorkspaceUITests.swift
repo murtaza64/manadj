@@ -19,6 +19,33 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
+    @MainActor func testMetalPrototypeWorkspacePixelsAndFallbackStatus() {
+        defer { captureFailure() }
+        for metal in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--performance-ui-fixture", "--wave-body-metrics"] + (metal ? ["--metal-waveform-prototype"] : [])
+            app.launch()
+            let a = app.buttons["A play pause"], b = app.buttons["B play pause"]
+            XCTAssertTrue(a.waitForExistence(timeout: 20)); waitForReadyTransport(a, app: app)
+            let bReady = NSPredicate(format: "enabled == true AND hittable == true")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: bReady, object: b)], timeout: 15), .completed)
+            a.tap(); b.tap()
+            let bPlaying = NSPredicate(format: "value BEGINSWITH %@", "playing")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: bPlaying, object: app.otherElements["deck-1-detail-wave"])], timeout: 5), .completed)
+            let wave = app.otherElements["deck-0-detail-wave"]
+            let measured = NSPredicate(format: "value CONTAINS %@", "waveBodySamples=120")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: measured, object: wave)], timeout: 20), .completed)
+            let value = wave.value as? String ?? ""
+            XCTAssertTrue(value.contains(metal ? "renderer=metal" : "renderer=coregraphics"), value)
+            print("SYNTHETIC_WORKSPACE_" + value + " simulatorNotPhone=true")
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = metal ? "Metal opt-in full workspace two playing decks" : "Core Graphics full workspace two playing decks"
+            shot.lifetime = .keepAlways; add(shot)
+            // Keep the final app alive for deferred failure diagnostics. The
+            // next launch replaces the first iteration's app on its own.
+        }
+    }
+
     @MainActor func testBrowserOpenResponsivenessSyntheticFixture() {
         let options = XCTMeasureOptions(); options.iterationCount = 3
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
@@ -34,21 +61,17 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
-    @MainActor func testTempoSyncButtonJoinsAndLeavesGroup() {
+    @MainActor func testSyncProgressShowsFileCountAndForegroundWarning() {
         defer { captureFailure() }
-        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
-        let play = app.buttons["A play pause"]
-        XCTAssertTrue(play.waitForExistence(timeout: 20)); waitForReadyTransport(play, app: app)
-        app.buttons["A PITCH panel"].tap()
-        let sync = app.buttons["A tempo sync"]
-        XCTAssertTrue(sync.waitForExistence(timeout: 5)); XCTAssertTrue(sync.isEnabled)
-        sync.tap()
-        let joined = NSPredicate(format: "value == %@", "synced")
-        expectation(for: joined, evaluatedWith: sync); waitForExpectations(timeout: 5)
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Synthetic Android-group tempo sync joined - not hardware proof"; shot.lifetime = .keepAlways; add(shot)
-        sync.tap()
-        let left = NSPredicate(format: "value == %@", "off")
-        expectation(for: left, evaluatedWith: sync); waitForExpectations(timeout: 5)
+        let app = XCUIApplication(); app.launchArguments = ["--sync-progress-ui-fixture"]; app.launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
+        app.buttons["Settings"].tap()
+        let count = app.staticTexts["sync-audio-progress"]
+        XCTAssertTrue(count.waitForExistence(timeout: 10))
+        XCTAssertEqual(count.label, "Audio: 3 of 10 files ready")
+        XCTAssertTrue(app.staticTexts["Completed files, not bytes. Already cached files count as ready."].exists)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Synthetic full-audio file progress - not device transfer proof"; shot.lifetime = .keepAlways; add(shot)
     }
 
     @MainActor func testStandardWorkspaceSettingsAndPitch() {
@@ -143,11 +166,17 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(entry.isHittable); entry.tap()
         let confirm = app.buttons["usb-confirm-import"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+        XCTAssertTrue(confirm.isHittable, "import stays visible even with 1075 preview rows")
+        XCTAssertEqual(confirm.label, "Import 0 selected")
+        XCTAssertFalse(confirm.isEnabled, "never preselect a full physical library")
+        app.buttons["Import USB generated pulse"].tap()
         XCTAssertEqual(confirm.label, "Import 1 selected")
         XCTAssertTrue(app.staticTexts["Preview only. Nothing copied."].exists)
-        XCTAssertTrue(app.staticTexts["Missing USB audio"].exists)
+        XCTAssertTrue(app.staticTexts["usb-selection-summary"].exists)
         let preview = XCTAttachment(screenshot: app.screenshot()); preview.name = "Synthetic USB read-only preview before explicit copy"; preview.lifetime = .keepAlways; add(preview)
         confirm.tap()
+        XCTAssertTrue(app.buttons["COPY TO THIS IPHONE"].waitForExistence(timeout: 5))
+        app.buttons["COPY TO THIS IPHONE"].tap()
         XCTAssertTrue(app.buttons["Load A"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Imported 1 track into this iPhone. USB unchanged."].exists)
         let copied = XCTAttachment(screenshot: app.screenshot()); copied.name = "Synthetic USB app-owned import after confirmation"; copied.lifetime = .keepAlways; add(copied)
@@ -339,6 +368,26 @@ final class WorkspaceUITests: XCTestCase {
         let loaded = NSPredicate(format: "value CONTAINS %@", "Cached Test Tone")
         expectation(for: loaded, evaluatedWith: app.buttons["deck-1-info"]); waitForExpectations(timeout: 8)
         XCTAssertFalse((app.buttons["deck-0-info"].value as? String ?? "").contains("Cached Test Tone"))
+    }
+
+    @MainActor func testCueAndStoredHotcueHoldSlideLatch() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        waitForReadyTransport(app.buttons["A play pause"], app: app)
+        let cue = app.buttons["deck-0-cue-hold"]
+        XCTAssertTrue(cue.waitForExistence(timeout: 20))
+        let wave = app.otherElements["deck-0-detail-wave"]
+        // At the stored main cue, hold and drag right to take over preview.
+        let point = cue.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        point.press(forDuration: 0.4, thenDragTo: point.withOffset(CGVector(dx: 85, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let playing = NSPredicate(format: "value BEGINSWITH %@", "playing")
+        expectation(for: playing, evaluatedWith: wave); waitForExpectations(timeout: 8)
+        app.buttons["A play pause"].tap()
+        let pad = app.buttons["deck-0-hotcue-0"]
+        let padPoint = pad.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        padPoint.press(forDuration: 0.4, thenDragTo: padPoint.withOffset(CGVector(dx: -85, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        expectation(for: playing, evaluatedWith: wave); waitForExpectations(timeout: 8)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Cue and hotcue slide-to-play latched synthetic"; shot.lifetime = .keepAlways; add(shot)
     }
 
     @MainActor func testLocalLiveSyntheticPairedHostMonitor() {

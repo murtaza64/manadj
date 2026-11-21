@@ -245,6 +245,53 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   border-color: var(--success);
 }
 
+.follow-temperature-controls .follow-reroll {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-4);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.follow-temperature-controls .follow-reroll:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--crust);
+}
+
+.follow-reroll-dice { display: block; flex: 0 0 36px; overflow: hidden; }
+.follow-temperature-controls .follow-reroll { width: 46px; min-width: 46px; justify-content: center; overflow: hidden; }
+
+/* Named motion exception (DESIGN.md D9): the dice tumble once per click. */
+.follow-reroll-dice[data-rolling="true"] .reroll-die {
+  transform-box: view-box;
+  transform-origin: 0 0;
+  animation: reroll-tumble 0.4s ease-out;
+}
+
+.follow-reroll-dice[data-rolling="true"] .reroll-landing:nth-child(2) .reroll-die {
+  animation-name: reroll-tumble-other;
+  animation-duration: 0.45s;
+}
+
+@keyframes reroll-tumble {
+  0%   { transform: rotate(-160deg) scale(.72); }
+  45%  { transform: rotate(-55deg) scale(.82); }
+  75%  { transform: rotate(12deg) scale(.94); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+
+@keyframes reroll-tumble-other {
+  0% { transform: rotate(160deg) scale(.72); }
+  45% { transform: rotate(55deg) scale(.82); }
+  75% { transform: rotate(-12deg) scale(.94); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .follow-reroll-dice[data-rolling="true"] .reroll-landing:nth-child(n) .reroll-die { animation: none; }
+}
+
 .follow-temperature-controls :disabled {
   opacity: 0.4;
   cursor: not-allowed;

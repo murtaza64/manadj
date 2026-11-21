@@ -1,10 +1,12 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './api/queryClient';
+import { recordTrail } from './feedback/diagnostics';
 import { DEV_SURFACES } from './devMode';
 import { OPEN_LIBRARY_TRACK_EVENT } from './library/openTrack';
 import { OPEN_LIBRARY_PLAYLIST_EVENT, peekLibraryPlaylistRequest } from './library/openPlaylist';
 import { OPEN_SYNC_WORKSPACE_EVENT } from './sync/openWorkspace';
+import { OPEN_USB_SYNC_EVENT } from './sync/openUsbSync';
 import { OPEN_ACQUISITION_EVENT } from './components/acquisition/openAcquisition';
 
 const SettingsPage = lazy(() => import('./settings/SettingsPage'));
@@ -118,7 +120,14 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(() =>
     new URLSearchParams(window.location.search).get('settings') === '1' || initialMode() === 'settings'
   );
+  // Trail compare stays closure-free (feedback #518): setView identity is
+  // stable, so the event-handler effects below keep their current deps.
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
   const setView = (mode: AppMode) => {
+    if (mode !== viewRef.current) recordTrail('view', mode);
     setSettingsOpen(false);
     setViewState(mode);
     persistMode(mode);
@@ -234,6 +243,11 @@ function App() {
     const open = () => setView('sync');
     window.addEventListener(OPEN_SYNC_WORKSPACE_EVENT, open);
     return () => window.removeEventListener(OPEN_SYNC_WORKSPACE_EVENT, open);
+  }, []);
+  useEffect(() => {
+    const open = () => setView('sync');
+    window.addEventListener(OPEN_USB_SYNC_EVENT, open);
+    return () => window.removeEventListener(OPEN_USB_SYNC_EVENT, open);
   }, []);
 
   // Dev-only surface (packaged-app #278): hand-typed path, dev builds only.

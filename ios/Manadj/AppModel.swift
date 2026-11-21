@@ -9,6 +9,7 @@ struct DeckViewState {
     var track: LibraryTrack?
     var duration: Double = 0
     var waveform: PreviewWaveform?
+    var waveformNotice: String?
     var engine = MDJDeck()
     var loading = false
 }
@@ -21,6 +22,8 @@ struct DeckViewState {
     @Published var libraryVersion = 0
     @Published var snapshot: Snapshot? { didSet { libraryVersion += 1 } }
     @Published var downloaded: Set<Int> = []
+    @Published var syncProgress: LibrarySyncProgress?
+    let syncWake = SyncWakeScope()
     @Published var busy = false
     @Published var status = "Offline library"
     @Published var error: String?
@@ -30,14 +33,6 @@ struct DeckViewState {
     @Published var recordings: [URL] = []
     @Published var loadTarget = 0
     @Published var crossfade = 0.0
-    @Published var syncStatuses = Array(repeating: TempoSyncStatus.off, count: 4)
-    @Published var groupTempo: Double?
-    private var sentSyncMasks: (Int, Int)?
-    private lazy var tempoSync = TempoSyncGroup(write: { [weak self] deck, pitch in
-        if self?.audio?.send(MDJPitch, deck: deck, value: pitch) != true { self?.error = "Tempo control was not accepted. Try again." }
-    }, align: { [weak self] deck, peer, ratio in
-        if self?.audio?.alignPhase(deck, reference: peer, ratio: ratio) != true { self?.error = "Phase alignment was not accepted. Try again." }
-    })
     @Published var quantize = false
     @Published var waveSeconds = 12.0
     @Published var splitOutput = false
@@ -66,7 +61,7 @@ struct DeckViewState {
         else if ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture") {
             root = Self.makePerformanceUIFixture() ?? FileManager.default.temporaryDirectory.appendingPathComponent("fixture-failed-" + UUID().uuidString)
         }
-        else if ProcessInfo.processInfo.arguments.contains("--usb-ui-fixture") {
+        else if ProcessInfo.processInfo.arguments.contains("--usb-ui-fixture") || ProcessInfo.processInfo.arguments.contains("--sync-progress-ui-fixture") {
             root = FileManager.default.temporaryDirectory.appendingPathComponent("usb-app-fixture-" + UUID().uuidString)
         }
         else if ProcessInfo.processInfo.arguments.contains("--library-ui-fixture") {
@@ -110,9 +105,17 @@ struct DeckViewState {
             repository = repo
             snapshot = await repo.cachedSnapshot()
             downloaded = await repo.downloadedIds()
-            if !ProcessInfo.processInfo.arguments.contains("--library-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--usb-ui-fixture"), let url = URL(string: origin), let token = PairingKeychain.token(for: origin) {
+            if !ProcessInfo.processInfo.arguments.contains("--library-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--usb-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--sync-progress-ui-fixture"), let url = URL(string: origin), let token = PairingKeychain.token(for: origin) {
                 connection = try DesktopConnection(url: url, deviceToken: token, deviceId: deviceId, deviceName: UIDevice.current.name)
             }
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--sync-progress-ui-fixture") {
+                busy = true
+                syncProgress = .init(phase: .audio, completed: 3, total: 10)
+                status = "Synthetic progress fixture · not a real transfer"
+                return
+            }
+            #endif
             if let warning = await repo.recoveryWarning { error = warning }
             status = snapshot.map { "\($0.tracks.count) tracks cached · offline ready" } ?? "Pair with your desktop to sync your library"
         } catch { self.error = "Offline cache: \(error.localizedDescription)" }
@@ -135,7 +138,6 @@ struct DeckViewState {
         // Wave views read the engine on their own display clock. Publish the
         // slower control snapshot only when visible values actually changed.
         if zip(decks, updated).contains(where: { !Self.sameControlState($0.engine, $1.engine) }) { decks = updated }
-        if !liveListening { updateTempoSync() }
         if recording && audio.recordingState != 1 {
             recording = false
             if audio.recordingState == 4 { error = "Recording stopped with error \(audio.recordingError). The partial file was not marked saved." }
@@ -228,7 +230,12 @@ struct DeckViewState {
                     try await Task.sleep(for: .milliseconds(200))
                 }
             } catch is CancellationError { }
-            catch { self.pauseLocalLive(error.localizedDescription) }
+            catch {
+                // URLSession cancellation can arrive as URLError, not CancellationError.
+                // A stopped/replaced listener must never overwrite STOP or pause its successor.
+                guard !Task.isCancelled else { return }
+                self.pauseLocalLive(error.localizedDescription)
+            }
         }
     }
     private func pauseLocalLive(_ reason: String) {
@@ -261,7 +268,9 @@ struct DeckViewState {
                 try Task.checkCancellation()
                 decks[index].track = track; decks[index].title = track.title
                 decks[index].artist = track.artist ?? ""; decks[index].duration = duration
-                decks[index].waveform = await repository.preview(track)
+                let preview = await repository.preview(track)
+                try Task.checkCancellation()
+                decks[index].waveform = preview
                 // Fetch a fresh anchor after download/decode, never extrapolate old state.
                 liveStatus = "Audio ready · waiting for fresh anchor"
                 return
@@ -340,24 +349,35 @@ struct DeckViewState {
         guard let repository, let connection else { error = "Pair this iPhone with the desktop first"; return }
         task?.cancel(); busy = true; status = allAudio ? "Syncing library and all audio…" : "Syncing library and waveforms…"
         task = Task {
-            defer { busy = false }
+            defer { busy = false; syncProgress = nil }
             do {
-                snapshot = try await repository.sync(connection, allAudio: allAudio)
+                snapshot = try await syncWake.duringTransfer {
+                    try await repository.sync(connection, allAudio: allAudio) { [weak self] progress in
+                        await self?.setSyncProgress(progress)
+                    }
+                }
                 downloaded = await repository.downloadedIds()
                 status = "\(snapshot?.tracks.count ?? 0) tracks synced · \(downloaded.count) downloaded"
-            } catch is CancellationError { status = "Sync cancelled. Existing cache kept." }
+            } catch is CancellationError {
+                snapshot = await repository.cachedSnapshot()
+                downloaded = await repository.downloadedIds()
+                status = "Sync cancelled. Complete cached files kept. Retry when ready."
+            }
             catch {
                 // A snapshot may have landed before a preview failed. Show that truth, with the error.
                 snapshot = await repository.cachedSnapshot()
                 downloaded = await repository.downloadedIds()
                 self.error = error.localizedDescription
-                status = "Sync incomplete. Last valid library kept."
+                status = "Sync incomplete. Complete cached files kept. Retry when ready."
             }
         }
     }
+    private func setSyncProgress(_ progress: LibrarySyncProgress) { syncProgress = progress }
     func preview(_ track: LibraryTrack) async -> PreviewWaveform? { await repository?.preview(track) }
     func cancelWork() { task?.cancel() }
     var pairedOrigin: String? { connection?.baseURL.absoluteString }
+    var syncConnection: DesktopConnection? { connection }
+    var feedbackQueueRoot: URL { root.appendingPathComponent("feedback-queue", isDirectory: true) }
     func forgetDesktop() {
         stopLocalLive()
         task?.cancel()
@@ -391,8 +411,14 @@ struct DeckViewState {
                 decks[deck].title = track.title
                 decks[deck].artist = track.artist ?? "Unknown artist"
                 decks[deck].track = track
-                decks[deck].duration = track.durationSecs ?? duration
-                decks[deck].waveform = await repository.preview(track)
+                decks[deck].duration = duration // Decoded audio is the authoritative timeline, not stale catalog metadata.
+                decks[deck].waveform = nil
+                decks[deck].waveformNotice = "Loading full waveform"
+                do {
+                    decks[deck].waveform = try await repository.detail(track, connection: connection)
+                    decks[deck].waveformNotice = decks[deck].waveform == nil ? "Full waveform not generated on desktop" : nil
+                } catch { decks[deck].waveformNotice = "Full waveform unavailable locally. Audio remains playable." }
+                // Never magnify the 256-bin browser preview into a performance lane.
                 downloaded = await repository.downloadedIds()
             } catch { loadFailed(error, deck: deck, previousLoad: previousLoad) }
         }
@@ -436,26 +462,8 @@ struct DeckViewState {
         do { try audio?.start(); audio?.send(decks[deck].engine.playing ? MDJPause : MDJPlay, deck: deck) }
         catch { self.error = error.localizedDescription }
     }
-    private func updateTempoSync() {
-        tempoSync.update(decks.map { TempoSyncDeck(ready: $0.engine.ready, playing: $0.engine.playing, bpm: $0.engine.bpm, pitch: Double($0.engine.pitch), source: $0.engine.load) })
-        publishTempoSync()
-    }
-    private func publishTempoSync() {
-        if syncStatuses != tempoSync.statuses { syncStatuses = tempoSync.statuses }
-        if groupTempo != tempoSync.tempo { groupTempo = tempoSync.tempo }
-        let members = syncStatuses.indices.reduce(0) { $0 | (syncStatuses[$1] != .off ? 1 << $1 : 0) }
-        let synced = syncStatuses.indices.reduce(0) { $0 | (syncStatuses[$1] == .synced ? 1 << $1 : 0) }
-        if sentSyncMasks?.0 != members || sentSyncMasks?.1 != synced, audio?.syncMembers(members, synced: synced) == true { sentSyncMasks = (members, synced) }
-    }
-    func toggleTempoSync(_ deck: Int) {
-        guard !liveListening else { error = "Stop local live before changing sync"; return }
-        updateTempoSync()
-        if !tempoSync.toggle(deck, quantize: quantize) { error = "SYNC needs a loaded track with BPM and a reachable tempo within ±8%, including half/double time." }
-        publishTempoSync()
-    }
     func set(_ op: MDJOp, _ deck: Int, _ value: Double, slot: Int = 0) {
         do {
-            if op == MDJPitch && !liveListening { updateTempoSync(); tempoSync.setPitch(deck, percent: value); publishTempoSync(); return }
             if op == MDJCueDown || op == MDJHotCueDown { try audio?.start() }
             audio?.send(op, deck: deck, value: value, slot: slot)
         } catch { self.error = error.localizedDescription }
@@ -473,5 +481,30 @@ struct DeckViewState {
     }
     func refreshRecordings() {
         recordings = ((try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("recordings"), includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "wav" }.sorted { $0.lastPathComponent > $1.lastPathComponent }
+    }
+}
+
+/// Only active foreground library transfers suppress automatic display sleep.
+/// Manual lock/backgrounding is not background-transfer support.
+@MainActor final class SyncWakeScope {
+    private var users = 0
+    private var saved: Bool?
+    private var active = true
+    private let read: () -> Bool
+    private let write: (Bool) -> Void
+    init(read: @escaping () -> Bool = { UIApplication.shared.isIdleTimerDisabled },
+         write: @escaping (Bool) -> Void = { UIApplication.shared.isIdleTimerDisabled = $0 }) {
+        self.read = read; self.write = write
+    }
+    func setActive(_ value: Bool) { active = value; update() }
+    private func update() {
+        if active && users > 0 {
+            if saved == nil { saved = read(); write(true) }
+        } else if let previous = saved { saved = nil; write(previous) }
+    }
+    func duringTransfer<T>(_ body: @MainActor () async throws -> T) async rethrows -> T {
+        users += 1; update()
+        defer { users -= 1; update() }
+        return try await body()
     }
 }

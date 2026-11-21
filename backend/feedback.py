@@ -42,6 +42,10 @@ SNAPSHOT_FIELDS = {
     "audible_surface",
     "errors",
     "crash",
+    # feedback #518: bounded element-point descriptor and recent
+    # navigation/playback trail, both redacted client-side.
+    "pointer",
+    "trail",
 }
 SCREENSHOT_LIMIT = 4 * 1024 * 1024
 SNAPSHOT_LIMIT = 256 * 1024
@@ -303,6 +307,44 @@ class Workspace:
         return f"Main triage: {session}" if session else "Main triage: not configured"
 
 
+IGNORE_BODY = b"*\n"
+
+
+def _ensure_ignore_file(target: Path, attempts: int = 50, delay: float = 0.05) -> None:
+    """Atomically publish the evidence .gitignore; safe when several processes initialise at once.
+
+    Windows refuses os.replace onto a file another process is replacing or has open
+    (PermissionError, WinError 5). The final content is fixed, so another process having
+    already published it is success; otherwise retry for a bounded time and then raise.
+    """
+    def published() -> bool:
+        try:
+            return target.read_bytes() == IGNORE_BODY
+        except OSError:
+            return False
+
+    if published():
+        return
+    with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as ignore:
+        ignore.write(IGNORE_BODY)
+    try:
+        for attempt in range(attempts):
+            try:
+                os.replace(ignore.name, target)
+                return
+            except PermissionError:
+                if published():
+                    return
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(delay)
+    finally:
+        try:
+            os.unlink(ignore.name)
+        except OSError:
+            pass  # already moved into place
+
+
 class FeedbackService:
     def __init__(
         self, workspace: Workspace, storage: Path | None = None, *, github=None, daemon=None
@@ -321,9 +363,7 @@ class FeedbackService:
         self.storage.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.storage.chmod(0o700)
         # The shared sidecar is itself a jj repo. Evidence must never be snapshotted.
-        with tempfile.NamedTemporaryFile(dir=self.storage, delete=False) as ignore:
-            ignore.write(b"*\n")
-        os.replace(ignore.name, self.storage / ".gitignore")
+        _ensure_ignore_file(self.storage / ".gitignore")
         self.db_path = self.storage / "feedback.sqlite3"
         fd = os.open(self.db_path, os.O_CREAT | os.O_RDWR, 0o600)
         os.close(fd)

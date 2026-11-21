@@ -11,6 +11,17 @@ import { useRankedFollow } from './useRankedFollow';
 vi.mock('../api/client', () => ({ api: { tracks: { get: vi.fn(), list: vi.fn() } } }));
 vi.mock('../settings/persistedSettings', () => ({ writeSetting: vi.fn() }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+// Presentation-store publication and React Query notifications cross task turns.
+// Wait for the asserted state, not a fixed timer that can run before observers.
+const waitForReact = async (check: () => void) => {
+  const deadline = Date.now() + 1000;
+  for (;;) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+    try { check(); return; }
+    catch (error) { if (Date.now() >= deadline) throw error; }
+  }
+};
+
 afterEach(() => {
   for (const deck of ['A', 'B', 'C', 'D'] as const) {
     if (getFollowFlags()[deck]) dispatchFollow({ type: 'toggle', deck, loaded: true });
@@ -29,7 +40,10 @@ it('joins query results by reference identity when Follow drops, switches and sp
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(['track', 1], a);
   client.setQueryData(['track', 2], b);
-  vi.mocked(api.tracks.list).mockResolvedValue({ items: source } as never);
+  vi.mocked(api.tracks.list).mockImplementation(async () => {
+    await new Promise(resolve => setTimeout(resolve, 60));
+    return { items: source } as never;
+  });
   const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {});
   dispatchFollow({ type: 'toggle', deck: 'B', loaded: true });
   function View() {
@@ -43,21 +57,16 @@ it('joins query results by reference identity when Follow drops, switches and sp
   }
   const container = document.createElement('div');
   const root = createRoot(container);
-  const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
   try {
     await act(async () => root.render(<QueryClientProvider client={client}><View /></QueryClientProvider>));
-    await settle();
-    expect(container.textContent).toBe('2');
+    await waitForReact(() => expect(container.textContent).toBe('2'));
     for (let i = 0; i < 3; i++) {
       act(() => dispatchFollow({ type: 'play', deck: 'A', playing: { A: true, B: false, C: false, D: false } }));
-      await settle();
-      expect(container.textContent).toBe('1,3');
+      await waitForReact(() => expect(container.textContent).toBe('1,3'));
       act(() => dispatchFollow({ type: 'play', deck: 'B', playing: { A: true, B: true, C: false, D: false } }));
-      await settle();
-      expect(container.textContent).toBe('1,2,3');
+      await waitForReact(() => expect(container.textContent).toBe('1,2,3'));
       act(() => dispatchFollow({ type: 'pause', deck: 'A', playing: { A: false, B: true, C: false, D: false } }));
-      await settle();
-      expect(container.textContent).toBe('2');
+      await waitForReact(() => expect(container.textContent).toBe('2'));
     }
     expect(warnings.mock.calls.flat().join(' ')).not.toContain('Duplicate Queries');
   } finally {
@@ -88,11 +97,9 @@ it('reuses projections across UI renders and observes fresh same-ID reference fa
   const container = document.createElement('div');
   const root = createRoot(container);
   const render = () => act(async () => { root.render(<QueryClientProvider client={client}><View /></QueryClientProvider>); });
-  const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
   try {
     await render();
-    await settle();
-    expect(container.textContent).toBe('2');
+    await waitForReact(() => expect(container.textContent).toBe('2'));
     expect(api.tracks.list).toHaveBeenCalledTimes(1); // Same Track on A/B is one query.
     const before = value!;
     const projection = value!.project(source, true);
@@ -100,15 +107,13 @@ it('reuses projections across UI renders and observes fresh same-ID reference fa
     expect(value).toBe(before);
     expect(value!.project(source, true)).toBe(projection);
     act(() => client.setQueryData(['track', 1], { ...reference, key: 9 }));
-    await settle();
-    expect(container.textContent).toBe('');
+    await waitForReact(() => expect(container.textContent).toBe(''));
     expect(value).not.toBe(before);
     expect(api.tracks.list).toHaveBeenCalledTimes(1); // Key changed, not the BPM gate.
     act(() => client.setQueryData(['track', 1], { ...reference, bpm: 130 }));
-    await settle();
-    expect(api.tracks.list).toHaveBeenLastCalledWith(1, 10000, {
+    await waitForReact(() => expect(api.tracks.list).toHaveBeenLastCalledWith(1, 10000, {
       bpmCenter: 130, bpmThresholdPercent: 5, archived: undefined,
-    });
+    }));
   } finally {
     act(() => root.unmount());
     client.clear();

@@ -3,6 +3,7 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, expect, it, vi } from 'vitest';
+import { takeUsbSyncFocus } from '../sync/openUsbSync';
 import { api, PlaylistExportRequestError } from '../api/client';
 import { ExportFieldChanges, PlaylistExportEntry, PlaylistExportInspector } from './PlaylistExportInspector';
 import { exportPlanFixture as plan, exportReportFixture as report } from '../test/playlistExportFixtures';
@@ -149,4 +150,11 @@ it('presents scalar deltas as colored key values and collapses same-value rewrit
   expect(host.querySelector('[aria-label="Energy change"]')?.textContent).toContain('CLEAR');
   expect(host.querySelector<HTMLDetailsElement>('.pei-unchanged')?.open).toBe(false);
   expect(host.querySelector('.pei-unchanged summary')?.textContent).toContain('still rewritten');
+});
+
+it('routes an explicit USB pull entry even with external export disabled', async () => {
+  await render('Night Shift', false);
+  expect(document.body.textContent).toContain('External export off');
+  await act(async () => { button('Sync from USB…').click(); await tick(); });
+  expect(takeUsbSyncFocus()).toEqual({ playlistName: 'Night Shift' });
 });

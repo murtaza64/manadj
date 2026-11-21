@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import stat as stat_module
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -25,12 +26,28 @@ class SyncError(Exception):
         self.status, self.code = status, code
 
 
+def _open_regular(filename):
+    """Open for identity checks, using nonblocking mode where supported.
+
+    O_NONBLOCK prevents a POSIX FIFO replacement from blocking at open. Callers
+    must fstat and refuse nonregular handles before reading on every platform.
+    This does not promise bounded I/O for remote or unavailable filesystems.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(os.fspath(Path(filename)), flags)
+    try:
+        return os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def file_version(filename):
     """Only a selected/bound DB path, never a path from imported JSON."""
     try:
-        with Path(filename).open("rb") as stream:
+        with _open_regular(filename) as stream:
             before = os.fstat(stream.fileno())
-            if not 0 < before.st_size <= 512 * 1024 * 1024:
+            if not stat_module.S_ISREG(before.st_mode) or not 0 < before.st_size <= 512 * 1024 * 1024:
                 return None
             hashed, size = hashlib.sha256(), 0
             while block := stream.read(1024 * 1024):
@@ -39,7 +56,14 @@ def file_version(filename):
                     return None
                 hashed.update(block)
             after = os.fstat(stream.fileno())
-            current = Path(filename).stat()
+            # Re-open the path and fstat that handle rather than Path.stat(): on Windows a path
+            # stat can serve a stale directory-entry creation time after the file was rewritten
+            # in place, while both handles report the file's true identity. The comparison
+            # below still requires the same dev/ino/size/mtime/ctime, so a replaced file differs.
+            with _open_regular(filename) as again:
+                current = os.fstat(again.fileno())
+            if not stat_module.S_ISREG(current.st_mode):
+                return None
             def facts(stat):
                 return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
             if facts(before) != facts(after) or facts(after) != facts(current) or size != before.st_size:

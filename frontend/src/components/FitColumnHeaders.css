@@ -1,0 +1,2 @@
+.fit-column-grip { position:absolute; right:0; top:0; bottom:0; width:9px; cursor:col-resize; touch-action:none; border-right:1px solid #555; }
+.fit-column-grip:hover, .fit-column-grip:focus-visible { background:#4a9eff66; outline:1px solid #4a9eff; }

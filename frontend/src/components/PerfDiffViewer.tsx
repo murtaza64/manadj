@@ -25,6 +25,7 @@ import {
   markersInWindow,
   panWindow,
   zoomWindow,
+  type BeatMarker,
 } from '../utils/perfDiffOverlay';
 import { STEP_RATIO } from '../utils/waveformZoom';
 import { CUE_FLAG_FULL_SIZE, CUE_FLAG_INK, CUE_FLAG_POLE_W } from '../theme/markers';
@@ -35,8 +36,8 @@ import './PerfDiffViewer.css';
 // sides carry their own colors (Engine orange, Rekordbox red)
 const LIBRARY_COLOR = '#00E5FF';
 
-export interface HotCueVal { slot: number; time: number; label: string | null; color: string | null }
-export interface TempoChangeVal { start_time: number; bpm: number; bar_position: number }
+export interface HotCueVal { slot: number; time: number; label: string | null; color: string | null; kind?: string; loop_end?: number | null }
+export interface TempoChangeVal { start_time: number; bpm: number; bar_position: number; time_signature_num?: number }
 export interface BeatgridVal { tempo_changes: TempoChangeVal[] }
 
 export interface ExternalSide {
@@ -46,6 +47,8 @@ export interface ExternalSide {
   grid: BeatgridVal | null;
   cues: HotCueVal[];
   maincue: number | null;
+  /** Stored USB beats, do not reconstruct irregular grids as constant BPM. */
+  beats?: BeatMarker[];
 }
 
 export interface PerfDiffSides {
@@ -57,8 +60,10 @@ export interface PerfDiffSides {
   externals: ExternalSide[];
 }
 
-export function PerfDiffViewer({ trackId, sides, onImport }: {
+export function PerfDiffViewer({ trackId, sides, onImport, useSavedMaincue = true, referenceLabel }: {
   trackId: number;
+  useSavedMaincue?: boolean;
+  referenceLabel?: string;
   sides: PerfDiffSides;
   /** Pick-a-side hooks; the parent owns the confirmation rule. */
   onImport: {
@@ -71,22 +76,25 @@ export function PerfDiffViewer({ trackId, sides, onImport }: {
   const { data: track } = useQuery<Track>({
     queryKey: ['track', trackId],
     queryFn: () => api.tracks.getById(trackId),
+    enabled: useSavedMaincue,
   });
   if (isLoading) return <div className="pdv-empty">Loading waveform…</div>;
   if (error || !blob) return <div className="pdv-empty">No waveform available for this track yet</div>;
   return (
     <Viewer
       blob={blob}
-      savedMaincue={track?.cue_point_time ?? null}
+      savedMaincue={useSavedMaincue ? track?.cue_point_time ?? null : null}
       sides={sides}
       onImport={onImport}
+      referenceLabel={referenceLabel}
     />
   );
 }
 
-function Viewer({ blob, savedMaincue, sides, onImport }: {
+function Viewer({ blob, savedMaincue, sides, onImport, referenceLabel }: {
   blob: DecodedWaveform;
   savedMaincue: number | null;
+  referenceLabel?: string;
   sides: PerfDiffSides;
   onImport: {
     hotcues?: (mode: 'fill-empty' | 'replace-all') => void;
@@ -95,6 +103,7 @@ function Viewer({ blob, savedMaincue, sides, onImport }: {
   };
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rangeRef = useRef<HTMLSpanElement>(null);
   const duration = blob.duration;
   const extRows = Math.max(0, sides.externals.length - 1);
   // deck renderer underneath: driven (we call draw), window pushed from
@@ -128,7 +137,7 @@ function Viewer({ blob, savedMaincue, sides, onImport }: {
   );
   const externalMarkers = useMemo(
     () => sides.externals.map((ext) =>
-      ext.grid ? beatMarkersFromTempoChanges(ext.grid.tempo_changes, duration) : []),
+      ext.beats ?? (ext.grid ? beatMarkersFromTempoChanges(ext.grid.tempo_changes, duration) : [])),
     [sides.externals, duration],
   );
 
@@ -145,6 +154,7 @@ function Viewer({ blob, savedMaincue, sides, onImport }: {
     ctx.clearRect(0, 0, width, height);
 
     const { windowStart, windowSeconds } = winRef.current;
+    if (rangeRef.current) rangeRef.current.textContent = `${windowStart.toFixed(2)}–${(windowStart + windowSeconds).toFixed(2)}s`;
     // the deck renderer paints the body for the same window underneath
     rendererRef.current?.setDisplayWindow(
       windowStart / duration,
@@ -161,8 +171,9 @@ function Viewer({ blob, savedMaincue, sides, onImport }: {
     // ---- beatgrid overlays (Library from top, external surface from bottom — the
     // misalignment reads as a vernier at beat-level zoom)
     const drawGrid = (markers: typeof libraryMarkers, color: string, fromTop: boolean, scale = 1) => {
-      const visible = markersInWindow(markers, windowStart, windowSeconds);
-      if (visible.length > width * 2) return; // too dense to mean anything
+      let visible = markersInWindow(markers, windowStart, windowSeconds);
+      if (visible.length > width / 5) visible = visible.filter(m => m.isDownbeat);
+      if (visible.length > width / 10) return; // zoom for detail, never paint a solid grid wall
       for (const m of visible) {
         const x = xOf(m.time);
         ctx.strokeStyle = color;
@@ -208,9 +219,20 @@ function Viewer({ blob, savedMaincue, sides, onImport }: {
       ctx.font = `bold ${size * 0.75}px ${FONT_MONO}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(String(cue.slot), x + size / 2, flagY + size / 2);
+      ctx.fillText(cue.kind === 'memory' ? 'M' : String(cue.slot), x + size / 2, flagY + size / 2);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
+      if (cue.loop_end != null) {
+        const endX = xOf(cue.loop_end);
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.65;
+        ctx.beginPath();
+        ctx.moveTo(x, above ? waveTop : waveBottom);
+        ctx.lineTo(endX, above ? waveTop : waveBottom);
+        ctx.lineTo(endX, above ? waveTop + 8 : waveBottom - 8);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       if (cue.label) {
         ctx.fillStyle = color;
         ctx.font = `9px ${FONT_MONO}`;
@@ -318,12 +340,13 @@ function Viewer({ blob, savedMaincue, sides, onImport }: {
 
   return (
     <div className="pdv-root">
+      {referenceLabel && <div className="pdv-reference">{referenceLabel}</div>}
       <div className="pdv-toolbar">
         <span className="pdv-legend">
-          <span className="pdv-swatch" style={{ background: LIBRARY_COLOR }} /> Library (top)
+          <span className="pdv-swatch" style={{ background: LIBRARY_COLOR }} /> Library overlays (top)
           {sides.externals.map((ext) => (
             <span key={ext.sid}>
-              <span className="pdv-swatch" style={{ background: ext.color }} /> {ext.label} (bottom)
+              <span className="pdv-swatch" style={{ background: ext.color }} /> {ext.label} overlays (bottom)
             </span>
           ))}
         </span>
@@ -332,7 +355,7 @@ function Viewer({ blob, savedMaincue, sides, onImport }: {
             ⚠ variable grid — {variableExt.grid!.tempo_changes.length} tempo changes ({variableExt.label})
           </span>
         )}
-        <span className="pdv-hint">wheel = zoom · horizontal scroll / drag = pan</span>
+        <span ref={rangeRef} className="pdv-hint" /><span className="pdv-hint">wheel = zoom · horizontal scroll / drag = pan</span>
         <span className="pdv-actions">
           {onImport.hotcues && (engineSide?.cues.length ?? 0) > 0 && (
             sides.libraryCues.length === 0

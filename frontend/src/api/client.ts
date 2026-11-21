@@ -10,7 +10,7 @@ import type {
   Track,
   PlaylistTrackAdd,
   PlaylistTrackAddResult,
-  UnifiedPlaylist,
+  UnifiedPlaylist, PlaylistCoverage,
   PlaylistSyncStats,
   PlaylistExportTarget,
   PlaylistFullExportPreview,
@@ -65,6 +65,190 @@ export interface TransitionTemplateWire {
 const BACKEND_URL =
   import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8127' : '');
 export const API_BASE = `${BACKEND_URL}/api`;
+
+/** A Rekordbox or Engine library found on a mounted external drive. */
+export interface ExternalDrive {
+  root: string;
+  kind: 'rekordbox' | 'engine';
+  name: string;
+  track_count: number | null;
+  written_by_manadj: boolean;
+}
+
+export interface ExternalDrivePullEntry {
+  ordinal: number;
+  title: string | null;
+  artist: string | null;
+  bpm: number | null;
+  key: string | null;
+  duration_secs: number | null;
+  device_path: string;
+  status: 'new' | 'present' | 'uncertain' | 'duplicate' | 'missing-file';
+  detail: string | null;
+  /** Library file that content-verified as the same audio, when one did. */
+  matched_path: string | null;
+  /** Exact verified match only, never a suggested copy. */
+  matched_track_id?: number | null;
+  /** Display-only name/duration suggestions. Never confirmed audio identity. */
+  candidates?: { track_id: number; title: string | null; artist: string | null; filename: string; score: number; duration: string; evidence: string }[];
+}
+
+export interface ExternalDrivePlaylistMembership {
+  counterpart_status: 'unique-name-match' | 'candidate-name-match' | 'no-local-playlist' | 'ambiguous-name';
+  counterpart_id: number | null;
+  /** Snapshot of the suggested counterpart at review time; the update
+   * confirm carries it back and a target changed since is refused. */
+  target_token: string | null;
+  /** Folder-nested drive playlist with one same-name library playlist: a
+   * candidate only, never paired unless the user chooses it by name. */
+  candidate_id?: number | null;
+  candidate_name?: string | null;
+  common: number;
+  adds_in_library: number;
+  adds_new: number;
+  removes: number;
+  removes_provisional: boolean;
+  uncertain_members: number;
+  order_differs: boolean | null;
+}
+
+export interface ExternalDrivePreviewPlaylist {
+  id: number;
+  name: string | null;
+  folder_path: string;
+  /** Typed folder chain, outermost first. folder_path is only its display form. */
+  folder_parts?: string[];
+  track_count: number;
+  new_count: number;
+  present_count: number;
+  uncertain_count: number;
+  other_count: number;
+  folder_not_representable: boolean;
+  /** Member entry ordinals in device order: the review guard binds the
+   * clicked plan to this exact ordered membership. */
+  track_ordinals: number[];
+  membership: ExternalDrivePlaylistMembership | null;
+}
+
+export interface ExternalDrivePreview {
+  root: string;
+  kind: 'rekordbox' | 'engine';
+  device_track_count: number;
+  new_count: number;
+  present_count: number;
+  uncertain_count: number;
+  duplicate_count: number;
+  missing_file_count: number;
+  default_destination: string | null;
+  fingerprint: string;
+  source_fingerprint: string;
+  entries: ExternalDrivePullEntry[];
+  playlists: ExternalDrivePreviewPlaylist[];
+}
+
+export interface ExternalDriveImportRequest {
+  root: string;
+  destination?: string;
+  confirm: boolean;
+  /** The user's checkbox selection (entry ordinals) from the reviewed
+   * plan. Omit to import every new entry. */
+  ordinals?: number[];
+  /** Binds the confirm to the reviewed preview; the server refuses a
+   * mismatch with 409 so the confirmed set never silently changes. */
+  preview_fingerprint: string;
+  /** Import one device playlist's new tracks and create a local playlist
+   * in device order. The playlist defines the selection; the server
+   * refuses combining it with explicit ordinals. */
+  create_playlist_id?: number;
+  /** Local name for the created playlist (defaults to the device name). */
+  playlist_name?: string;
+  /** The user's explicitly chosen local playlist for a sync-from-USB
+   * update. Only with create_playlist_id; a name suggestion never fills
+   * this in. */
+  update_playlist_id?: number;
+  /** Reviewed snapshot of the local target; required with
+   * update_playlist_id. */
+  update_target_token?: string;
+}
+
+export interface ExternalDriveUpdatedPlaylist {
+  playlist_id: number;
+  name: string;
+  member_count: number;
+  added_imported: number;
+  added_from_library: number;
+  kept_local_only: number;
+  skipped_uncertain: number;
+  skipped_other: number;
+}
+
+export interface ExternalDriveImportedPlaylist {
+  playlist_id: number;
+  name: string;
+  member_count: number;
+  imported: number;
+  already_in_library: number;
+  skipped_uncertain: number;
+  skipped_other: number;
+}
+
+export interface ExternalDriveFieldRow { field: string; drive: string | number | null; library: string | number | null; applicable: boolean; conflict?: string }
+export interface ExternalDriveFieldTrack { ordinal: number; track_id: number; label: string; fields: ExternalDriveFieldRow[] }
+export interface ExternalDriveFieldComparison {
+  fingerprint: string;
+  tracks: ExternalDriveFieldTrack[];
+  compared: string[];
+  not_compared: Record<string, string>;
+}
+
+export interface PerformanceCue {
+  slot: number; kind: 'hot' | 'memory' | 'main'; time: number;
+  loop_end: number | null; label: string | null; color: string | null;
+}
+export interface ExternalDrivePerformanceComparison {
+  ordinal: number; track_id: number; fingerprint: string; duration: number | null;
+  alignment: string; newer_source: null; read_only: true;
+  usb: { state: 'read' | 'unavailable'; reason: string | null; cues: PerformanceCue[];
+    beats: { time: number; beat: number; bpm: number }[]; decode_offset_ms?: number; grid_truncated?: boolean };
+  library: { cues: PerformanceCue[]; grid_state?: 'read' | 'unavailable'; grid_origin: string | null;
+    tempo_changes: { start_time: number; bpm: number; bar_position: number }[] | null };
+  limits: string[];
+}
+
+export interface ExternalDriveExportImpact {
+  root: string;
+  mode: 'rebuild';
+  selected: { id: number; name: string; tracks: number; missing_audio: number }[];
+  drive: { read: true; tracks: number; playlists: number; dropped_playlists: string[] } | { read: false; reason: string };
+  one_library_present: boolean;
+  is_mount: boolean;
+  gate_enabled: boolean;
+  rewrites: string[];
+  adds: string[];
+  deletes: string[];
+  executable: false;
+  blocked_reason: string;
+}
+
+export type ExternalDriveCheck =
+  | { kind: string; checked: false; reason: string }
+  | { kind: string; checked: true; tracks: number; playlists: number; analysis_files: number; errors: string[]; error_count: number };
+
+export interface ExternalDriveImportResult {
+  root: string;
+  kind: string;
+  destination: string;
+  imported: number;
+  skipped_present: number;
+  skipped_uncertain: number;
+  skipped_duplicate: number;
+  skipped_missing_file: number;
+  skipped_unselected: number;
+  errors: string[];
+  track_ids: number[];
+  playlist?: ExternalDriveImportedPlaylist;
+  playlist_update?: ExternalDriveUpdatedPlaylist;
+}
 
 /** Phone sync LAN listener (#373, backend/device_listener.py). */
 export interface DeviceListenerStatus {
@@ -197,6 +381,27 @@ async function exchangeRequest<T>(path: string, body?: unknown): Promise<T> {
     throw new Error(detailToMessage(error.detail, `Exchange request failed (${response.status})`));
   }
   return response.json();
+}
+
+export interface RemoteMirrorProblem {
+  track_id: number;
+  reason: string;
+}
+
+export interface RemoteMirrorPreview {
+  status: 'ok' | 'no_tracks_root';
+  computed_at: string;
+  duration_ms: number;
+  roots: string[];
+  tracks: number;
+  files: number;
+  upload_bytes: number;
+  unchanged: number;
+  changed: number;
+  missing: RemoteMirrorProblem[];
+  missing_total: number;
+  collisions: string[];
+  collision_total: number;
 }
 
 export const api = {
@@ -868,6 +1073,12 @@ export const api = {
       return res.json();
     },
 
+    getCoverage: async (): Promise<PlaylistCoverage> => {
+      const res = await fetch(`${API_BASE}/sync/playlists/coverage`);
+      if (!res.ok) throw new Error('Failed to read playlist libraries');
+      return res.json();
+    },
+
     getStats: async (): Promise<PlaylistSyncStats> => {
       const res = await fetch(`${API_BASE}/sync/playlists/stats`);
       if (!res.ok) throw new Error('Failed to fetch sync stats');
@@ -1018,6 +1229,103 @@ export const api = {
         body: JSON.stringify(request),
       });
       if (!res.ok) throw new Error('Failed to sync tracks with Rekordbox');
+      return res.json();
+    },
+  },
+
+  externalDrives: {
+    /** Detect Rekordbox/Engine libraries on mounted external drives. */
+    list: async (): Promise<ExternalDrive[]> => {
+      const res = await fetch(`${API_BASE}/external-drives`);
+      if (!res.ok) throw new Error('Failed to detect external drives');
+      return res.json();
+    },
+
+    /** Read-only diff: what a pull from this drive would add or skip.
+     * Pass destination to bind the returned fingerprint to it (the
+     * confirm flow does this right before importing). */
+    preview: async (
+      root: string,
+      destination?: string,
+      verify?: boolean,
+    ): Promise<ExternalDrivePreview> => {
+      const res = await fetch(`${API_BASE}/external-drives/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          root,
+          ...(destination ? { destination } : {}),
+          ...(verify !== undefined ? { verify } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, 'Failed to preview the drive'));
+      }
+      return res.json();
+    },
+
+    /** Read-only per-track metadata comparison against the library. */
+    fields: async (root: string): Promise<ExternalDriveFieldComparison> => {
+      const res = await fetch(`${API_BASE}/external-drives/fields`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ root }),
+      });
+      if (!res.ok) throw new Error(detailToMessage((await res.json().catch(() => null))?.detail, 'Failed to compare track details'));
+      return res.json();
+    },
+
+    performance: async (root: string, ordinal: number, preview_fingerprint: string): Promise<ExternalDrivePerformanceComparison> => {
+      const res = await fetch(`${API_BASE}/external-drives/performance/compare`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root, ordinal, preview_fingerprint }),
+      });
+      if (!res.ok) throw new Error(detailToMessage((await res.json().catch(() => null))?.detail, 'Cue/grid comparison unavailable'));
+      return res.json();
+    },
+
+    /** Take the drive's value for reviewed pairs. Library only; bound to the reviewed fingerprint. */
+    applyFields: async (root: string, preview_fingerprint: string, changes: { track_id: number; field: string; drive?: string | number | null; library?: string | number | null }[]): Promise<{ applied: { track_id: number; field: string; value: string }[] }> => {
+      const res = await fetch(`${API_BASE}/external-drives/fields/apply`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ root, preview_fingerprint, changes }),
+      });
+      if (!res.ok) throw new Error(detailToMessage((await res.json().catch(() => null))?.detail, 'Failed to apply track details'));
+      return res.json();
+    },
+
+    /** Read-only: what exporting library playlists to this drive would rebuild. Writes nothing. */
+    exportImpact: async (root: string, playlist_ids: number[]): Promise<ExternalDriveExportImpact> => {
+      const res = await fetch(`${API_BASE}/external-drives/export/impact`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ root, playlist_ids }),
+      });
+      if (!res.ok) throw new Error(detailToMessage((await res.json().catch(() => null))?.detail, 'Could not preview the export'));
+      return res.json();
+    },
+
+    /** Read-only structural readback of a drive (never writes). */
+    check: async (root: string): Promise<ExternalDriveCheck> => {
+      const res = await fetch(`${API_BASE}/external-drives/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root }),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, 'Failed to check the drive'));
+      }
+      return res.json();
+    },
+
+    /** The confirmed pull. The server refuses confirm != true. */
+    import: async (request: ExternalDriveImportRequest): Promise<ExternalDriveImportResult> => {
+      const res = await fetch(`${API_BASE}/external-drives/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, 'Failed to import from the drive'));
+      }
       return res.json();
     },
   },
@@ -1926,6 +2234,14 @@ export const api = {
       if (!res.ok) throw new Error(`Failed to reveal logs (${res.status})`);
     },
   },
+
+  remoteMirror: {
+    preview: async (): Promise<RemoteMirrorPreview> => {
+      const res = await fetch(`${API_BASE}/remote-mirror/preview`);
+      if (!res.ok) throw new Error(`Failed to run the mirror preview (${res.status})`);
+      return res.json();
+    },
+  },
 };
 
 // ── App config wire types (packaged-app #277) ──────────────────────────
@@ -2221,4 +2537,4 @@ export interface SetWithEntriesWire extends SetRowWire {
   dormant: SetDormantPinWire[];
   /** Dormant Cameo pins (#140): host-track-keyed memories. */
   dormant_cameos: SetDormantCameoPinWire[];
-}
+        }

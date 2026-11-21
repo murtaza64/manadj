@@ -10,8 +10,8 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BACKEND_PORT = 8127
@@ -40,6 +40,10 @@ def format_label(name: str, use_color: bool) -> str:
 
 def ensure_port_available(name: str, port: int) -> None:
     with socket.socket() as probe:
+        # Match the reusable listener sockets used by uvicorn/Vite. TIME_WAIT
+        # is not an active server and must not look like an orphan listener.
+        if os.name != "nt":
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind(("127.0.0.1", port))
         except OSError as error:
@@ -69,6 +73,8 @@ def spawn_process(
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        # Own a distinct process group, including uv/npm/reloader children.
+        start_new_session=os.name != "nt",
     )
 
     def stream_logs() -> None:
@@ -80,17 +86,69 @@ def spawn_process(
     return process
 
 
-def stop_processes(processes: list[subprocess.Popen[str]]) -> None:
-    for process in processes:
-        if process.poll() is None:
-            process.terminate()
+def _group_exists(process: subprocess.Popen[str]) -> bool:
+    if os.name == "nt":
+        return process.poll() is None
+    try:
+        os.killpg(process.pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # macOS can leave an inaccessible group briefly after SIGKILL
+        # while launchd reaps its orphaned members. EPERM is NOT proof the
+        # group is gone. Keep the conservative bounded wait, rather than
+        # turn the successful kill into a shutdown exception.
+        return True
 
-    for process in processes:
-        if process.poll() is None:
+
+def stop_processes(processes: list[subprocess.Popen[str]], grace_seconds: float = 5) -> None:
+    """Stop only groups created by this launcher, including exited wrappers' children."""
+    if os.name == "nt":
+        # taskkill /T only targets this launcher's known child tree. Never look
+        # up a PID by port, name or a stale PID file.
+        for process in processes:
+            if process.poll() is None:
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    check=False,
+                    capture_output=True,
+                )
+    else:
+        for process in processes:
             try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + grace_seconds
+        while time.monotonic() < deadline:
+            for process in processes:
+                process.poll()  # reap immediate children before checking groups
+            if not any(_group_exists(process) for process in processes):
+                break
+            time.sleep(0.025)
+        for process in processes:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        # killpg returns when the signal is queued, not when descendants
+        # have released their sockets. Wait for group exit before returning.
+        # Orphan zombies can remain visible until init reaps them; they own
+        # no sockets, so bound this final wait rather than hanging forever.
+        deadline = time.monotonic() + 3
+        while any(_group_exists(process) for process in processes):
+            for process in processes:
+                process.poll()
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.025)
+    for process in processes:
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            # An OS-level uninterruptible child must not be reported as stopped.
+            raise RuntimeError(f"child {process.pid} did not stop")
 
 
 def main() -> int:
@@ -115,69 +173,7 @@ def main() -> int:
     shutting_down = False
     use_color = sys.stdout.isatty()
 
-    backend = spawn_process(
-        name="backend",
-        command=[
-            "uv",
-            "run",
-            "uvicorn",
-            "backend.main:app",
-            "--reload",
-            "--reload-dir",
-            "backend",
-            # Loopback only (packaged-app #278, PRD story 8): the backend
-            # must never be reachable from the network.
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(args.backend_port),
-        ],
-        cwd=ROOT,
-        line_queue=line_queue,
-        # env_overrides={"DISABLE_WAVEFORM_WORKER": "1"},
-    )
-
-    frontend = spawn_process(
-        name="frontend",
-        command=["npm", "run", "dev", "--", "--port", str(args.vite_port), "--strictPort"],
-        cwd=ROOT / "frontend",
-        line_queue=line_queue,
-        env_overrides={
-            "FORCE_COLOR": "1",
-            "VITE_API_URL": f"http://localhost:{args.backend_port}",
-        },
-    )
-
-    processes = [backend, frontend]
-
-    if args.app:
-        # The shell is attach-only (desktop/README.md): it polls until Vite is
-        # up, so spawn order doesn't matter. It is a full peer child — any
-        # child exiting (including Cmd+Q on the window) tears everything down.
-        #
-        # Spawn the Electron binary directly (resolved via electron's own
-        # path.txt contract): wrapper layers (npx, cli.js) don't reliably
-        # forward SIGTERM, orphaning the window on teardown.
-        electron_dir = ROOT / "desktop" / "node_modules" / "electron"
-        try:
-            electron_bin = electron_dir / "dist" / (
-                (electron_dir / "path.txt").read_text().strip()
-            )
-        except OSError:
-            print(
-                "electron is not installed — run `make dev-app` (or "
-                "`cd desktop && npm install`; see desktop/README.md "
-                "troubleshooting if that fails)",
-                file=sys.stderr,
-            )
-            return 1
-        app = spawn_process(
-            name="app",
-            command=[str(electron_bin), ".", "--port", str(args.vite_port)],
-            cwd=ROOT / "desktop",
-            line_queue=line_queue,
-        )
-        processes.append(app)
+    processes: list[subprocess.Popen[str]] = []
 
     def handle_signal(_signum: int, _frame: object) -> None:
         nonlocal shutting_down
@@ -186,25 +182,92 @@ def main() -> int:
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
-    while True:
-        try:
-            source, line = line_queue.get(timeout=0.1)
-            if source == "app" and line.startswith(BROWSER_PREFIX):
-                source = "browser"
-                line = line[len(BROWSER_PREFIX):]
-            print(f"{format_label(source, use_color)} {line}", flush=True)
-        except queue.Empty:
-            pass
+    try:
+        backend = spawn_process(
+            name="backend",
+            command=[
+                "uv",
+                "run",
+                "uvicorn",
+                "backend.main:app",
+                "--reload",
+                "--reload-dir",
+                "backend",
+                # Loopback only (packaged-app #278, PRD story 8): the backend
+                # must never be reachable from the network.
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(args.backend_port),
+            ],
+            cwd=ROOT,
+            line_queue=line_queue,
+            # env_overrides={"DISABLE_WAVEFORM_WORKER": "1"},
+        )
 
-        if shutting_down:
-            stop_processes(processes)
-            return 0
+        processes.append(backend)
 
-        for process in processes:
-            exit_code = process.poll()
-            if exit_code is not None:
-                stop_processes(processes)
-                return exit_code
+        frontend = spawn_process(
+            name="frontend",
+            command=["npm", "run", "dev", "--", "--port", str(args.vite_port), "--strictPort"],
+            cwd=ROOT / "frontend",
+            line_queue=line_queue,
+            env_overrides={
+                "FORCE_COLOR": "1",
+                "VITE_API_URL": f"http://localhost:{args.backend_port}",
+            },
+        )
+
+        processes.append(frontend)
+
+        if args.app:
+            # The shell is attach-only (desktop/README.md): it polls until Vite is
+            # up, so spawn order doesn't matter. It is a full peer child — any
+            # child exiting (including Cmd+Q on the window) tears everything down.
+            #
+            # Spawn the Electron binary directly (resolved via electron's own
+            # path.txt contract): wrapper layers (npx, cli.js) don't reliably
+            # forward SIGTERM, orphaning the window on teardown.
+            electron_dir = ROOT / "desktop" / "node_modules" / "electron"
+            try:
+                electron_bin = (
+                    electron_dir / "dist" / ((electron_dir / "path.txt").read_text().strip())
+                )
+            except OSError:
+                print(
+                    "electron is not installed — run `make dev-app` (or "
+                    "`cd desktop && npm install`; see desktop/README.md "
+                    "troubleshooting if that fails)",
+                    file=sys.stderr,
+                )
+                return 1
+            app = spawn_process(
+                name="app",
+                command=[str(electron_bin), ".", "--port", str(args.vite_port)],
+                cwd=ROOT / "desktop",
+                line_queue=line_queue,
+            )
+            processes.append(app)
+
+        while True:
+            try:
+                source, line = line_queue.get(timeout=0.1)
+                if source == "app" and line.startswith(BROWSER_PREFIX):
+                    source = "browser"
+                    line = line[len(BROWSER_PREFIX) :]
+                print(f"{format_label(source, use_color)} {line}", flush=True)
+            except queue.Empty:
+                pass
+
+            if shutting_down:
+                return 0
+
+            for process in processes:
+                exit_code = process.poll()
+                if exit_code is not None:
+                    return exit_code
+    finally:
+        stop_processes(processes)
 
 
 if __name__ == "__main__":

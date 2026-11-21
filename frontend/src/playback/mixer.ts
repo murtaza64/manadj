@@ -986,6 +986,19 @@ export class Mixer {
     await this.applyOutputRouting();
   }
 
+  /**
+   * The master route's reported output latency in seconds (#382 Heard):
+   * the main AudioContext's render quantum + device latency, mirroring
+   * Android's `EngineSnapshot.reportedLatencySeconds()` (Oboe timestamp).
+   * 0 until the context exists. Read live — Chromium revises outputLatency
+   * when the route changes (Bluetooth sinks report much larger values).
+   */
+  masterLatencySeconds(): number {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state === 'closed') return 0;
+    return (ctx.baseLatency ?? 0) + (ctx.outputLatency ?? 0);
+  }
+
   /** Serialized entry point — see routingChain. */
   private applyOutputRouting(): Promise<void> {
     const run = this.routingChain.then(() => this.doApplyOutputRouting());

@@ -104,3 +104,41 @@ acknowledgements and approved operation/conflict semantics remain future work.
 Fixture tests cover persistence, discard, stale-source holds, validation and
 save failure without erasing pending work. Apple/Swift verification is required
 before treating the new prototype as tested. No real library was used.
+
+## November20 shake-to-report feedback prototype
+
+Shake → capture → review → file feedback, ported from the desktop feedback
+loop (`frontend/src/feedback`, `backend/feedback.py`) rather than Android.
+Core payload/scrub/outbox logic is Foundation-only in ManadjCore with fixture
+tests; the desktop accepts reviewed phone reports through one scoped write,
+POST /api/device-sync/feedback, filed by the paired desktop's own credentials
+through the existing FeedbackService. The full loopback feedback router is
+not exposed on the LAN. Screenshots and context stay in the desktop's local
+feedback store; the GitHub issue is text-only with a report marker, and the
+review sheet says so. Shaking never sends anything by itself. Offline or
+unpaired explicitly filed reports save on-device. REVIEW SAVED REPORTS makes
+each saved report inspectable with text, image, context and current destination.
+Only an explicit per-report reviewed-send can transmit it later; re-pairing,
+launching, shaking and filing another report never drain the outbox.
+Apple build/runtime verification, simulator pixels and physical-device shake
+checks are pending; treat as untested until those land.
+
+
+## Explicit feedback button and screenshot targeting, draft verification
+
+A header feedback button opens the same reviewed report flow as shake, without
+replacing Sessions or triggering the control being reported. The captured screen
+and registered control frames freeze together. Pick element selects the smallest
+registered control under the tap; other points are labeled Screenshot area.
+The marker and its visible target text can be cleared, combined with freehand
+strokes and typed detail, or removed with the screenshot. The iOS keyboard's
+microphone is the dictation path, not an app recording or external transcription.
+Picking, drawing and cancelling do not file or queue a report. The existing
+reviewed-file and named-destination outbox rules remain in force.
+
+Native target resolution, image flattening and button/pick/draw/cancel UI tests
+are added. Apple CI and actual screenshots are pending. System dictation and
+physical shake still require a phone; simulator evidence is not hardware proof.
+Port: desktop now, in its separately coordinated feedback update. Android is not
+changed by this iOS-specific interaction change; no Android reporting parity is
+claimed.

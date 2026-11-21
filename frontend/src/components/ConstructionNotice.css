@@ -1,0 +1,4 @@
+.construction-notice { margin:10px 0; border-left:2px dashed #ffc85a; padding:4px 8px; color:#aaa; font-size:11px; }
+.construction-notice summary { cursor:pointer; white-space:normal; }
+.construction-notice small { display:inline-block; color:#ffc85a; border:1px dashed #7a6226; padding:0 4px; margin-left:4px; font:inherit; }
+.construction-notice p { margin:6px 0 0; overflow-wrap:anywhere; }

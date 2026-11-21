@@ -38,7 +38,8 @@
       "tag-structure",
       "filters",
       "playlists",
-      "archive"
+      "archive",
+      "remote-preview"
     ]
   },
   {
@@ -60,6 +61,7 @@
       "keyboard",
       "loading",
       "cues",
+      "heard",
       "mixer",
       "mouse-jog",
       "stems"

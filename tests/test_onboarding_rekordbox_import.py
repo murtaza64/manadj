@@ -396,7 +396,7 @@ def test_executor_import_uses_scale_name(db):
     )
     imported = import_tracks_from_rekordbox([rb_track], db, dry_run=False)
     assert imported == 1
-    track = db.query(models.Track).filter_by(filename="/music/x.wav").one()
+    track = db.query(models.Track).filter_by(filename=str(Path("/music/x.wav"))).one()
     assert track.key == AM_ENGINE_ID
     assert track.key_provenance == "imported"
 

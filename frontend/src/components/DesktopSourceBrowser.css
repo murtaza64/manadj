@@ -1,0 +1,12 @@
+.ds-browser { grid-template-columns:200px minmax(0,1fr) minmax(280px,360px); }
+.ds-row-open { font:inherit; color:inherit; text-align:left; background:none; border:0; padding:2px 0; cursor:pointer; white-space:normal; overflow-wrap:anywhere; }
+.ds-row-open:hover { color:#74b8ff; }
+.ds-selected td { background:#1b2b3f; }
+.ds-search { min-width:0; flex:1; background:#181818; color:inherit; border:1px solid #444; padding:6px; }
+.ds-plan { padding:12px; }
+.ds-plan .sync-embedded-review { padding:0; }
+.ds-plan .pei-field-columns, .ds-plan .pei-field-row { grid-template-columns:60px minmax(0,1fr) 12px minmax(0,1fr); }
+.ds-plan .pei-field-columns > :last-child { display:none; }
+.ds-plan .pei-field-action { grid-column:1 / -1; }
+.ds-plan .pei-content { overflow:auto; min-width:0; }
+@media(max-width:1100px) { .ds-browser { grid-template-columns:180px minmax(0,1fr); } .ds-plan { grid-column:1 / -1; min-height:320px; max-height:500px; } }

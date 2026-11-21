@@ -2,6 +2,7 @@ import type { DeckEngine } from './DeckEngine';
 import { audibleHolder, subscribeAudible } from './audibleSurface';
 import { CHANNEL_IDS, type ChannelId } from './mixer';
 import { isQuantizeOn } from './quantizeStore';
+import { isSyncWanted, setSyncWanted } from './syncWantedStore';
 import {
   bpmMatch, effectiveBpm, nearestPlayingTempoReference, PITCH_RANGE_PERCENT,
   type BpmMatchResult,
@@ -17,6 +18,10 @@ export interface SyncSnapshot {
 export class SyncGroup {
   private tempo: number | null = null;
   private ratios = new Map<ChannelId, number>();
+  /** Rejoin dedupe (#399 desktop port): the Track each Deck last attempted
+   * sync on (explicit toggle or auto-rejoin), so a wanted Deck joins once
+   * per loaded source and a refused join retries on the NEXT source. */
+  private tried = new Map<ChannelId, number | null>();
   private listeners = new Set<() => void>();
   private matchListeners = new Set<(deck: ChannelId) => void>();
   subscribeMatch = (listener: (deck: ChannelId) => void): (() => void) => {
@@ -49,7 +54,11 @@ export class SyncGroup {
         const changed = next.bpm !== previous.bpm || next.trackId !== previous.trackId
           || next.loadState !== previous.loadState;
         previous = next;
-        if (this.applying || !changed || !this.ratios.has(deck)) return;
+        if (this.applying || !changed) return;
+        if (!this.ratios.has(deck)) {
+          this.rejoin(deck);
+          return;
+        }
         if (this.validBpm(next.bpm) && this.tempo !== null) {
           this.ratios.set(deck, this.ratioFor(next.bpm, this.tempo));
         }
@@ -65,6 +74,27 @@ export class SyncGroup {
     stops.push(subscribeAudible(clearForMachine));
     clearForMachine();
     return () => stops.forEach(stop => stop());
+  }
+
+  /**
+   * Auto-join a remembered Deck (#399 desktop port): a wanted Deck joins
+   * the group once per loaded Track when it is ready with a BPM. A refused
+   * join (out of reach) keeps the preference and retries on the next
+   * Track — the performer asked for sync on this deck, not on this song.
+   */
+  private rejoin(deck: ChannelId): void {
+    if (!isSyncWanted(deck) || audibleHolder() !== 'shared') return;
+    const s = this.engines[deck].getSnapshot();
+    if (s.loadState !== 'ready' || !this.validBpm(s.bpm) || this.tried.get(deck) === s.trackId) return;
+    this.tried.set(deck, s.trackId);
+    this.join(deck);
+  }
+
+  /** An explicit toggle records the resulting membership and marks the
+   * current Track attempted, so auto-rejoin never re-fires on it. */
+  private remember(deck: ChannelId): void {
+    setSyncWanted(deck, this.ratios.has(deck));
+    this.tried.set(deck, this.engines[deck].getSnapshot().trackId);
   }
 
   private validBpm(bpm: number | null): bpm is number {
@@ -100,8 +130,21 @@ export class SyncGroup {
     if (this.ratios.delete(deck)) {
       if (!this.ratios.size) this.tempo = null;
       this.publish();
+      this.remember(deck);
       return null;
     }
+    // Not ready/BPM-less: a no-op, like before — and never a preference
+    // write (toggling an empty deck must not wipe a remembered sync).
+    const own = this.engines[deck].getSnapshot();
+    if (own.loadState !== 'ready' || !this.validBpm(own.bpm)) return null;
+    const result = this.join(deck);
+    this.remember(deck);
+    return result;
+  }
+
+  /** Join the group (shared by explicit toggles and #399 auto-rejoin):
+   * captures/rides the Group Tempo and snaps phase like a toggle. */
+  private join(deck: ChannelId): BpmMatchResult | null {
     const own = this.engines[deck].getSnapshot();
     if (own.loadState !== 'ready' || !this.validBpm(own.bpm)) return null;
     const reference = this.reference(deck, this.tempo !== null);

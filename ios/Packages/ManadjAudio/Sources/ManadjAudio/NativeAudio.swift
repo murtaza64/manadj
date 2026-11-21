@@ -33,7 +33,7 @@ private final class RenderContext: @unchecked Sendable {
                 guard let bytes = buffers[channel].mData else { continue }
                 let out = bytes.assumingMemoryBound(to: Float.self)
                 if channel < 2 {
-                    // C vector copy avoids a per-sample Swift loop in development builds.
+                    // Vector copy keeps deinterleaving off Swift's per-sample Debug path.
                     cblas_scopy(Int32(n), scratch.advanced(by: channel), 2, out.advanced(by: offset), 1)
                 } else { memset(out.advanced(by: offset), 0, n * MemoryLayout<Float>.size) }
             }
@@ -130,8 +130,6 @@ private final class NotificationTokens: @unchecked Sendable {
     }
     public var renderedFrames: UInt64 { mdj_frames(handle.raw) }
     public var starvedFrames: UInt64 { mdj_starved_frames(handle.raw) }
-    @discardableResult public func alignPhase(_ deck: Int, reference: Int, ratio: Double) -> Bool { mdj_phase_align(handle.raw, Int32(deck), Int32(reference), ratio) != 0 }
-    @discardableResult public func syncMembers(_ members: Int, synced: Int) -> Bool { mdj_sync_members(handle.raw, Int32(members), Int32(synced)) != 0 }
     public func state(_ deck: Int) -> MDJDeck { mdj_deck(handle.raw, Int32(deck)) }
     public func grid(_ deck: Int, bpm: Double, anchor: Double) { _ = mdj_grid(handle.raw, Int32(deck), bpm, anchor) }
     public func filter(_ deck: Int, position: Double) { _ = mdj_filter(handle.raw, Int32(deck), position) }
