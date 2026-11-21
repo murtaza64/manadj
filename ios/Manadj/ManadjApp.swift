@@ -85,6 +85,10 @@ struct WorkspaceView: View {
     private var portraitBody: some View {
         GeometryReader { geometry in
             let compact = geometry.size.height < 860
+            // The SE cannot fit square pads and all transport controls at the
+            // regular-phone density. Fit one intact canvas, not a clipped stack.
+            let canvasHeight = max(780, geometry.size.height)
+            let fit = min(CGFloat(1), geometry.size.height / canvasHeight)
             let gap: CGFloat = compact ? 5 : 8
             VStack(spacing: gap) {
                 HStack(spacing: 10) { deckInfo(0); deckInfo(1) }.frame(height: browsing && keyboardOpen ? 36 : 44)
@@ -115,6 +119,9 @@ struct WorkspaceView: View {
                 }.clipped()
                 if !browsing && !settings { PerformanceBattery().frame(height: 14) }
             }.padding(.horizontal, 8)
+            .frame(width: geometry.size.width, height: canvasHeight)
+            .scaleEffect(fit, anchor: .top)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
             .animation(.easeOut(duration: 0.24), value: browsing)
             .animation(.easeOut(duration: 0.24), value: settings)
         }
