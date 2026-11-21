@@ -57,7 +57,7 @@ final class WorkspaceUITests: XCTestCase {
         }
         expectation(for: settled, evaluatedWith: app); waitForExpectations(timeout: 15)
         XCTAssertTrue(knob.waitForExistence(timeout: 10))
-        let landscape = XCTAttachment(screenshot: app.screenshot()); landscape.name = "Landscape square hotcues and fullscreen safe edges"; landscape.lifetime = .keepAlways; add(landscape)
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); landscape.name = "Landscape square hotcues and fullscreen safe edges"; landscape.lifetime = .keepAlways; add(landscape)
         XCTAssertTrue(app.otherElements["performance-battery"].exists)
         knob.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 2)
         XCUIDevice.shared.orientation = .portrait
