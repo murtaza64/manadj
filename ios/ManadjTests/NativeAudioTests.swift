@@ -9,6 +9,23 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    @MainActor func testMetalAsynchronousDriverCompletionReturnsFramePermits() async throws {
+        let gpu = try XCTUnwrap(MetalWaveBody(experimentFrame: CGRect(x: 0, y: 0, width: 390, height: 60)))
+        let device = try XCTUnwrap(gpu.device)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 1170, height: 180, mipmapped: false)
+        descriptor.usage = [.renderTarget, .shaderRead]; descriptor.storageMode = .shared
+        let texture = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        let resource = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "mwf"))
+        let wave = try PreviewWaveform.parse(Data(contentsOf: resource))
+        var submitted = 0
+        for _ in 0..<100 {
+            if gpu.render(wave: wave, source: 1, start: 0, span: 12, gain: 1, vertical: false, target: texture) != nil { submitted += 1 }
+            if submitted >= 12 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertGreaterThanOrEqual(submitted, 12, "Driver completions must return permits beyond the three-frame in-flight cap")
+    }
+
     @MainActor func testMetalWaveBodyGPUCompletionAndReadbackSynthetic() throws {
         let gpu = try XCTUnwrap(MetalWaveBody(experimentFrame: CGRect(x: 0, y: 0, width: 390, height: 60)), "Metal must initialize; fallback alone is not proof")
         let device = try XCTUnwrap(gpu.device)
