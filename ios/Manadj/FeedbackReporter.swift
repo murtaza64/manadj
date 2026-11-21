@@ -116,7 +116,7 @@ struct LiveFeedbackToolbar: View {
                     else { Task { await session.startVoice(directory: model.feedbackQueueRoot.appendingPathComponent("voice-drafts"), audio: model.audio); if session.recording { model.noteFeedbackAction("feedback-voice-start") } } }
                 }.buttonStyle(PerformanceKeyStyle(color: Ink.danger, active: session.recording)).disabled(session.requestingMicrophone).accessibilityIdentifier("feedback-rec")
                 Button("REVIEW") { session.stopVoice(); session.mode = "USE APP"; session.reviewing = true }.buttonStyle(PerformanceKeyStyle(color: Ink.play)).accessibilityIdentifier("feedback-review-open")
-            }.frame(height: 32)
+            }.frame(height: 44)
             HStack(spacing: 2) {
                 ForEach(["USE APP", "POINT", "DRAW"], id: \.self) { mode in Button(mode) { session.mode = mode }.buttonStyle(PerformanceKeyStyle(color: Ink.accent, active: session.mode == mode)) }
             }.frame(height: 28)
