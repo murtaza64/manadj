@@ -91,15 +91,12 @@ struct WorkspaceView: View {
                 HStack(spacing: 10) { deckInfo(0); deckInfo(1) }.frame(height: browsing && keyboardOpen ? 36 : infoHeight)
                 if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: waveHeight) }
                 ZStack(alignment: .bottom) {
-                    // Keep native waveform/display-link identity alive under the drawer.
-                    // Removing the whole tree discarded tiles and restarted its clocks.
-                    VStack(spacing: gap) {
+                    if !settings && !browsing { VStack(spacing: gap) {
                         mixer.frame(maxHeight: .infinity)
                         HStack(spacing: 6) { minimap(0); browseKey.frame(width: 84); minimap(1) }.frame(height: compact ? 36 : 44)
                         HStack(alignment: .top, spacing: 14) { deckControls(0, compact: compact); deckControls(1, compact: compact) }.frame(height: deckHeight)
-                    }.opacity(settings || browsing ? 0 : 1)
-                        .allowsHitTesting(!settings && !browsing)
-                        .accessibilityHidden(settings || browsing)
+                    }
+                    }
                     if browsing {
                         VStack(spacing: 0) {
                             if !keyboardOpen { Capsule().fill(Ink.muted.opacity(0.7)).frame(width: 40, height: 4).frame(maxWidth: .infinity).frame(height: 24).contentShape(Rectangle())
@@ -232,21 +229,33 @@ HStack(spacing: 0) {
                     }
                 }.foregroundStyle(Ink.accent)
     }
-    private var nativeCenterModePicker: some View {
-        Picker("Center controls", selection: Binding(get: {
-            feedback.contextual == "OUTPUT" ? "AUDIO" : (["FX", "FEEDBACK", "SYNC"].contains(feedback.contextual) ? feedback.contextual : "FX")
-        }, set: { tab in
-            if tab == "FEEDBACK" { feedback.open() }
-            else { feedback.contextual = tab == "AUDIO" ? "OUTPUT" : tab }
-        })) {
+    @ViewBuilder private var nativeCenterModePicker: some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 0) { centerGlassButtons }
+        } else { plainCenterTabs }
+        #else
+        plainCenterTabs
+        #endif
+    }
+    private var centerGlassButtons: some View {
+        HStack(spacing: 0) {
             ForEach(["FX", "FEEDBACK", "AUDIO", "SYNC"], id: \.self) { tab in
-                Image(systemName: tab == "FX" ? "sparkles" : tab == "FEEDBACK" ? "bubble.left.and.text.bubble.right" : tab == "AUDIO" ? outputSymbol : "desktopcomputer")
+                let selected = feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")
+                Button {
+                    if tab == "FEEDBACK" { feedback.open() }
+                    else { feedback.contextual = tab == "AUDIO" ? "OUTPUT" : tab }
+                } label: {
+                    Image(systemName: tab == "FX" ? "sparkles" : tab == "FEEDBACK" ? "bubble.left.and.text.bubble.right" : tab == "AUDIO" ? outputSymbol : "desktopcomputer")
+                        .font(.system(size: 15)).frame(maxWidth: .infinity, minHeight: 44)
+                        .modifier(CenterSelectionGlass(selected: selected))
+                }.buttonStyle(.plain).contentShape(Capsule())
+                    .foregroundStyle(selected ? Ink.accent : Ink.text)
                     .accessibilityLabel(tab == "FEEDBACK" ? "Feedback" : tab.capitalized)
                     .accessibilityIdentifier(tab == "FEEDBACK" ? "feedback-open" : "center-tab-" + tab.lowercased())
-                    .tag(tab)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
             }
-        }.pickerStyle(.segmented).tint(Ink.accent).frame(minHeight: 44)
-            .accessibilityIdentifier("center-mode-picker")
+        }.padding(3).background(Ink.panel, in: Capsule())
     }
     private var mixer: some View {
         HStack(spacing: 0) {
@@ -371,4 +380,18 @@ HStack(spacing: 0) {
 private struct NativeRoutePicker: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView { let view = AVRoutePickerView(); view.tintColor = .white; return view }
     func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+}
+
+/// Real native material, never simulated blur. Legacy SDKs retain the plain strip.
+private struct CenterSelectionGlass: ViewModifier {
+    let selected: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *), selected {
+            content.glassEffect(.regular.tint(Ink.accent.opacity(0.2)).interactive(), in: Capsule())
+        } else { content }
+        #else
+        content
+        #endif
+    }
 }

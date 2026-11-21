@@ -59,6 +59,7 @@ final class WorkspaceUITests: XCTestCase {
             XCTAssertTrue(playA.waitForExistence(timeout: 20)); waitForReadyTransport(playA, app: app)
             let ready = NSPredicate(format: "enabled == true AND hittable == true")
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: playB)], timeout: 15), .completed)
+            app.buttons["deck-0-loop-toggle"].tap(); app.buttons["deck-1-loop-toggle"].tap()
             playA.tap(); playB.tap()
             let wave = app.otherElements["deck-0-detail-wave"]
             Thread.sleep(forTimeInterval: 4)
