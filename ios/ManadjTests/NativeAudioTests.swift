@@ -196,6 +196,31 @@ final class NativeAudioTests: XCTestCase {
         }
     }
 
+    @MainActor func testPositionObservationIsScopedButSnapshotsAndTransportStayFresh() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(storageRoot: root)
+        try await Task.sleep(for: .milliseconds(250))
+        var controlChanges = 0, readoutChanges = 0
+        let controls = model.objectWillChange.sink { controlChanges += 1 }
+        let readout = model.positionReadouts[0].objectWillChange.sink { readoutChanges += 1 }
+        var snapshots = model.decks
+        snapshots[0].engine.position = 2.35
+        model.applyEngineSnapshots(snapshots)
+        XCTAssertEqual(controlChanges, 0)
+        XCTAssertEqual(readoutChanges, 1)
+        XCTAssertEqual(model.decks[0].engine.position, 2.35, accuracy: 0.001)
+        XCTAssertEqual(model.positionReadouts[0].position, 2.35, accuracy: 0.001)
+        snapshots[0].engine.playing = true
+        snapshots[0].engine.position = 2.47
+        model.applyEngineSnapshots(snapshots)
+        XCTAssertEqual(controlChanges, 1, "Transport still publishes immediately")
+        XCTAssertEqual(readoutChanges, 2)
+        XCTAssertTrue(model.decks[0].engine.playing)
+        XCTAssertEqual(model.decks[0].engine.position, 2.47, accuracy: 0.001)
+        withExtendedLifetime((controls, readout)) {}
+    }
+
     @MainActor func testIdleControlPollingDoesNotPublishUnchangedDecks() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

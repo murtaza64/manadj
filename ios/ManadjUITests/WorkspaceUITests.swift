@@ -49,6 +49,33 @@ final class WorkspaceUITests: XCTestCase {
     /// Native callbacks/draw submissions, not presented frames or touch-to-photon.
     /// UI automation overhead is excluded from the interval probes, but the
     /// simulator host still affects scheduling. Never call these phone FPS.
+    @MainActor func testScopedPositionObservationPacingABBA() {
+        defer { captureFailure() }
+        // ABBA holds plain icons, dual-deck loop, wave size and automation idle
+        // fixed. It tests a cause, not a user-facing optimization or phone FPS.
+        for (iteration, wholeTree) in [true, false, false, true].enumerated() {
+            let app = XCUIApplication()
+            app.launchArguments = ["--performance-ui-fixture", "--wave-pacing-metrics", "--wave-body-metrics", "--plain-center-tabs"]
+                + (wholeTree ? ["--probe-whole-position-publication"] : [])
+            app.launch()
+            let playA = app.buttons["A play pause"], playB = app.buttons["B play pause"]
+            XCTAssertTrue(playA.waitForExistence(timeout: 20)); waitForReadyTransport(playA, app: app)
+            let ready = NSPredicate(format: "enabled == true AND hittable == true")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: playB)], timeout: 15), .completed)
+            app.buttons["deck-0-loop-toggle"].tap(); app.buttons["deck-1-loop-toggle"].tap()
+            playA.tap(); playB.tap()
+            Thread.sleep(forTimeInterval: 14)
+            for index in 0..<2 {
+                let wave = app.otherElements["deck-\(index)-detail-wave"]
+                let value = wave.value as? String ?? "missing"
+                XCTAssertTrue(value.hasPrefix("playing"), value)
+                XCTAssertTrue(value.contains("callbackSamples="), value)
+                print("SCOPED_POSITION_OBSERVATION iteration=\(iteration) wholeTree=\(wholeTree) deck=\(index) \(value) simulatorNotPhone=true automationIdle14s=true")
+            }
+            if iteration < 3 { app.terminate() }
+        }
+    }
+
     @MainActor func testContinuousPlaybackDrawerAndGlassPacing() {
         defer { captureFailure() }
         for plain in [true, false] {

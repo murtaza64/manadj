@@ -178,7 +178,7 @@ struct WorkspaceView: View {
                 HStack(spacing: 2) {
                     Text(deck.duration > 0 ? deck.artist : "local file").lineLimit(1)
                     Spacer(minLength: 0)
-                    Text("\(Ink.clock(deck.engine.position)) -\(Ink.clock(max(0, deck.duration - deck.engine.position)))").foregroundStyle(deck.engine.playing ? Ink.play : Ink.text).lineLimit(1)
+                    DeckTimeReadout(clock: model.positionReadouts[index], duration: deck.duration, playing: deck.engine.playing)
                 }.font(Ink.font(10)).foregroundStyle(Ink.muted)
             }
         }.contentShape(Rectangle()).onTapGesture { selected = index; model.loadTarget = index }
@@ -408,5 +408,18 @@ private struct CenterSelectionGlass: ViewModifier {
         #else
         content
         #endif
+    }
+}
+
+/// Only this small text observes the 10Hz position clock, not the mixer tree.
+struct DeckTimeReadout: View {
+    @ObservedObject var clock: DeckPositionReadout
+    var duration: Double
+    var playing: Bool
+    var precise = false
+    var body: some View {
+        Text(precise ? String(format: "%.2fs", clock.position)
+             : "\(Ink.clock(clock.position)) -\(Ink.clock(max(0, duration - clock.position)))")
+            .foregroundStyle(playing ? Ink.play : Ink.text).lineLimit(1)
     }
 }
