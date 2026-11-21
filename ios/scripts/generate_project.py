@@ -42,7 +42,7 @@ for name in ('ManadjCore', 'ManadjAudio'):
     products.append(add('product.'+name, 'XCSwiftPackageProductDependency', package=package, productName=name))
 frameworks = [add('link.'+name, 'PBXBuildFile', productRef=product) for name, product in zip(('ManadjCore', 'ManadjAudio'), products)]
 product = add('app', 'PBXFileReference', explicitFileType='wrapper.application', includeInIndex='0', path='manaDJ.app', sourceTree='BUILT_PRODUCTS_DIR')
-app_settings = dict(PRODUCT_BUNDLE_IDENTIFIER='dev.manadj.ios', PRODUCT_NAME='manaDJ', PRODUCT_MODULE_NAME='Manadj', INFOPLIST_FILE='Manadj/Info.plist', ASSETCATALOG_COMPILER_APPICON_NAME='AppIcon', TARGETED_DEVICE_FAMILY='1,2', CODE_SIGN_STYLE='Automatic', CURRENT_PROJECT_VERSION='1', MARKETING_VERSION='0.1.0', LD_RUNPATH_SEARCH_PATHS=['$(inherited)', '@executable_path/Frameworks'])
+app_settings = dict(PRODUCT_BUNDLE_IDENTIFIER='earth.murtaza.manadj.ios', PRODUCT_NAME='manaDJ', PRODUCT_MODULE_NAME='Manadj', INFOPLIST_FILE='Manadj/Info.plist', ASSETCATALOG_COMPILER_APPICON_NAME='AppIcon', TARGETED_DEVICE_FAMILY='1,2', CODE_SIGN_STYLE='Automatic', CURRENT_PROJECT_VERSION='1', MARKETING_VERSION='0.1.0', LD_RUNPATH_SEARCH_PATHS=['$(inherited)', '@executable_path/Frameworks'])
 app = add('target.app', 'PBXNativeTarget', buildConfigurationList=configs('app', app_settings), buildPhases=[add('app.sources','PBXSourcesBuildPhase',buildActionMask='2147483647',files=source_builds,runOnlyForDeploymentPostprocessing='0'),add('app.frameworks','PBXFrameworksBuildPhase',buildActionMask='2147483647',files=frameworks,runOnlyForDeploymentPostprocessing='0'),add('app.resources','PBXResourcesBuildPhase',buildActionMask='2147483647',files=resource_builds,runOnlyForDeploymentPostprocessing='0')], buildRules=[],dependencies=[],name='Manadj',packageProductDependencies=products,productName='manaDJ',productReference=product,productType='com.apple.product-type.application')
 
 targets, test_refs, test_products = [app], [], []
@@ -53,7 +53,7 @@ for name, kind in [('ManadjTests','unit-test'), ('ManadjUITests','ui-testing')]:
         refs.append(ref); builds.append(add('build.'+str(path.relative_to(ROOT)),'PBXBuildFile',fileRef=ref))
     test_refs.extend(refs)
     prod=add(name+'.product','PBXFileReference',explicitFileType='wrapper.cfbundle',includeInIndex='0',path=name+'.xctest',sourceTree='BUILT_PRODUCTS_DIR'); test_products.append(prod)
-    settings=dict(PRODUCT_BUNDLE_IDENTIFIER='dev.manadj.ios.'+name, PRODUCT_NAME='$(TARGET_NAME)', GENERATE_INFOPLIST_FILE='YES',CODE_SIGN_STYLE='Automatic',TARGETED_DEVICE_FAMILY='1,2')
+    settings=dict(PRODUCT_BUNDLE_IDENTIFIER='earth.murtaza.manadj.ios.'+name, PRODUCT_NAME='$(TARGET_NAME)', GENERATE_INFOPLIST_FILE='YES',CODE_SIGN_STYLE='Automatic',TARGETED_DEVICE_FAMILY='1,2')
     if kind=='unit-test': settings.update(TEST_HOST='$(BUILT_PRODUCTS_DIR)/manaDJ.app/manaDJ',BUNDLE_LOADER='$(TEST_HOST)')
     else: settings['TEST_TARGET_NAME']='Manadj'
     dep=add(name+'.dependency','PBXTargetDependency',target=app)
