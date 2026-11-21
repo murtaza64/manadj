@@ -85,11 +85,12 @@ struct WorkspaceView: View {
                     }
                     if browsing {
                         VStack(spacing: 0) {
-                            if !keyboardOpen { Capsule().fill(Ink.muted.opacity(0.7)).frame(width: 40, height: 4).frame(height: 16) }
+                            if !keyboardOpen { Capsule().fill(Ink.muted.opacity(0.7)).frame(width: 40, height: 4).frame(maxWidth: .infinity).frame(height: 24).contentShape(Rectangle())
+                                .gesture(DragGesture(minimumDistance: 12).onEnded { if $0.translation.height > 60 { withAnimation(.easeOut(duration: 0.24)) { browsing = false } } })
+                                .accessibilityLabel("Close browser drag handle") }
                             library
                             HStack(spacing: 12) { transport(0, browser: true); transport(1, browser: true) }.frame(height: 44).padding(.horizontal, 6).background(Ink.panel)
-                        }.background(Ink.base).transition(.move(edge: .bottom))
-                            .gesture(DragGesture(minimumDistance: 40).onEnded { if $0.translation.height > 60 { withAnimation(.easeOut(duration: 0.24)) { browsing = false } } })
+                        }.background(Ink.base).compositingGroup().transition(.move(edge: .bottom))
                     }
                     if settings {
                         VStack(spacing: 0) {

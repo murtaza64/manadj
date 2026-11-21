@@ -137,7 +137,7 @@ struct LibraryBrowser: View {
             } else if rows.isEmpty && !filtering {
                 ContentUnavailableView.search(text: search)
             } else {
-                List(rows) { track in
+                ScrollView { LazyVStack(spacing: 0) { ForEach(rows) { track in
                     // Android Library.kt SwipeToLoad: drag left → A, right → B,
                     // short travel or intentional flick commits on release, no full swipe.
                     SwipeToLoad(
@@ -173,11 +173,10 @@ struct LibraryBrowser: View {
                         }
                         #endif
                     }
-                    .listRowBackground(selectedTrack == track.id ? Ink.accent.opacity(0.08) : Ink.base)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 2, bottom: 0, trailing: 8))
-                    .listRowSeparatorTint(Ink.edge)
+                    .padding(.leading, 2).padding(.trailing, 8)
+                    .overlay(alignment: .bottom) { Rectangle().fill(Ink.edge).frame(height: 0.5) }
                     .contextMenu { if let bpm = track.bpm { Button("Match BPM ±6") { bpmCenter = bpm; filtersOpen = true } }; Button("Follow this track") { followReference = track.id }; ForEach(0..<4) { index in Button("Load deck \(Ink.deckName(index))") { if model.load(track, deck: index) { searchFocused = false } } } }
-                }.listStyle(.plain).scrollContentBackground(.hidden)
+                } } }.scrollDismissesKeyboard(.interactively)
                     .accessibilityIdentifier("library-track-list")
                     .accessibilityValue(firstRowTiming)
                 }

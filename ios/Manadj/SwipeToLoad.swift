@@ -1,80 +1,81 @@
 import SwiftUI
+import UIKit
 import ManadjCore
 
-/// Android Library.kt SwipeToLoad parity: drag left → deck A, drag right →
-/// deck B. The row slides over a deck-colored reveal with the target letter;
-/// crossing the arm threshold ticks a haptic and arms the load, releasing
-/// armed commits, and dragging back under the threshold cancels. A quick
-/// short swipe is enough — there is no full-width swipe requirement.
-/// Only horizontally dominant drags move the row, so the List keeps
-/// vertical scrolling.
+/// Native directional pan fails immediately for vertical motion, leaving List's
+/// own scroll/tap cancellation intact. Direction cannot change into a load later.
 struct SwipeToLoad<Content: View>: View {
-    /// Android direction/release semantics, shorter 60pt threshold per iPhone feedback.
     static var armDistance: CGFloat { 60 }
-    /// Horizontal-dominance slop before the row starts moving.
-    private static var slop: CGFloat { 12 }
-    /// Android clamps travel to 60% of the row width; rows here are phone-width.
-    private static var maxTravel: CGFloat { 240 }
-
     let loadA: () -> Void
     let loadB: () -> Void
     var background: Color = Ink.base
     @ViewBuilder var content: Content
-
     @State private var dx: CGFloat = 0
-    @State private var horizontal = false
-    @State private var armed = false
-    @State private var haptic = UISelectionFeedbackGenerator()
-
-    /// Android: dx < 0 (dragged left) loads deck A, dx > 0 loads deck B.
     private var deck: Int { dx < 0 ? 0 : 1 }
-
     var body: some View {
         ZStack {
             if dx != 0 {
                 HStack {
                     if dx < 0 { Spacer(minLength: 0) }
-                    Text(armed ? "LOAD \(Ink.deckName(deck))" : Ink.deckName(deck))
-                        .font(Ink.font(14, bold: true))
-                        .foregroundStyle(armed ? Ink.text : Ink.decks[deck])
-                        .padding(.horizontal, 16)
+                    Text(abs(dx) >= Self.armDistance ? "LOAD \(Ink.deckName(deck))" : Ink.deckName(deck))
+                        .font(Ink.font(14, bold: true)).foregroundStyle(Ink.decks[deck]).padding(.horizontal, 16)
                     if dx > 0 { Spacer(minLength: 0) }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Ink.decks[deck].opacity(armed ? 0.45 : 0.15))
-                .accessibilityIdentifier("swipe-load-reveal")
+                }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Ink.decks[deck].opacity(0.2))
+                    .accessibilityIdentifier("swipe-load-reveal")
             }
-            content
-                .background(background)
-                .offset(x: dx)
-        }
-        .simultaneousGesture(drag)
-        .accessibilityAction(named: "Load to A") { loadA() }
-        .accessibilityAction(named: "Load to B") { loadB() }
-    }
-
-    private var drag: some Gesture {
-        DragGesture(minimumDistance: 8)
-            .onChanged { value in
-                let t = value.translation
-                if !horizontal {
-                    // detectHorizontalDragGestures: claim only horizontal pans.
-                    guard abs(t.width) > Self.slop, abs(t.width) > abs(t.height) * 1.2 else { return }
-                    horizontal = true
-                    haptic.prepare()
-                }
-                dx = max(-Self.maxTravel, min(Self.maxTravel, t.width))
-                let now = abs(dx) >= Self.armDistance
-                if now != armed { armed = now; haptic.selectionChanged() }
-            }
-            .onEnded { value in
-                let target = horizontal ? LoadSwipeIntent.target(travel: value.translation.width,
-                    vertical: value.translation.height, projected: value.predictedEndTranslation.width) : nil
+            DirectionLockedRow(content: content.background(background).offset(x: dx), changed: { dx = $0 }, ended: { travel, vertical, cancelled in
+                let target = cancelled ? nil : LoadSwipeIntent.target(travel: travel, vertical: vertical, projected: travel)
                 withAnimation(.easeOut(duration: 0.16)) { dx = 0 }
-                horizontal = false
-                armed = false
-                guard let target else { return }
-                if target == 0 { loadA() } else { loadB() }
+                if target == 0 { loadA() }; if target == 1 { loadB() }
+            })
+        }
+        .accessibilityAction(named: "Load to A", loadA)
+        .accessibilityAction(named: "Load to B", loadB)
+    }
+}
+
+private struct DirectionLockedRow<Content: View>: UIViewControllerRepresentable {
+    let content: Content
+    let changed: (CGFloat) -> Void
+    let ended: (Double, Double, Bool) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(changed: changed, ended: ended) }
+    func makeUIViewController(context: Context) -> UIHostingController<Content> {
+        let controller = UIHostingController(rootView: content)
+        controller.safeAreaRegions = []; controller.view.backgroundColor = .clear
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pan(_:)))
+        pan.delegate = context.coordinator; pan.maximumNumberOfTouches = 1
+        pan.cancelsTouchesInView = true; controller.view.addGestureRecognizer(pan)
+        return controller
+    }
+    func updateUIViewController(_ controller: UIHostingController<Content>, context: Context) {
+        controller.rootView = content; context.coordinator.changed = changed; context.coordinator.ended = ended
+    }
+    func sizeThatFits(_ proposal: ProposedViewSize, uiViewController: UIHostingController<Content>, context: Context) -> CGSize? {
+        uiViewController.sizeThatFits(in: CGSize(width: proposal.width ?? 320, height: proposal.height ?? .greatestFiniteMagnitude))
+    }
+    @MainActor final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var changed: (CGFloat) -> Void
+        var ended: (Double, Double, Bool) -> Void
+        private var armed = false
+        private let haptic = UISelectionFeedbackGenerator()
+        init(changed: @escaping (CGFloat) -> Void, ended: @escaping (Double, Double, Bool) -> Void) { self.changed = changed; self.ended = ended }
+        func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = recognizer as? UIPanGestureRecognizer else { return false }
+            let t = pan.translation(in: pan.view), v = pan.velocity(in: pan.view)
+            return abs(t.x) > 3 && abs(t.x) > abs(t.y) * 1.5 && abs(v.x) > abs(v.y) * 1.5
+        }
+        @objc func pan(_ pan: UIPanGestureRecognizer) {
+            let t = pan.translation(in: pan.view)
+            switch pan.state {
+            case .began: haptic.prepare(); fallthrough
+            case .changed:
+                changed(max(-240, min(240, t.x)))
+                let next = abs(t.x) >= 60
+                if next != armed { armed = next; haptic.selectionChanged() }
+            case .ended, .cancelled, .failed:
+                ended(Double(t.x), Double(t.y), pan.state != .ended); armed = false
+            default: break
             }
+        }
     }
 }

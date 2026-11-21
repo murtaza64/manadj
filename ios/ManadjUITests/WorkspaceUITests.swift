@@ -333,6 +333,27 @@ final class WorkspaceUITests: XCTestCase {
         previews.name = "Library rows with preview waveforms"; previews.lifetime = .keepAlways; add(previews)
     }
 
+    @MainActor func testBrowserScrollDoesNotLoadOrStealCollapse() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture", "--browser-scroll-fixture"]; app.launch()
+        app.buttons["BROWSE"].tap()
+        let list = app.scrollViews["library-track-list"]
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        let first = XCTAttachment(screenshot: app.screenshot()); first.name = "Browser and list expanded as one surface before scroll"; first.lifetime = .keepAlways; add(first)
+        for delta in [CGVector(dx: 12, dy: -190), CGVector(dx: -18, dy: -200), CGVector(dx: 25, dy: 160), CGVector(dx: -20, dy: -150)] {
+            let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: delta.dy < 0 ? 0.8 : 0.2))
+            from.press(forDuration: 0.02, thenDragTo: from.withOffset(delta), withVelocity: .fast, thenHoldForDuration: 0)
+            XCTAssertTrue(app.textFields["Search title, artist, file"].exists, "Scrolling must not close browser or load a track")
+            XCTAssertFalse(app.alerts.firstMatch.exists, "Scrolling must not attempt unavailable track loads")
+            for index in 0..<2 { XCTAssertFalse((app.buttons["deck-\(index)-info"].value as? String ?? "").contains("Test Tone")) }
+        }
+        let after = XCTAttachment(screenshot: app.screenshot()); after.name = "Vertical diagonal and reversed browser scroll without deck load"; after.lifetime = .keepAlways; add(after)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Scroll fixture'")).firstMatch.exists)
+        app.buttons["BROWSE"].firstMatch.tap()
+        app.buttons["BROWSE"].firstMatch.tap()
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+    }
+
     @MainActor func testLibraryQuickSwipeLoadsWithoutFullSwipe() {
         defer { captureFailure() }
         let app = XCUIApplication()
@@ -349,7 +370,7 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         // User-requested short flick keeps Android left=A direction.
         let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
-        let to = from.withOffset(CGVector(dx: -45, dy: 0))
+        let to = from.withOffset(CGVector(dx: -75, dy: 0))
         from.press(forDuration: 0.01, thenDragTo: to, withVelocity: .fast, thenHoldForDuration: 0)
         let deck = app.buttons["deck-0-info"]
         let loaded = NSPredicate(format: "value CONTAINS %@", "Cached Test Tone")
@@ -364,7 +385,7 @@ final class WorkspaceUITests: XCTestCase {
         let row = app.staticTexts["Cached Test Tone"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
-        from.press(forDuration: 0.01, thenDragTo: from.withOffset(CGVector(dx: 45, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+        from.press(forDuration: 0.01, thenDragTo: from.withOffset(CGVector(dx: 75, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
         let loaded = NSPredicate(format: "value CONTAINS %@", "Cached Test Tone")
         expectation(for: loaded, evaluatedWith: app.buttons["deck-1-info"]); waitForExpectations(timeout: 8)
         XCTAssertFalse((app.buttons["deck-0-info"].value as? String ?? "").contains("Cached Test Tone"))

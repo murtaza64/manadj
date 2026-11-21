@@ -49,7 +49,15 @@ extension AppModel {
         do {
             let store = try LibraryStore(root: root.appendingPathComponent("library"))
             let json = #"{"version":1,"tag_categories":[{"id":1,"name":"Style"}],"tags":[{"id":1,"name":"Rolling","category_id":1},{"id":2,"name":"Liquid","category_id":1}],"settings":{},"playlists":[{"id":10,"name":"Fixture set","display_order":0,"track_ids":[1,2]},{"id":11,"name":"Empty set","display_order":1,"track_ids":[]}],"tracks":[{"id":1,"file_name":"cached.wav","title":"Cached Test Tone","bpm":128,"tag_ids":[1],"artist":"Synthetic fixture","audio_rev":"fixture","preview_rev":"fixture"},{"id":2,"file_name":"offline.wav","title":"Offline Test Tone","bpm":174,"tag_ids":[2],"artist":"Synthetic fixture","audio_rev":"missing","preview_rev":"fixture"}]}"#
-            try store.saveSnapshot(json)
+            var savedJSON = json
+            if ProcessInfo.processInfo.arguments.contains("--browser-scroll-fixture"),
+               var object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+               var tracks = object["tracks"] as? [[String: Any]] {
+                for i in 3...82 { tracks.append(["id": i, "file_name": "fixture-\(i).wav", "title": String(format: "Scroll fixture %03d", i), "artist": "Generated no-music fixture", "bpm": 128]) }
+                object["tracks"] = tracks
+                savedJSON = String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+            }
+            try store.saveSnapshot(savedJSON)
             // Row preview coverage: both tracks carry a preview blob, so the
             // browser UI tests see the same waveform path as a synced phone.
             for (track, name) in zip(try SnapshotJson.parse(json).tracks, ["synthetic-A", "synthetic-B"]) {
