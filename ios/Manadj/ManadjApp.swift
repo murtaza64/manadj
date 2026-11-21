@@ -80,7 +80,7 @@ struct WorkspaceView: View {
             let compact = geometry.size.height < 860
             // The SE cannot fit square pads and all transport controls at the
             // regular-phone density. Fit one intact canvas, not a clipped stack.
-            let canvasHeight = max(780, geometry.size.height)
+            let canvasHeight = geometry.size.height < 760 ? CGFloat(860) : geometry.size.height
             let fit = min(CGFloat(1), geometry.size.height / canvasHeight)
             let gap: CGFloat = compact ? 5 : 8
             VStack(spacing: gap) {
