@@ -50,7 +50,7 @@ final class FeedbackUITests: XCTestCase {
         app.buttons["feedback-submit"].tap()
         XCTAssertTrue(app.buttons["SAVE REVIEWED FEEDBACK ON IPHONE"].waitForExistence(timeout: 5))
         capture("Explicit reviewed save confirmation, no paired desktop", app: app)
-        app.buttons["SAVE REVIEWED FEEDBACK ON IPHONE"].tap()
+        app.buttons["SAVE REVIEWED FEEDBACK ON IPHONE"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["SAVED ON THIS IPHONE"].waitForExistence(timeout: 15))
         capture("Saved locally without an automatic later send", app: app)
         app.buttons["feedback-open-outbox"].tap()

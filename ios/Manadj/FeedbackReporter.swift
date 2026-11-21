@@ -82,13 +82,13 @@ import ManadjAudio
     }
     private func transcribeLocal(_ url: URL) async {
         let token = generation
-        let status = await withCheckedContinuation { continuation in SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) } }
+        let status = await withCheckedContinuation { continuation in SFSpeechRecognizer.requestAuthorization { @Sendable status in continuation.resume(returning: status) } }
         guard generation == token, voiceURL == url, active, !recording else { return }
         guard status == .authorized, let recognizer = SFSpeechRecognizer(), recognizer.supportsOnDeviceRecognition else {
             message = "Voice is saved locally. On-device transcription is unavailable; add text at review. No voice was sent to a speech service."; return
         }
         let request = SFSpeechURLRecognitionRequest(url: url); request.requiresOnDeviceRecognition = true
-        recognition = recognizer.recognitionTask(with: request) { [weak self] result, error in
+        recognition = recognizer.recognitionTask(with: request) { @Sendable [weak self] result, error in
             let text = result?.bestTranscription.formattedString
             let failure = error?.localizedDescription
             Task { @MainActor in
