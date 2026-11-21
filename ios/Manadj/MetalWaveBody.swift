@@ -24,7 +24,7 @@ import ManadjCore
     private(set) var lastCPUEncodeMS = 0.0
     private(set) var failure: String?
 
-    init?(frame: CGRect) {
+    init?(experimentFrame frame: CGRect) {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else { return nil }
         do {
             let library = try device.makeLibrary(source: Self.shader, options: nil)

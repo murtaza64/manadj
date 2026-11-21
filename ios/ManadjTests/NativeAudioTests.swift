@@ -10,7 +10,7 @@ import CEngine
 
 final class NativeAudioTests: XCTestCase {
     @MainActor func testMetalWaveBodyGPUCompletionAndReadbackSynthetic() throws {
-        let gpu = try XCTUnwrap(MetalWaveBody(frame: CGRect(x: 0, y: 0, width: 390, height: 60)), "Metal must initialize; fallback alone is not proof")
+        let gpu = try XCTUnwrap(MetalWaveBody(experimentFrame: CGRect(x: 0, y: 0, width: 390, height: 60)), "Metal must initialize; fallback alone is not proof")
         let device = try XCTUnwrap(gpu.device)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 1170, height: 180, mipmapped: false)
         descriptor.usage = [.renderTarget, .shaderRead]; descriptor.storageMode = .shared

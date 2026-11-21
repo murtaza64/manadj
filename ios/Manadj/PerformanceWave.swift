@@ -225,7 +225,7 @@ struct PerformanceWave: UIViewRepresentable {
         if metalPrototype && wave != nil {
             if !triedMetal {
                 triedMetal = true
-                if let gpu = MetalWaveBody(frame: bounds) {
+                if let gpu = MetalWaveBody(experimentFrame: bounds) {
                     metalBody = gpu; addSubview(gpu)
                     let overlay = MetalWaveOverlay(frame: bounds); overlay.owner = self
                     overlay.isOpaque = false; overlay.backgroundColor = .clear; overlay.isUserInteractionEnabled = false
