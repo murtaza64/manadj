@@ -26,6 +26,10 @@ final class WorkspaceUITests: XCTestCase {
         measure(metrics: [XCTClockMetric()], options: options) {
             app.buttons["BROWSE"].tap()
             XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
+            let list = app.descendants(matching: .any)["library-track-list"].firstMatch
+            let timing = NSPredicate(format: "value BEGINSWITH %@", "nativeTapToRowAppearMs=")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: timing, object: list)], timeout: 5), .completed)
+            print("SYNTHETIC_BROWSER_NATIVE \(list.value ?? "missing") excludesAutomationTapOverhead=true rowAppearNotPixels=true")
             app.buttons["BROWSE"].firstMatch.tap()
         }
     }

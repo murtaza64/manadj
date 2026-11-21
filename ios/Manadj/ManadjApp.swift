@@ -143,7 +143,12 @@ struct WorkspaceView: View {
     }
 
     private var browseKey: some View {
-        Button("BROWSE") { withAnimation { settings = false; browsing.toggle() } }.buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing))
+        Button("BROWSE") {
+            #if DEBUG
+            if !browsing { model.browserOpenStarted = ProcessInfo.processInfo.systemUptime }
+            #endif
+            withAnimation { settings = false; browsing.toggle() }
+        }.buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing))
     }
     private var library: some View {
         LibraryBrowser(onClose: { withAnimation { browsing = false } }, onLoad: { track in

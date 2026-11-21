@@ -14,6 +14,9 @@ struct DeckViewState {
 }
 
 @MainActor final class AppModel: ObservableObject {
+    #if DEBUG
+    var browserOpenStarted: Double?
+    #endif
     @Published var decks = (0..<4).map { _ in DeckViewState() }
     @Published var libraryVersion = 0
     @Published var snapshot: Snapshot? { didSet { libraryVersion += 1 } }

@@ -22,6 +22,7 @@ struct LibraryBrowser: View {
     @State private var rows: [LibraryTrack] = []
     @State private var followLabels: [Int: String] = [:]
     @State private var filtering = false
+    @State private var firstRowTiming = "awaiting first row"
     private var taskId: String {
         "\(model.libraryVersion)|\(model.downloaded.count)|\(search)|\(source.key)|\(sort.rawValue)|\(downloadedOnly)|\(tags.sorted())|\(bpmCenter ?? -1)|\(energy)|\(followReference ?? -1)"
     }
@@ -164,11 +165,21 @@ struct LibraryBrowser: View {
                             .buttonStyle(.plain)
                         }
                     }
+                    .onAppear {
+                        #if DEBUG
+                        if let began = model.browserOpenStarted {
+                            firstRowTiming = String(format: "nativeTapToRowAppearMs=%.3f rows=%d", (ProcessInfo.processInfo.systemUptime - began) * 1000, rows.count)
+                            model.browserOpenStarted = nil
+                        }
+                        #endif
+                    }
                     .listRowBackground(selectedTrack == track.id ? Ink.accent.opacity(0.08) : Ink.base)
                     .listRowInsets(EdgeInsets(top: 0, leading: 2, bottom: 0, trailing: 8))
                     .listRowSeparatorTint(Ink.edge)
                     .contextMenu { if let bpm = track.bpm { Button("Match BPM ±6") { bpmCenter = bpm; filtersOpen = true } }; Button("Follow this track") { followReference = track.id }; ForEach(0..<4) { index in Button("Load deck \(Ink.deckName(index))") { if model.load(track, deck: index) { searchFocused = false } } } }
                 }.listStyle(.plain).scrollContentBackground(.hidden)
+                    .accessibilityIdentifier("library-track-list")
+                    .accessibilityValue(firstRowTiming)
                 }
             }
             .background(Ink.base)

@@ -20,11 +20,11 @@ struct PerformanceWave: UIViewRepresentable {
     func updateUIView(_ view: PerformanceWaveView, context: Context) {
         let deck = model.decks[index]
         if view.source != deck.engine.load {
-            view.source = deck.engine.load; view.columns.removeAll(); view.waveReady = false
+            view.source = deck.engine.load; view.columns.removeAll(); view.preparedColumns.removeAll(); view.waveReady = false
             view.fillGain = deck.waveform?.displayFillGain ?? 1
             view.body = nil
         }
-        if !view.waveReady, let wave = deck.waveform { view.fillGain = wave.displayFillGain; view.columns.removeAll(); view.waveReady = true }
+        if !view.waveReady, let wave = deck.waveform { view.fillGain = wave.displayFillGain; view.columns.removeAll(); view.preparedColumns.removeAll(); view.waveReady = true }
         view.wave = deck.waveform
         view.duration = deck.duration
         view.vertical = vertical
@@ -54,6 +54,7 @@ struct PerformanceWave: UIViewRepresentable {
     var zoom: ((Double) -> Void)?
     var playback: ((Bool) -> Void)?
     var columns: [Int: [Double]] = [:]
+    var preparedColumns: [Int: [(Double, Int)]] = [:]
     var fillGain = 1.0
     var waveReady = false
     /// Android renderOverview: the minimap body depends only on data + size, so
@@ -108,7 +109,7 @@ struct PerformanceWave: UIViewRepresentable {
         if gesture.state == .began { pinchWindow = spanSeconds }
         spanSeconds = min(48, max(0.75, pinchWindow / Double(gesture.scale)))
         zoom?(spanSeconds)
-        columns.removeAll(); setNeedsDisplay()
+        columns.removeAll(); preparedColumns.removeAll(); setNeedsDisplay()
     }
     private func location(_ point: CGPoint) -> Double {
         let along = vertical ? bounds.height : bounds.width
@@ -247,7 +248,7 @@ struct PerformanceWave: UIViewRepresentable {
             } else {
                 let step = 2 / scale // Android detail columns are 2 physical pixels
                 let secondsPerColumn = span / max(1, Double(along)) * Double(step)
-                if abs(secondsPerColumn - cachedStep) > 0.000001 { cachedStep = secondsPerColumn; columns.removeAll() }
+                if abs(secondsPerColumn - cachedStep) > 0.000001 { cachedStep = secondsPerColumn; columns.removeAll(); preparedColumns.removeAll() }
                 let first = Int(floor(start / secondsPerColumn))
                 let count = Int(Double(along) / Double(step)) + 2
                 // Whole-device-pixel translation so scrolling never resamples columns.
@@ -256,14 +257,30 @@ struct PerformanceWave: UIViewRepresentable {
                 for i in 0..<count {
                     let k = first + i; let t0 = Double(k) * secondsPerColumn
                     if t0 + secondsPerColumn < 0 || t0 > duration { continue }
-                    let groups: [Double]
-                    if let cached = columns[k] { groups = cached }
-                    else { groups = wave.columnGroups(from: t0, to: t0 + secondsPerColumn).map { min(1, $0 * fillGain) }; columns[k] = groups }
-                    addSegments(&paths, groups: groups, at: CGFloat(base + Double(i) * Double(step)),
-                                across: across, style: .full, dim: 1, anchored: false)
+                    // Cache amplitude ordering and color math with each source column.
+                    // Only translation/path appending belongs on the display clock.
+                    let segments: [(Double, Int)]
+                    if let cached = preparedColumns[k] { segments = cached }
+                    else {
+                        let groups = wave.columnGroups(from: t0, to: t0 + secondsPerColumn).map { min(1, $0 * fillGain) }
+                        segments = (0..<3).sorted { groups[$0] > groups[$1] }.compactMap { n in
+                            guard groups[n] > 0.002 else { return nil }
+                            var mask = 0
+                            for m in 0..<3 where groups[m] >= groups[n] { mask |= 1 << m }
+                            return (groups[n], WaveStyle.full.bucket(mask: mask, groups: groups))
+                        }
+                        preparedColumns[k] = segments
+                    }
+                    let p = CGFloat(base + Double(i) * Double(step)), half = across / 2
+                    for (amplitude, bucket) in segments {
+                        let path = paths[bucket] ?? CGMutablePath(), size = CGFloat(amplitude) * half
+                        if vertical { path.move(to: CGPoint(x: half - size, y: p)); path.addLine(to: CGPoint(x: half + size, y: p)) }
+                        else { path.move(to: CGPoint(x: p, y: half - size)); path.addLine(to: CGPoint(x: p, y: half + size)) }
+                        paths[bucket] = path
+                    }
                 }
                 stroke(ctx, paths, width: step)
-                if columns.count > 24000 { columns.removeAll(keepingCapacity: true) }
+                if preparedColumns.count > 24000 { columns.removeAll(keepingCapacity: true); preparedColumns.removeAll(keepingCapacity: true) }
             }
         }
         if !overview && state.bpm > 0 {
