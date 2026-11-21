@@ -50,6 +50,26 @@ final class NativeAudioTests: XCTestCase {
         var bytes = [UInt8](repeating: 0, count: 1170 * 180 * 4)
         bytes.withUnsafeMutableBytes { raw in texture.getBytes(raw.baseAddress!, bytesPerRow: 1170 * 4, from: MTLRegionMake2D(0,0,1170,180), mipmapLevel: 0) }
         XCTAssertTrue(bytes.enumerated().contains { $0.offset % 4 != 3 && $0.element > 32 }, "GPU output must contain waveform pixels, not just a clear")
+        var referenceBytes = [UInt8](repeating: 0, count: bytes.count)
+        let referenceImage = try XCTUnwrap(cpuImage.cgImage)
+        referenceBytes.withUnsafeMutableBytes { raw in
+            let context = CGContext(data: raw.baseAddress, width: 1170, height: 180, bitsPerComponent: 8, bytesPerRow: 1170 * 4,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)!
+            context.draw(referenceImage, in: CGRect(x: 0, y: 0, width: 1170, height: 180))
+        }
+        var active = 0, mismatched = 0
+        for y in 0..<180 { for x in 0..<1170 {
+            if (345...355).contains(x) { continue } // CPU-only playhead, not waveform parity.
+            let i = (y * 1170 + x) * 4
+            if (0..<3).contains(where: { max(bytes[i + $0], referenceBytes[i + $0]) > 10 }) {
+                active += 1
+                if (0..<3).contains(where: { abs(Int(bytes[i + $0]) - Int(referenceBytes[i + $0])) > 30 }) { mismatched += 1 }
+            }
+        } }
+        XCTAssertGreaterThan(active, 1000, "Parity must compare visible waveform pixels, not a black image")
+        let mismatch = Double(mismatched) / Double(max(1, active))
+        print("SYNTHETIC_METAL_PIXEL_PARITY activePixels=\(active) differingActiveFraction=\(mismatch) channelTolerance=30 excludesCPUPlayhead=true")
+        XCTAssertLessThan(mismatch, 0.10, "GPU and CPU must agree on at least 90% of active waveform pixels within channel tolerance")
         let data = Data(bytes)
         let provider = try XCTUnwrap(CGDataProvider(data: data as CFData))
         let image = try XCTUnwrap(CGImage(width: 1170, height: 180, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 1170*4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue).union(.byteOrder32Little), provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))

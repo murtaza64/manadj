@@ -27,7 +27,11 @@ final class WorkspaceUITests: XCTestCase {
             app.launch()
             let a = app.buttons["A play pause"], b = app.buttons["B play pause"]
             XCTAssertTrue(a.waitForExistence(timeout: 20)); waitForReadyTransport(a, app: app)
+            let bReady = NSPredicate(format: "enabled == true AND hittable == true")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: bReady, object: b)], timeout: 15), .completed)
             a.tap(); b.tap()
+            let bPlaying = NSPredicate(format: "value BEGINSWITH %@", "playing")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: bPlaying, object: app.otherElements["deck-1-detail-wave"])], timeout: 5), .completed)
             let wave = app.otherElements["deck-0-detail-wave"]
             let measured = NSPredicate(format: "value CONTAINS %@", "waveBodySamples=120")
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: measured, object: wave)], timeout: 20), .completed)
