@@ -95,7 +95,7 @@ public final class SyncClient: Sendable {
         }
         if let expectedBytes, expectedBytes > 0 {
             let size = try temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize
-            guard size.map(Int64.init) == expectedBytes else { throw SyncError("Audio length changed. Sync the library again.") }
+            guard size.map(Int64.init) == expectedBytes else { throw SyncError("Audio length mismatch (expected \(expectedBytes) bytes, received \(size.map(String.init) ?? "unknown")). Complete cached files were kept. Refresh the library before retrying.") }
         }
         try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
         let staging = target.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".part")
