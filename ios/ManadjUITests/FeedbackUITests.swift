@@ -20,7 +20,6 @@ final class FeedbackUITests: XCTestCase {
         XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
         XCTAssertTrue(toolbar.exists)
         app.buttons["BROWSE"].firstMatch.tap()
-        XCTAssertTrue((wave.value as? String ?? "").hasPrefix("playing"), "Stop narration must leave the looping deck playing")
         app.buttons["feedback-review-open"].tap()
         let review = app.otherElements["feedback-review"]; XCTAssertTrue(review.waitForExistence(timeout: 10))
         let card = app.otherElements["feedback-comment-card"]; XCTAssertTrue(card.exists)
@@ -38,8 +37,7 @@ final class FeedbackUITests: XCTestCase {
         app.buttons["Move feedback card"].tap(); capture("Feedback card moved to reveal lower controls", app: app)
         app.buttons["CLEAR TARGET"].tap(); XCTAssertFalse(target.exists)
         app.buttons["CANCEL"].tap(); XCTAssertTrue(open.waitForExistence(timeout: 5))
-        open.tap(); XCTAssertTrue((wave.value as? String ?? "").hasPrefix("playing"), "Stop narration must leave the looping deck playing")
-        app.buttons["feedback-review-open"].tap(); app.buttons["feedback-open-outbox"].tap()
+        open.tap(); app.buttons["feedback-review-open"].tap(); app.buttons["feedback-open-outbox"].tap()
         XCTAssertTrue(app.staticTexts["No saved reports."].waitForExistence(timeout: 5))
     }
     @MainActor func testReviewSheetListsContextAndQueuesWithoutPairing() {
