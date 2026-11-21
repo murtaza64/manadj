@@ -142,6 +142,8 @@ final class WorkspaceUITests: XCTestCase {
         let pair = app.buttons["PAIR IPHONE"]
         for _ in 0..<8 where !pair.isHittable { panel.swipeUp(velocity: .slow) }
         XCTAssertTrue(pair.isHittable, "Pair action must remain reachable inside bounded Sync scroll")
+        XCTAssertGreaterThanOrEqual(pair.frame.height, 44)
+        XCTAssertLessThanOrEqual(pair.frame.maxY, panel.frame.maxY + 1, "Whole Pair target must fit, not merely its center")
         XCTAssertEqual(app.buttons["A play pause"].frame.minY, beforeTransport.minY, accuracy: 2)
         shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Actual Sync tab reuses desktop pairing and library sync"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["center-tab-fx"].tap()

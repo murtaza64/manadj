@@ -9,14 +9,14 @@ struct SettingsView: View {
     @State private var liveConfirmation = false
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: syncOnly ? 4 : 12) {
                 if !syncOnly { SectionLabel(title: "DESKTOP · PHONE SYNC") }
                 if !syncOnly {
                 Text("On the desktop: Settings → Phone sync. Enable the LAN listener, then enter one of the shown LAN addresses here. Both devices must be on the same trusted network.").font(Ink.font(14)).foregroundStyle(Ink.muted)
                 }
                 TextField("http://192.168.1.20:48127", text: $model.origin)
                     .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .padding(12).background(Ink.crust).overlay(Rectangle().stroke(Ink.edge)).disabled(model.busy)
+                    .font(Ink.font(syncOnly ? 12 : 14)).padding(.horizontal, 8).frame(height: syncOnly ? 38 : 48).background(Ink.crust).overlay(Rectangle().stroke(Ink.edge)).disabled(model.busy)
                     .accessibilityLabel("Desktop address")
 
                 if let paired = model.pairedOrigin {
@@ -82,7 +82,7 @@ struct SettingsView: View {
                 Text("Native SwiftUI interface · AVFoundation audio output and file decoding · shared C++ DSP engine · Swift library and Follow ranking. This is implementation work, not a verified release.").font(Ink.font(12)).foregroundStyle(Ink.muted)
                 Text("Still missing: desktop write-back, saved imports browser, Session replay/timeline, sync groups/phase alignment, scratch gestures, stems, heard-latency calibration, full detail-waveform editing and four-channel output. Read the Android coverage map in ios/FEATURE_COVERAGE.md.").font(Ink.font(12)).foregroundStyle(Ink.warning)
                 }
-            }.padding(syncOnly ? 6 : 16)
+            }.padding(syncOnly ? 4 : 16)
         }.background(Ink.base)
         .confirmationDialog("Replace phone playback with your paired desktop?", isPresented: $liveConfirmation) {
             Button("Listen to local live") { model.startLocalLive() }
