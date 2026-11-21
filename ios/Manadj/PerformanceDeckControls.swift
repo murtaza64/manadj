@@ -15,6 +15,22 @@ struct PerformanceDeckControls: View {
     private var shiftKey: some View {
         Button("SHIFT") { shift.toggle() }.buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: shift)).frame(width: 46)
     }
+    private func canLatchHotCue(_ slot: Int) -> Bool {
+        guard !shift, let live = model.audio?.state(index) else { return false }
+        return live.preview && live.previewSlot == Int32(slot)
+    }
+    private func hotCuePad(_ slot: Int) -> some View {
+        let time = cue(slot)
+        return HoldControl(
+            title: "\(slot + 1)\n\(time < 0 ? "SET" : Ink.clock(time))",
+            color: Ink.cues[slot], active: state.preview && state.previewSlot == Int32(slot),
+            enabled: state.ready, marked: time >= 0,
+            down: { model.set(shift ? MDJHotCueClear : time < 0 ? MDJHotCueSet : MDJHotCueDown, index, 0, slot: slot) },
+            up: { model.set(MDJHotCueUp, index, 0, slot: slot) },
+            canLatch: { canLatchHotCue(slot) }, latch: { model.set(MDJPlay, index, 0) }
+        ).accessibilityIdentifier("deck-\(index)-hotcue-\(slot)")
+            .padding(3).accessibilityLabel("\(Ink.deckName(index)) hotcue \(slot + 1)")
+    }
     var body: some View {
         GeometryReader { geometry in
             let padHeight: CGFloat = compact ? 80 : 104
@@ -30,9 +46,7 @@ struct PerformanceDeckControls: View {
                         HStack(spacing: 0) {
                             ForEach(0..<4) { c in
                                 let slot = r * 4 + c
-                                HoldControl(title: "\(slot + 1)\n\(cue(slot) < 0 ? "SET" : Ink.clock(cue(slot)))", color: Ink.cues[slot], active: state.preview && state.previewSlot == slot, enabled: state.ready, marked: cue(slot) >= 0, down: {
-                                    model.set(shift ? MDJHotCueClear : cue(slot) < 0 ? MDJHotCueSet : MDJHotCueDown, index, 0, slot: slot)
-                                }, up: { model.set(MDJHotCueUp, index, 0, slot: slot) }).padding(3).accessibilityLabel("\(Ink.deckName(index)) hotcue \(slot + 1)")
+                                hotCuePad(slot)
                             }
                         }
                     }

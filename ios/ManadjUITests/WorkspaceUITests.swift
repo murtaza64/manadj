@@ -387,6 +387,26 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertFalse((app.buttons["deck-0-info"].value as? String ?? "").contains("Cached Test Tone"))
     }
 
+    @MainActor func testCueAndStoredHotcueHoldSlideLatch() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        waitForReadyTransport(app.buttons["A play pause"], app: app)
+        let cue = app.buttons["deck-0-cue-hold"]
+        XCTAssertTrue(cue.waitForExistence(timeout: 20))
+        let wave = app.otherElements["deck-0-detail-wave"]
+        // At the stored main cue, hold and drag right to take over preview.
+        let point = cue.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        point.press(forDuration: 0.4, thenDragTo: point.withOffset(CGVector(dx: 85, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let playing = NSPredicate(format: "value BEGINSWITH %@", "playing")
+        expectation(for: playing, evaluatedWith: wave); waitForExpectations(timeout: 8)
+        app.buttons["A play pause"].tap()
+        let pad = app.buttons["deck-0-hotcue-0"]
+        let padPoint = pad.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        padPoint.press(forDuration: 0.4, thenDragTo: padPoint.withOffset(CGVector(dx: -85, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        expectation(for: playing, evaluatedWith: wave); waitForExpectations(timeout: 8)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Cue and hotcue slide-to-play latched synthetic"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     @MainActor func testLocalLiveSyntheticPairedHostMonitor() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--local-live-ui-fixture"]; app.launch()

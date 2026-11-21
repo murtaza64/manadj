@@ -14,7 +14,7 @@ interface DictationRecognition {
   interimResults: boolean;
   lang: string;
   onresult: ((event: { resultIndex: number; results: DictationResult[] }) => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
   onend: (() => void) | null;
   start(): void;
   stop(): void;
@@ -34,8 +34,15 @@ export interface Dictation {
   stop(): void;
 }
 
-/** Append final transcripts to `onText` until stopped; null when unsupported. */
-export function startDictation(onText: (text: string) => void, onEnd: () => void): Dictation | null {
+/**
+ * Append final transcripts to `onText` until stopped; null when
+ * unsupported. `onError` receives the service's failure reason
+ * (SpeechRecognition error event names) when a session dies on its own —
+ * permission denied, no mic, unreachable service — so the form can say so
+ * instead of silently resetting. Explicit stops and late post-stop errors
+ * never reach `onError`.
+ */
+export function startDictation(onText: (text: string) => void, onEnd: () => void, onError?: (reason: string) => void): Dictation | null {
   const Ctor = ctor();
   if (!Ctor) return null;
   const recognition = new Ctor();
@@ -54,8 +61,10 @@ export function startDictation(onText: (text: string) => void, onEnd: () => void
       if (!stopped && result.isFinal && text) onText(text);
     }
   };
-  recognition.onerror = () => {
-    if (!stopped) recognition.stop();
+  recognition.onerror = (event) => {
+    if (stopped) return;
+    onError?.(event?.error ?? 'unknown');
+    recognition.stop();
   };
   recognition.onend = () => {
     stopped = true;

@@ -427,7 +427,7 @@
 		"87D6626BE2AC0AB5E63AD0B9" = {
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
-				"PRODUCT_BUNDLE_IDENTIFIER" = "dev.manadj.ios";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "earth.murtaza.manadj.ios";
 				"PRODUCT_NAME" = "manaDJ";
 				"PRODUCT_MODULE_NAME" = "Manadj";
 				"INFOPLIST_FILE" = "Manadj/Info.plist";
@@ -443,7 +443,7 @@
 		"3A9669118334ABE63A2B8662" = {
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
-				"PRODUCT_BUNDLE_IDENTIFIER" = "dev.manadj.ios";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "earth.murtaza.manadj.ios";
 				"PRODUCT_NAME" = "manaDJ";
 				"PRODUCT_MODULE_NAME" = "Manadj";
 				"INFOPLIST_FILE" = "Manadj/Info.plist";
@@ -534,7 +534,7 @@
 		"F4A58CAC07A0001B5B1F326B" = {
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
-				"PRODUCT_BUNDLE_IDENTIFIER" = "dev.manadj.ios.ManadjTests";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "earth.murtaza.manadj.ios.ManadjTests";
 				"PRODUCT_NAME" = "$(TARGET_NAME)";
 				"GENERATE_INFOPLIST_FILE" = "YES";
 				"CODE_SIGN_STYLE" = "Automatic";
@@ -547,7 +547,7 @@
 		"FE52E47FA7B370768480D1FF" = {
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
-				"PRODUCT_BUNDLE_IDENTIFIER" = "dev.manadj.ios.ManadjTests";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "earth.murtaza.manadj.ios.ManadjTests";
 				"PRODUCT_NAME" = "$(TARGET_NAME)";
 				"GENERATE_INFOPLIST_FILE" = "YES";
 				"CODE_SIGN_STYLE" = "Automatic";
@@ -621,7 +621,7 @@
 		"5EB1176EB2B21ED2D9EA971C" = {
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
-				"PRODUCT_BUNDLE_IDENTIFIER" = "dev.manadj.ios.ManadjUITests";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "earth.murtaza.manadj.ios.ManadjUITests";
 				"PRODUCT_NAME" = "$(TARGET_NAME)";
 				"GENERATE_INFOPLIST_FILE" = "YES";
 				"CODE_SIGN_STYLE" = "Automatic";
@@ -633,7 +633,7 @@
 		"9B23D0444AB96D3E16934C7F" = {
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
-				"PRODUCT_BUNDLE_IDENTIFIER" = "dev.manadj.ios.ManadjUITests";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "earth.murtaza.manadj.ios.ManadjUITests";
 				"PRODUCT_NAME" = "$(TARGET_NAME)";
 				"GENERATE_INFOPLIST_FILE" = "YES";
 				"CODE_SIGN_STYLE" = "Automatic";

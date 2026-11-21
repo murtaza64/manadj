@@ -37,6 +37,7 @@ const LibrarySettings = lazy(() => import('./LibrarySettings'));
 const WallpaperThemeSettings = lazy(() => import('./WallpaperThemeSettings'));
 const HeardSettings = lazy(() => import('./HeardSettings'));
 const PhoneSyncSettings = lazy(() => import('./PhoneSyncSettings'));
+const RemoteLibrarySettings = lazy(() => import('./RemoteLibrarySettings'));
 const ExchangeSettings = lazy(() => import('./ExchangeSettings'));
 const SetupSettings = lazy(() => import('../setup/SetupSettings'));
 const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
@@ -443,6 +444,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     sections: [
       { id: 'library', title: 'Library', render: () => <LibrarySettings /> },
       { id: 'phone-sync', title: 'Phone sync', render: () => <PhoneSyncSettings /> },
+      { id: 'remote-library', title: 'Remote library', render: () => <RemoteLibrarySettings /> },
       { id: 'session-exchange', title: 'Session exchange', render: () => <ExchangeSettings /> },
     ],
   },

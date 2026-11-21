@@ -151,6 +151,29 @@ final class NativeAudioTests: XCTestCase {
         }
     }
 
+    @MainActor func testPreviewPlayTakeoverSurvivesCueRelease() async throws {
+        let audio = try NativeAudio()
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "wav"))
+        _ = try await audio.load(url, deck: 0)
+        for hotcue in [false, true] {
+            audio.send(MDJPause); audio.send(MDJSeek, value: 0)
+            if hotcue { audio.send(MDJHotCueSetAt, value: 0, slot: 0) }
+            try await Task.sleep(for: .milliseconds(80))
+            audio.send(hotcue ? MDJHotCueDown : MDJCueDown, slot: 0)
+            try await Task.sleep(for: .milliseconds(80))
+            XCTAssertTrue(audio.state(0).preview)
+            audio.send(MDJPlay)
+            audio.send(hotcue ? MDJHotCueUp : MDJCueUp, slot: 0)
+            try await Task.sleep(for: .milliseconds(80))
+            XCTAssertTrue(audio.state(0).playing); XCTAssertFalse(audio.state(0).preview)
+        }
+        audio.send(MDJPause); audio.send(MDJSeek, value: 0)
+        try await Task.sleep(for: .milliseconds(80))
+        audio.send(MDJCueDown); try await Task.sleep(for: .milliseconds(80))
+        audio.send(MDJCueUp); try await Task.sleep(for: .milliseconds(80))
+        XCTAssertFalse(audio.state(0).playing); XCTAssertFalse(audio.state(0).preview)
+    }
+
     @MainActor func testLoadedDeckReadsOfflineFullWaveformCache() async throws {
         let root = try XCTUnwrap(AppModel.makePerformanceUIFixture())
         defer { try? FileManager.default.removeItem(at: root) }
@@ -433,10 +456,18 @@ final class NativeAudioTests: XCTestCase {
         model.startLocalLive()
         defer { model.stopLocalLive() }
         var heardPlaying = false
-        for _ in 0..<250 {
+        // The fixture only plays for three seconds in each ten-second cycle.
+        // Download/decode plus an overloaded simulator can miss the first window.
+        // Keep the behavior assertion, but allow three real fixture cycles rather
+        // than assuming readiness and a playing anchor fit inside the first one.
+        let readinessStarted = ProcessInfo.processInfo.systemUptime
+        let readinessDeadline = readinessStarted + 30
+        while ProcessInfo.processInfo.systemUptime < readinessDeadline {
             if model.audio?.state(0).playing == true { heardPlaying = true; break }
             try await Task.sleep(for: .milliseconds(40))
         }
+        let readyState = model.audio?.state(0)
+        print("SYNTHETIC_LIVE_READINESS elapsed=\(ProcessInfo.processInfo.systemUptime - readinessStarted) heardPlaying=\(heardPlaying) ready=\(readyState?.ready ?? false) decodedSeconds=\(readyState?.decodedSeconds ?? 0) status=\(model.liveStatus)")
         XCTAssertTrue(heardPlaying, model.liveStatus + " " + (model.error ?? ""))
         XCTAssertEqual(model.decks[0].title, "Synthetic LAN Tone")
         XCTAssertGreaterThan(model.liveRoundTrip, 0)

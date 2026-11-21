@@ -10,7 +10,7 @@ interface FakeInstance {
   continuous: boolean;
   interimResults: boolean;
   onresult: ((e: { resultIndex: number; results: { isFinal: boolean; 0: { transcript: string } }[] }) => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
   onend: (() => void) | null;
   started: number;
   stopped: number;
@@ -24,7 +24,7 @@ function stubRecognition(): FakeInstance[] {
     interimResults = true;
     lang = '';
     onresult: FakeInstance['onresult'] = null;
-    onerror: (() => void) | null = null;
+    onerror: ((event: { error?: string }) => void) | null = null;
     onend: (() => void) | null = null;
     started = 0;
     stopped = 0;
@@ -86,8 +86,26 @@ describe('dictation', () => {
     const instances = stubRecognition();
     const onEnd = vi.fn();
     startDictation(() => {}, onEnd);
-    instances[0].onerror?.();
+    instances[0].onerror?.({});
     expect(instances[0].stopped).toBe(1);
     expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports the failure reason when the service kills a session', () => {
+    const instances = stubRecognition();
+    const onError = vi.fn();
+    startDictation(() => {}, () => {}, onError);
+    instances[0].onerror?.({ error: 'network' });
+    expect(onError).toHaveBeenCalledWith('network');
+    expect(instances[0].stopped).toBe(1);
+  });
+
+  it('never reports errors after an explicit stop', () => {
+    const instances = stubRecognition();
+    const onError = vi.fn();
+    const session = startDictation(() => {}, () => {}, onError);
+    session!.stop();
+    instances[0].onerror?.({ error: 'aborted' });
+    expect(onError).not.toHaveBeenCalled();
   });
 });
