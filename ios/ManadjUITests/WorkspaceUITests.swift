@@ -72,7 +72,7 @@ final class WorkspaceUITests: XCTestCase {
                 XCTAssertTrue(value.contains("callbackSamples="), value)
                 print("ISOLATED_POSITION_PUBLICATION iteration=\(iteration) suppressed=\(suppressed) deck=\(index) \(value) simulatorNotPhone=true automationIdle14s=true")
             }
-            app.terminate()
+            if iteration < 3 { app.terminate() }
         }
     }
 
