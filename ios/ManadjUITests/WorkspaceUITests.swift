@@ -354,6 +354,22 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(list.waitForExistence(timeout: 10))
     }
 
+    @MainActor func testBrowserHandleFollowsFingerAndCancelsPartialDrag() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture", "--browser-scroll-fixture"]; app.launch()
+        app.buttons["BROWSE"].tap()
+        let handle = app.otherElements["browser-drag-handle"]
+        XCTAssertTrue(handle.waitForExistence(timeout: 10))
+        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 45)), withVelocity: .slow, thenHoldForDuration: 0.6)
+        XCTAssertTrue(app.textFields["Search title, artist, file"].exists, "Short drag settles open")
+        let open = XCTAttachment(screenshot: app.screenshot()); open.name = "Real drawer settles open after a short held drag"; open.lifetime = .keepAlways; add(open)
+        let close = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        close.press(forDuration: 0.05, thenDragTo: close.withOffset(CGVector(dx: 0, dy: 230)), withVelocity: .slow, thenHoldForDuration: 0.6)
+        XCTAssertFalse(app.textFields["Search title, artist, file"].exists, "Long drag settles closed")
+        app.buttons["BROWSE"].tap(); XCTAssertTrue(handle.waitForExistence(timeout: 5))
+    }
+
     @MainActor func testLibraryQuickSwipeLoadsWithoutFullSwipe() {
         defer { captureFailure() }
         let app = XCUIApplication()

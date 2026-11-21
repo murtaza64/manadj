@@ -143,6 +143,11 @@ struct LibraryBrowser: View {
                     SwipeToLoad(
                         loadA: { model.loadTarget = 0; if onLoad(track) { searchFocused = false } },
                         loadB: { model.loadTarget = 1; if onLoad(track) { searchFocused = false } },
+                        tap: {
+                            let wasSearching = searchFocused
+                            if onLoad(track) { searchFocused = false }
+                            else { restoreSearchAfterError = wasSearching || !search.isEmpty }
+                        },
                         background: selectedTrack == track.id ? Ink.accent.opacity(0.08) : Ink.base
                     ) {
                         HStack(spacing: 2) {
@@ -155,14 +160,8 @@ struct LibraryBrowser: View {
                             }.buttonStyle(.plain)
                                 .accessibilityLabel("Select " + track.title)
                                 .accessibilityValue(selectedTrack == track.id ? "Selected" : "Not selected")
-                            Button {
-                                let wasSearching = searchFocused
-                                if onLoad(track) { searchFocused = false }
-                                else { restoreSearchAfterError = wasSearching || !search.isEmpty }
-                            } label: {
-                                LibraryRow(track: track, downloaded: model.downloaded.contains(track.id), evidence: followLabels[track.id]).environmentObject(model)
-                            }
-                            .buttonStyle(.plain)
+                            LibraryRow(track: track, downloaded: model.downloaded.contains(track.id), evidence: followLabels[track.id]).environmentObject(model)
+                                .accessibilityAddTraits(.isButton)
                         }
                     }
                     .onAppear {

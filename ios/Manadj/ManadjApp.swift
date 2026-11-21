@@ -27,6 +27,7 @@ import CEngine
 struct WorkspaceView: View {
     @EnvironmentObject var model: AppModel
     @State private var browsing = false
+    @State private var browserDrag: CGFloat = 0
     @State private var feedbackRequested = false
     @State private var feedbackTargets: [FeedbackTarget] = []
     @State private var keyboardOpen = false
@@ -77,7 +78,7 @@ struct WorkspaceView: View {
                 HStack(spacing: 10) { deckInfo(0); deckInfo(1); feedbackButton }.frame(height: browsing && keyboardOpen ? 36 : 44)
                 if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: compact ? 83 : 135) }
                 ZStack(alignment: .bottom) {
-                    if !browsing && !settings { VStack(spacing: gap) {
+                    if !settings { VStack(spacing: gap) {
                         mixer.frame(maxHeight: .infinity)
                         HStack(spacing: 6) { minimap(0); browseKey.frame(width: 84); minimap(1) }.frame(height: compact ? 36 : 44)
                         HStack(alignment: .top, spacing: 14) { deckControls(0, compact: compact); deckControls(1, compact: compact) }
@@ -86,11 +87,13 @@ struct WorkspaceView: View {
                     if browsing {
                         VStack(spacing: 0) {
                             if !keyboardOpen { Capsule().fill(Ink.muted.opacity(0.7)).frame(width: 40, height: 4).frame(maxWidth: .infinity).frame(height: 24).contentShape(Rectangle())
-                                .gesture(DragGesture(minimumDistance: 12).onEnded { if $0.translation.height > 60 { withAnimation(.easeOut(duration: 0.24)) { browsing = false } } })
+                                .gesture(browserDrawerDrag(height: geometry.size.height))
+                                .accessibilityIdentifier("browser-drag-handle")
                                 .accessibilityLabel("Close browser drag handle") }
                             library
                             HStack(spacing: 12) { transport(0, browser: true); transport(1, browser: true) }.frame(height: 44).padding(.horizontal, 6).background(Ink.panel)
-                        }.background(Ink.base).compositingGroup().transition(.move(edge: .bottom))
+                        }.background(Ink.base).compositingGroup().offset(y: browserDrag).transition(.move(edge: .bottom))
+                            .accessibilityIdentifier("browser-drawer")
                     }
                     if settings {
                         VStack(spacing: 0) {
@@ -100,9 +103,26 @@ struct WorkspaceView: View {
                     }
                 }.clipped()
             }.padding(.horizontal, 8)
-            .animation(.easeOut(duration: 0.24), value: browsing)
+            .animation(.spring(response: 0.3, dampingFraction: 0.9), value: browsing)
+            .onChange(of: browsing) { _, _ in browserDrag = 0 }
             .animation(.easeOut(duration: 0.24), value: settings)
         }
+    }
+    private func browserDrawerDrag(height: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                // Direct manipulation has no easing. The entire browser,
+                // including its real scrolling list, travels under the finger.
+                var transaction = Transaction(); transaction.disablesAnimations = true
+                withTransaction(transaction) { browserDrag = max(0, value.translation.height) }
+            }
+            .onEnded { value in
+                let close = browserDrag > min(180, height * 0.25)
+                    || (browserDrag > 60 && value.predictedEndTranslation.height > height * 0.5)
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                    browsing = !close; browserDrag = 0
+                }
+            }
     }
     private var feedbackButton: some View {
         Button { feedbackRequested = true } label: {
