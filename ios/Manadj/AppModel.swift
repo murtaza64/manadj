@@ -9,6 +9,7 @@ struct DeckViewState {
     var track: LibraryTrack?
     var duration: Double = 0
     var waveform: PreviewWaveform?
+    var waveformNotice: String?
     var engine = MDJDeck()
     var loading = false
 }
@@ -385,8 +386,14 @@ struct DeckViewState {
                 decks[deck].title = track.title
                 decks[deck].artist = track.artist ?? "Unknown artist"
                 decks[deck].track = track
-                decks[deck].duration = track.durationSecs ?? duration
-                decks[deck].waveform = await repository.preview(track)
+                decks[deck].duration = duration // Decoded audio is the authoritative timeline, not stale catalog metadata.
+                decks[deck].waveform = nil
+                decks[deck].waveformNotice = "Loading full waveform"
+                do {
+                    decks[deck].waveform = try await repository.detail(track, connection: connection)
+                    decks[deck].waveformNotice = decks[deck].waveform == nil ? "Full waveform not generated on desktop" : nil
+                } catch { decks[deck].waveformNotice = "Full waveform unavailable locally. Audio remains playable." }
+                // Never magnify the 256-bin browser preview into a performance lane.
                 downloaded = await repository.downloadedIds()
             } catch { loadFailed(error, deck: deck, previousLoad: previousLoad) }
         }

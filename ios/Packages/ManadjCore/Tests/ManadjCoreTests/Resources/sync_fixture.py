@@ -9,8 +9,12 @@ from pathlib import Path
 import struct
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-SNAPSHOT = {"version": 1, "tag_categories": [], "tags": [], "tracks": [{"id":1,"file_name":"fixture.wav","audio_rev":"fixture-revision","filesize_bytes":1024}, {"id":2,"file_name":"missing.wav"}], "playlists": [], "settings": {}}
+SNAPSHOT = {"version": 1, "tag_categories": [], "tags": [], "tracks": [{"id":1,"file_name":"fixture.wav","audio_rev":"fixture-revision","filesize_bytes":1024,"waveform_rev":"detail-revision","preview_rev":"preview-revision"}, {"id":2,"file_name":"missing.wav"}], "playlists": [], "settings": {}}
 AUDIO = bytes(range(256)) * 4
+def mwf(frames):
+    return struct.pack('<4sHHIdIIIB3xf',b'MWF1',2,0,44100,24.,128,512,2048,8,.5)+struct.pack('<9f',20,60,150,400,1000,2500,6000,12000,20000)+struct.pack('<II',frames,frames)+bytes([128])*(frames*9)
+DETAIL=mwf(2048)
+PREVIEW=mwf(256)
 class Handler(BaseHTTPRequestHandler):
     captures = 0
     def log_message(self, *args): pass
@@ -33,6 +37,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.endswith('/snapshot'):
             time.sleep(0.05)
             return self.respond(200,json.dumps(SNAPSHOT).encode())
+        if self.path.endswith('/tracks/1/waveform'):
+            return self.respond(200,DETAIL,{'X-Waveform-Rev':'detail-revision'})
         if self.path.endswith('/tracks/1/audio'):
             return self.respond(200,AUDIO,{'X-Audio-Rev':'fixture-revision'})
         if self.path.endswith('/tracks/2/audio'):
@@ -44,7 +50,10 @@ class Handler(BaseHTTPRequestHandler):
             if not body.get('device_id') or not body.get('device_name'): return self.respond(422)
             return self.respond(200,json.dumps({'id':'0123456789abcdef0123456789abcdef','match_code':'1234','expires_s':120}).encode())
         if self.path=='/api/device-sync/previews':
-            return self.respond(200,b'MPK1'+struct.pack('<I',0))
+            ids=body.get('track_ids',[])
+            pack=b'MPK1'+struct.pack('<I',1 if 1 in ids else 0)
+            if 1 in ids: pack+=struct.pack('<II',1,len(PREVIEW))+PREVIEW
+            return self.respond(200,pack)
         self.respond(404)
 
 server=ThreadingHTTPServer(('127.0.0.1',0),Handler)

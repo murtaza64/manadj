@@ -140,7 +140,8 @@ struct WorkspaceView: View {
     private func detailWave(_ index: Int, vertical: Bool = false) -> some View {
         let deck = model.decks[index]
         return PerformanceWave(index: index, vertical: vertical)
-            .overlay { if deck.duration == 0 { Text("\(Ink.deckName(index)) · no track").font(Ink.font(11)).foregroundStyle(Ink.muted) } }
+            .overlay { if deck.duration == 0 { Text("\(Ink.deckName(index)) · no track").font(Ink.font(11)).foregroundStyle(Ink.muted) }
+                else if let notice = deck.waveformNotice { Text(notice).font(Ink.font(9)).foregroundStyle(Ink.muted).padding(4) } }
             .accessibilityLabel("\(Ink.deckName(index)) detail wave")
     }
     private func minimap(_ index: Int) -> some View {

@@ -7,6 +7,23 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    @MainActor func testLoadedDeckUsesDecodedDurationAndDoesNotMagnifyPreviewAsDetail() async throws {
+        let root = try XCTUnwrap(AppModel.makePerformanceUIFixture())
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(root: root.appendingPathComponent("library"))
+        // Deliberately stale catalog duration. Preview exists but no full-wave revision.
+        let stale = try String(contentsOf: store.root.appendingPathComponent("snapshot.json"), encoding: .utf8).replacingOccurrences(of: "\"duration_secs\":24", with: "\"duration_secs\":240")
+        try store.saveSnapshot(stale)
+        let track = try SnapshotJson.parse(stale).tracks[0]
+        let model = AppModel(storageRoot: root)
+        for _ in 0..<100 { if model.snapshot != nil && model.audio != nil { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(model.load(track, deck: 0))
+        for _ in 0..<200 { if !model.decks[0].loading { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.decks[0].duration, 24, accuracy: 0.1)
+        XCTAssertNil(model.decks[0].waveform, "A cached preview is not a full performance waveform")
+        XCTAssertEqual(model.decks[0].waveformNotice, "Full waveform not generated on desktop")
+    }
+
     @MainActor func testSyncWakeScopeRestoresAfterSuccessFailureAndCancellation() async throws {
         var idle = false
         let scope = SyncWakeScope(read: { idle }, write: { idle = $0 })
