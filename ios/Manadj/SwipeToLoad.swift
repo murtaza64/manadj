@@ -70,9 +70,18 @@ struct BrowserTopPull: UIViewRepresentable {
         override func didMoveToWindow() { super.didMoveToWindow(); if window != nil { attach() } }
         func attach() {
             guard scroll == nil else { return }
+            func findScroll(_ root: UIView) -> UIScrollView? {
+                if let list = root as? UIScrollView { return list }
+                for child in root.subviews {
+                    if let list = findScroll(child) { return list }
+                }
+                return nil
+            }
+            // SwiftUI may host the background beside its platform scroll view,
+            // not below it. Search the nearest shared ancestor as well.
             var ancestor = superview
             while let candidate = ancestor {
-                if let list = candidate as? UIScrollView {
+                if let list = findScroll(candidate) {
                     scroll = list
                     list.panGestureRecognizer.addTarget(self, action: #selector(pan(_:)))
                     return
