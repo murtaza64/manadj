@@ -81,11 +81,17 @@ private struct DirectionLockedRow<Content: View>: UIViewControllerRepresentable 
         }
         func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
             guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
-            let t = pan.translation(in: pan.view)
+            let t = pan.translation(in: pan.view?.window)
+            #if DEBUG
+            print("BROWSER_ROW_PAN_BEGIN x=\(t.x) y=\(t.y)")
+            #endif
             return abs(t.x) > 3 && abs(t.x) > abs(t.y) * 1.5
         }
         @objc func pan(_ pan: UIPanGestureRecognizer) {
-            let t = pan.translation(in: pan.view)
+            let t = pan.translation(in: pan.view?.window)
+            #if DEBUG
+            print("BROWSER_ROW_PAN state=\(pan.state.rawValue) x=\(t.x) y=\(t.y)")
+            #endif
             switch pan.state {
             case .began: haptic.prepare(); fallthrough
             case .changed:

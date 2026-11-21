@@ -187,7 +187,7 @@ struct WorkspaceView: View {
             if !browsing { model.browserOpenStarted = ProcessInfo.processInfo.systemUptime }
             #endif
             withAnimation { settings = false; browsing.toggle() }
-        }.buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing)).feedbackTarget("Browse library")
+        }.accessibilityIdentifier("browser-open").buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing)).feedbackTarget("Browse library")
     }
     private var library: some View {
         LibraryBrowser(onClose: { withAnimation { browsing = false } }, onLoad: { track in

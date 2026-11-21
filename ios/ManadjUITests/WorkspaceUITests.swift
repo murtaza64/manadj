@@ -51,7 +51,7 @@ final class WorkspaceUITests: XCTestCase {
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
         XCTAssertTrue(app.buttons["BROWSE"].waitForExistence(timeout: 10))
         measure(metrics: [XCTClockMetric()], options: options) {
-            app.buttons["BROWSE"].tap()
+            app.buttons["browser-open"].tap()
             XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
             let list = app.descendants(matching: .any)["library-track-list"].firstMatch
             let timing = NSPredicate(format: "value BEGINSWITH %@", "nativeTapToRowAppearMs=")
@@ -115,7 +115,7 @@ final class WorkspaceUITests: XCTestCase {
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.textFields["Desktop address"].waitForExistence(timeout: 5))
         app.buttons["CLOSE"].tap()
-        app.buttons["BROWSE"].tap()
+        app.buttons["browser-open"].tap()
         XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
         Thread.sleep(forTimeInterval: 0.6)
         let browse = XCTAttachment(screenshot: app.screenshot()); browse.name = "iOS in-place browser with transport WIP"; browse.lifetime = .keepAlways; add(browse)
@@ -199,7 +199,7 @@ final class WorkspaceUITests: XCTestCase {
     @MainActor func testLibrarySourceNavigationAndBack() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
-        app.buttons["BROWSE"].tap()
+        app.buttons["browser-open"].tap()
         let back = app.buttons["Browser back"]
         XCTAssertTrue(back.waitForExistence(timeout: 10)); back.tap()
         XCTAssertTrue(app.buttons["source-collection"].waitForExistence(timeout: 5))
@@ -233,7 +233,7 @@ final class WorkspaceUITests: XCTestCase {
     @MainActor func testLibraryFilterChipsAndBPM() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
-        app.buttons["BROWSE"].tap()
+        app.buttons["browser-open"].tap()
         let filter = app.buttons["Library filters"]
         XCTAssertTrue(filter.waitForExistence(timeout: 10))
         let search = app.textFields["Search title, artist, file"]
@@ -278,7 +278,7 @@ final class WorkspaceUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--library-ui-fixture"]
         app.launch()
-        app.buttons["BROWSE"].tap()
+        app.buttons["browser-open"].tap()
         let search = app.textFields["Search title, artist, file"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap()
@@ -320,7 +320,7 @@ final class WorkspaceUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--library-ui-fixture"]
         app.launch()
-        app.buttons["BROWSE"].tap()
+        app.buttons["browser-open"].tap()
         let search = app.textFields["Search title, artist, file"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         // Fixture tracks carry saved preview blobs; their rows must show the
@@ -336,7 +336,7 @@ final class WorkspaceUITests: XCTestCase {
     @MainActor func testBrowserScrollDoesNotLoadOrStealCollapse() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture", "--browser-scroll-fixture"]; app.launch()
-        app.buttons["BROWSE"].tap()
+        app.buttons["browser-open"].tap()
         let list = app.scrollViews["library-track-list"]
         XCTAssertTrue(list.waitForExistence(timeout: 10))
         let first = XCTAttachment(screenshot: app.screenshot()); first.name = "Browser and list expanded as one surface before scroll"; first.lifetime = .keepAlways; add(first)
@@ -350,14 +350,14 @@ final class WorkspaceUITests: XCTestCase {
         let after = XCTAttachment(screenshot: app.screenshot()); after.name = "Vertical diagonal and reversed browser scroll without deck load"; after.lifetime = .keepAlways; add(after)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Scroll fixture'")).firstMatch.exists)
         app.buttons["browser-close"].tap()
-        app.buttons["browser-close"].tap()
+        app.buttons["browser-open"].tap()
         XCTAssertTrue(list.waitForExistence(timeout: 10))
     }
 
     @MainActor func testBrowserHandleFollowsFingerAndCancelsPartialDrag() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture", "--browser-scroll-fixture"]; app.launch()
-        app.buttons["BROWSE"].tap()
+        app.buttons["browser-open"].tap()
         let handle = app.otherElements["browser-drag-handle"]
         XCTAssertTrue(handle.waitForExistence(timeout: 10))
         let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -367,7 +367,7 @@ final class WorkspaceUITests: XCTestCase {
         let close = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         close.press(forDuration: 0.05, thenDragTo: close.withOffset(CGVector(dx: 0, dy: 230)), withVelocity: .slow, thenHoldForDuration: 0.6)
         XCTAssertFalse(app.textFields["Search title, artist, file"].exists, "Long drag settles closed")
-        app.buttons["BROWSE"].tap(); XCTAssertTrue(handle.waitForExistence(timeout: 5))
+        app.buttons["browser-open"].tap(); XCTAssertTrue(handle.waitForExistence(timeout: 5))
     }
 
     @MainActor func testLibraryQuickSwipeLoadsWithoutFullSwipe() {
@@ -375,7 +375,7 @@ final class WorkspaceUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--library-ui-fixture"]
         app.launch()
-        app.buttons["BROWSE"].tap()
+        app.buttons["browser-open"].tap()
         let search = app.textFields["Search title, artist, file"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap()
@@ -397,7 +397,7 @@ final class WorkspaceUITests: XCTestCase {
     @MainActor func testLibraryRightShortSwipeLoadsBNotA() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
-        app.buttons["BROWSE"].tap()
+        app.buttons["browser-open"].tap()
         let row = app.staticTexts["Cached Test Tone"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
