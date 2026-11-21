@@ -59,3 +59,12 @@ The Core integration tests start a loopback-only Python fixture with synthetic a
 - No removed Soulseek or SoundCloud download behavior is ported. The base is `d137e2d7`, after the piracy-removal change.
 
 Implementation changes are confined to `ios/` and its unsigned simulator CI workflow. Apple signing setup and paid services are outside this change.
+
+
+## Bundle identity transition (prepared, not a data migration)
+
+The intended iOS application identifier is `earth.murtaza.manadj.ios`. The visible application name stays **manaDJ**. Unit/UI test identifiers and project generation use the same prefix. The pairing Keychain service is `earth.murtaza.manadj.ios.desktop`.
+
+Changing the identifier creates a separate installed application, not an in-place update to `dev.manadj.ios`. Its sandbox, settings, cached audio, feedback outbox and default Keychain access must not be assumed shared. Keep the old application installed and its data untouched. This branch does not copy data or pairing tokens. A new build requires matching signing/provisioning on the user's own machine. Do not delete the old application or reset caches as part of this change. Preservation/export and the switch date require a separate decision.
+
+Android and web identities, domain registration/DNS and releases are unchanged by this iOS-only branch.

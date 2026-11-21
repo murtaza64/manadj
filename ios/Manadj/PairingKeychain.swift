@@ -24,7 +24,7 @@ enum PairingKeychain {
         guard SecItemAdd(new as CFDictionary, nil) == errSecSuccess else { throw AppFailure("Could not save pairing securely") }
     }
     private static func base(_ origin: String) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "dev.manadj.ios.desktop", kSecAttrAccount as String: origin]
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "earth.murtaza.manadj.ios.desktop", kSecAttrAccount as String: origin]
     }
 }
 
