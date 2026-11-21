@@ -32,6 +32,7 @@ struct WorkspaceView: View {
     @State private var outputRoute = AVAudioSession.sharedInstance().currentRoute
     @State private var browsing = false
     @State private var browserDrag: CGFloat = 0
+    @State private var browserPeakVelocity: CGFloat = 0
     @State private var feedbackRequested = false
     @State private var feedbackTargets: [FeedbackTarget] = []
     @State private var keyboardOpen = false
@@ -119,7 +120,7 @@ struct WorkspaceView: View {
                 }.clipped()
             }.frame(height: geometry.size.height, alignment: .top).padding(.horizontal, 8)
             .animation(.spring(response: 0.3, dampingFraction: 0.9), value: browsing)
-            .onChange(of: browsing) { _, _ in browserDrag = 0 }
+            .onChange(of: browsing) { _, _ in browserDrag = 0; browserPeakVelocity = 0 }
             .animation(.easeOut(duration: 0.24), value: settings)
         }
     }
@@ -132,10 +133,14 @@ struct WorkspaceView: View {
                 // Direct manipulation has no easing. The entire browser,
                 // including its real scrolling list, travels under the finger.
                 var transaction = Transaction(); transaction.disablesAnimations = true
-                withTransaction(transaction) { browserDrag = max(0, value.translation.height) }
+                withTransaction(transaction) {
+                    browserDrag = max(0, value.translation.height)
+                    browserPeakVelocity = max(browserPeakVelocity, value.velocity.height)
+                }
             }
             .onEnded { value in
-                let close = shouldCloseBrowser(distance: browserDrag, velocity: value.velocity.height)
+                let close = shouldCloseBrowser(distance: browserDrag, velocity: max(value.velocity.height, browserPeakVelocity))
+                browserPeakVelocity = 0
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
                     browsing = !close; browserDrag = 0
                 }
