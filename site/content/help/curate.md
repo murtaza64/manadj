@@ -59,3 +59,10 @@ Playlist filters are off by default. Use the funnel on that Playlist to apply th
 ## Archive a reject {#archive}
 
 Right-click a Track, or select several, and choose **Archive track(s)**. Confirm if prompted about removal from Playlists: archiving takes it out of active Library lists and **every Playlist**. It does not delete the audio file, Track record, or source correspondence. **Tracks → Archived** shows archived rows; right-click one and **Unarchive** to return it to active lists. Unarchiving does **not** restore its former Playlist memberships. A later scan does not re-propose the archived path as a new Track.
+
+
+## Remote Library Preview {#remote-preview}
+
+Settings > Library > Remote library has a manual **Mirror preview**. It is local, read-only groundwork, not a connected cloud library. Nothing uploads or changes. It shows file counts, total bytes and tracks that need attention, such as missing or unreadable audio, changed files, paths outside the configured tracks directory and case-only name conflicts.
+
+A preview reads and hashes every audio file. It can take minutes and shares the disk with playback, so run it when you are not mixing. Leaving the page does not cancel an active scan. A second scan is refused while one is running in the same server process. Treat the report as advisory, not proof that files will remain unchanged for a later upload. No cloud destination or upload has been configured by this panel.
