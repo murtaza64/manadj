@@ -7,6 +7,17 @@ import ManadjAudio
 /// One live feedback session. Opening the toolbar never captures or freezes the app.
 @MainActor final class LiveFeedbackSession: NSObject, ObservableObject {
     @Published var active = false
+    @Published var sending = false
+    @Published var deliveryStatus: String?
+    @Published var reportGeneration = UUID()
+    func receivedReport() {
+        stopVoice(transcribe: false); recognition?.cancel(); recognition = nil
+        if let voiceURL { try? FileManager.default.removeItem(at: voiceURL) }
+        voiceURL = nil; voiceStartedAt = nil; voiceEndedAt = nil
+        transcript = ""; strokes = []; selectedPoint = nil; selectedTarget = nil
+        mode = "USE APP"; startedAt = Date(); reportGeneration = UUID()
+    }
+
     @Published var contextual = "FX"
     @Published var mode = "USE APP"
     @Published var recording = false
@@ -31,7 +42,7 @@ import ManadjAudio
     private var previousCategory: AVAudioSession.Category?
     private var previousOptions: AVAudioSession.CategoryOptions = []
     func open() { guard !active else { contextual = "FEEDBACK"; return }; contextual = "FEEDBACK"; active = true; mode = "USE APP"; startedAt = Date(); message = nil }
-    func close() { generation = UUID(); requestingMicrophone = false; stopVoice(transcribe: false); recognition?.cancel(); recognition = nil; active = false; contextual = "FX"; reviewing = false; mode = "USE APP"; transcript = ""; strokes = []; selectedPoint = nil; selectedTarget = nil; if let voiceURL { try? FileManager.default.removeItem(at: voiceURL) }; voiceURL = nil }
+    func close() { guard !sending else { return }; deliveryStatus = nil; generation = UUID(); requestingMicrophone = false; stopVoice(transcribe: false); recognition?.cancel(); recognition = nil; active = false; contextual = "FX"; reviewing = false; mode = "USE APP"; transcript = ""; strokes = []; selectedPoint = nil; selectedTarget = nil; if let voiceURL { try? FileManager.default.removeItem(at: voiceURL) }; voiceURL = nil }
     func startVoice(directory: URL, audio: NativeAudio?) async {
         guard active, !recording, !requestingMicrophone else { return }
         requestingMicrophone = true
@@ -108,15 +119,20 @@ struct LiveFeedbackToolbar: View {
             HStack(spacing: 4) {
                 Text(session.recording ? "● \(session.seconds)s / 120" : "FEEDBACK").foregroundStyle(session.recording ? Ink.danger : Ink.accent).font(Ink.font(9, bold: true))
                 Spacer(minLength: 0)
-                Button("×") { session.close() }.font(Ink.font(18)).accessibilityLabel("Close feedback toolbar")
+                Button("×") { session.close() }.disabled(session.sending).font(Ink.font(18)).accessibilityLabel("Close feedback toolbar")
             }
             HStack(spacing: 3) {
                 Button(session.recording ? "STOP" : session.requestingMicrophone ? "MIC…" : "REC") {
                     if session.recording { model.noteFeedbackAction("feedback-voice-stop"); session.stopVoice() }
                     else { Task { await session.startVoice(directory: model.feedbackQueueRoot.appendingPathComponent("voice-drafts"), audio: model.audio); if session.recording { model.noteFeedbackAction("feedback-voice-start") } } }
-                }.buttonStyle(PerformanceKeyStyle(color: Ink.danger, active: session.recording)).disabled(session.requestingMicrophone).accessibilityIdentifier("feedback-rec")
+                }.buttonStyle(PerformanceKeyStyle(color: Ink.danger, active: session.recording)).disabled(session.requestingMicrophone || session.sending).accessibilityIdentifier("feedback-rec")
                 Button("REVIEW") { session.stopVoice(); session.mode = "USE APP"; session.reviewing = true }.buttonStyle(PerformanceKeyStyle(color: Ink.play)).accessibilityIdentifier("feedback-review-open")
-            }.frame(height: 44)
+            }.frame(height: 44).disabled(session.sending)
+            if session.sending {
+                HStack { ProgressView().controlSize(.small); Text("SENDING TO DESKTOP…").font(Ink.font(9)) }.accessibilityIdentifier("feedback-center-sending")
+            } else if let status = session.deliveryStatus {
+                Text(status).font(Ink.font(9)).foregroundStyle(Ink.warning).accessibilityIdentifier("feedback-center-delivery")
+            }
             HStack(spacing: 2) {
                 ForEach(["USE APP", "POINT", "DRAW"], id: \.self) { mode in Button(mode) { session.mode = mode }.buttonStyle(PerformanceKeyStyle(color: Ink.accent, active: session.mode == mode)) }
             }.frame(height: 28)
@@ -146,21 +162,37 @@ struct FeedbackReporter: ViewModifier {
                 if session.active && !session.reviewing && session.mode != "USE APP" {
                     FeedbackLiveInk(session: session, targets: targets).ignoresSafeArea()
                 }
-                if let capture, session.reviewing {
+                if let capture {
                     FeedbackReviewView(capture: capture, targets: capturedTargets, onSubmit: { draft in
-                        await FeedbackSubmitter(queue: FeedbackQueue(directory: model.feedbackQueueRoot)).submit(draft, via: model.syncConnection)
+                        session.reviewing = false; session.sending = true; session.deliveryStatus = nil
+                        let result = await FeedbackSubmitter(queue: FeedbackQueue(directory: model.feedbackQueueRoot)).submit(draft, via: model.syncConnection)
+                        session.sending = false
+                        switch result {
+                        case .filed:
+                            session.deliveryStatus = "RECEIVED · Ready for new feedback"; session.receivedReport()
+                        case .savedOnDesktop:
+                            session.deliveryStatus = "RECEIVED ON DESKTOP · GitHub pending"; session.receivedReport()
+                        case .queuedLocally:
+                            session.deliveryStatus = "ON IPHONE ONLY · Review saved report"
+                        case .rejected, .saveFailed:
+                            session.deliveryStatus = "NOT RECEIVED · Review report to retry"
+                        }
+                        return result
                     }, queueDirectory: model.feedbackQueueRoot, queueConnection: model.syncConnection, voice: capturedVoice, voiceURL: capturedVoiceURL, initialComment: capturedTranscript, initialStrokes: session.strokes, initialPoint: session.selectedPoint, initialTarget: session.selectedTarget, onClose: { session.reviewing = false; self.capture = nil })
+                        .opacity(session.reviewing ? 1 : 0).allowsHitTesting(session.reviewing).accessibilityHidden(!session.reviewing)
                 }
             }
             .onChange(of: requested) { _, value in if value { requested = false; session.open() } }
             .onChange(of: session.reviewing) { _, value in
-                if value {
+                if value && capture == nil {
                     capturedTargets = targets
                     capturedVoice = session.reviewedVoice(); capturedVoiceURL = session.voiceURL
                     capturedTranscript = session.transcript
                     capture = FeedbackCapture.capture(model: model, browsing: browsing, settings: settings)
-                } else { capture = nil; capturedVoice = nil; capturedVoiceURL = nil; capturedTranscript = "" }
+                }
             }
+            .onChange(of: session.reportGeneration) { _, _ in capture = nil; capturedVoice = nil; capturedVoiceURL = nil; capturedTranscript = "" }
+            .onChange(of: session.active) { _, value in if !value { capture = nil } }
             .onAppear {
                 detector.onShake = { session.open() }; detector.start()
                 if autoPresent { session.open(); Task { @MainActor in try? await Task.sleep(for: .milliseconds(700)); session.reviewing = true } }
