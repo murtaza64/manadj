@@ -45,7 +45,11 @@ def test_identity_is_core_420_identity():
 
 
 @pytest.mark.parametrize("version,rev,body", [
-    ("0.1.0", REV[:12], BODY), ("", REV, BODY), ("0.1.0", REV, "  "), ("0.1.0", REV, "x" * 32769)])
+    pytest.param("0.1.0", REV[:12], BODY, id="short-rev"),
+    pytest.param("", REV, BODY, id="empty-version"),
+    pytest.param("0.1.0", REV, "  ", id="blank-body"),
+    pytest.param("0.1.0", REV, "x" * 32769, id="oversize-body"),
+])
 def test_identity_refuses_invalid_inputs(version, rev, body):
     with pytest.raises(ar.Refused):
         ar.release_identity(version, rev, body)
@@ -247,10 +251,10 @@ def _stamp_body(tmp_path, monkeypatch, body: str, name: str):
 
 
 @pytest.mark.parametrize("body", [
-    "\u0001" * 32768,                      # worst case: 6 encoded bytes per body byte
-    "\U0001F3A7" * 8192,                   # astral: 4 UTF-8 bytes, 12 encoded (surrogate pair)
-    "é" * 16384,                           # accent: 2 UTF-8 bytes, 6 encoded
-    "  edges \r\n\t\u2028 kept\n\n",   # no trim/normalization
+    pytest.param("\u0001" * 32768, id="control-max"),  # worst case: 6 encoded bytes per body byte
+    pytest.param("\U0001F3A7" * 8192, id="astral"),  # 4 UTF-8 bytes, 12 encoded (surrogate pair)
+    pytest.param("é" * 16384, id="accent"),  # 2 UTF-8 bytes, 6 encoded
+    pytest.param("  edges \r\n\t\u2028 kept\n\n", id="edges"),  # no trim/normalization
 ])
 def test_bounded_bodies_round_trip_exactly_through_stamp_and_zip(tmp_path, monkeypatch, body):
     files, (build, notes, android) = _stamp_body(tmp_path, monkeypatch, body, "b")
