@@ -589,6 +589,11 @@ it('clears viewport marks on resize and protects the active draft from boot relo
 it('excludes capture chrome from fallback screenshots and cancels safely with Escape', async () => {
   await click('Feedback');
   expect(document.querySelector('.feedback-overlay')?.hasAttribute('data-feedback-private')).toBe(true);
+  const hotkey = vi.fn();
+  window.addEventListener('keydown', hotkey);
+  await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true })); });
+  expect(hotkey).not.toHaveBeenCalled();
+  window.removeEventListener('keydown', hotkey);
   await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
   expect(document.querySelector('.feedback-overlay')).toBeNull();
   expect(captureFeedback).not.toHaveBeenCalled();

@@ -177,7 +177,10 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
   }, [overlay, page, capture, title, description, strokes.length]);
   const canDictate = dictationAvailable();
 
-  useEffect(() => installModalKeyGuard(() => Boolean(dialog.current?.open), () => setPage(null)), []);
+  useEffect(() => installModalKeyGuard(
+    () => Boolean(dialog.current?.open || (document.querySelector('.feedback-overlay') && !document.querySelector('.feedback-picker'))),
+    () => { setPage(null); setOverlay(false); setDrawing(false); setPointer(null); setStrokes([]); },
+  ), []);
 
   function stopDictation() {
     dictationRef.current?.stop();
