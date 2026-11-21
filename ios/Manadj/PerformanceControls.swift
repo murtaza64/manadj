@@ -203,9 +203,19 @@ private struct KnobAnchorPreference: PreferenceKey {
     static let defaultValue: [UUID: Anchor<CGRect>] = [:]
     static func reduce(value: inout [UUID: Anchor<CGRect>], nextValue: () -> [UUID: Anchor<CGRect>]) { value.merge(nextValue(), uniquingKeysWith: { _, new in new }) }
 }
+private enum PopupAccessibilityTestSettings {
+    static var enabled: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--popup-accessibility-fixture")
+        #else
+        false
+        #endif
+    }
+}
 struct KnobPopupLayer: ViewModifier {
     @ObservedObject var popups: KnobPopups
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool { systemReduceMotion || PopupAccessibilityTestSettings.enabled }
     func body(content: Content) -> some View {
         content.overlayPreferenceValue(KnobAnchorPreference.self) { anchors in
             GeometryReader { geometry in
@@ -252,8 +262,8 @@ private struct KnobPopupCard: View {
             Text(entry.readout).font(Ink.font(16, bold: true)).monospacedDigit().foregroundStyle(Ink.text)
             Text(entry.notched ? "NEUTRAL" : entry.fine ? "FINE ADJUST" : "UP / RIGHT +").font(Ink.font(8, bold: true)).foregroundStyle(entry.notched ? entry.color : Ink.muted).padding(.top, 4)
         }.padding(10).frame(maxWidth: .infinity, maxHeight: .infinity)
-            .modifier(KnobPopupMaterial(opaque: reduceTransparency || contrast == .increased))
-            .overlay(shape.stroke(entry.color.opacity(contrast == .increased ? 1 : 0.7), lineWidth: contrast == .increased ? 2 : 1))
+            .modifier(KnobPopupMaterial(opaque: reduceTransparency || contrast == .increased || PopupAccessibilityTestSettings.enabled))
+            .overlay(shape.stroke(entry.color.opacity(contrast == .increased || PopupAccessibilityTestSettings.enabled ? 1 : 0.7), lineWidth: contrast == .increased || PopupAccessibilityTestSettings.enabled ? 2 : 1))
             .shadow(color: .black.opacity(0.45), radius: 12, y: 5)
     }
 }
