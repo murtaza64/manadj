@@ -1,0 +1,37 @@
+name: iOS current-toolchain device compile
+on:
+  pull_request:
+    paths: ["ios/**", ".github/workflows/ios-current-toolchain.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: ios-current-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  device-compile:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Select latest installed production Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_*.app' ! -iname '*beta*' | sort -V | tail -1)
+          test -n "$XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          xcrun swift --version
+      - name: Compile checked-in project for physical-device SDK
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/device-current" CODE_SIGNING_ALLOWED=NO ARCHS=arm64 SWIFT_STRICT_CONCURRENCY=complete build 2>&1 | tee device-current.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ios-current-device-build-log
+          path: device-current.log
+          retention-days: 3
