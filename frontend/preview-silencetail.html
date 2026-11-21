@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { margin: 0; background: #111111; font-family: 'Ubuntu Mono', monospace; }
+      .label { color: #999; font-size: 12px; padding: 8px 8px 2px; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <div class="label" id="main-label"></div>
+    <canvas id="main" width="1000" height="180"></canvas>
+    <div class="label" id="mini-label"></div>
+    <canvas id="mini" width="1000" height="90"></canvas>
+    <script type="module" src="/src/preview/silenceTailPreview.tsx"></script>
+  </body>
+</html>

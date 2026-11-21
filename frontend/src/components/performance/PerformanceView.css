@@ -391,6 +391,30 @@
   }
 }
 
+/* The heard latency stepper widens the left cluster; before the strip would
+ * overlap the centered crossfader group, wrap early while the stepper shows. */
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .perf-strip:has(.perf-heard-latency) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-8) var(--space-12);
+  }
+  .perf-strip:has(.perf-heard-latency) .perf-strip-left,
+  .perf-strip:has(.perf-heard-latency) .perf-xf-tools,
+  .perf-strip:has(.perf-heard-latency) .perf-xf-fader,
+  .perf-strip:has(.perf-heard-latency) .perf-xf-right,
+  .perf-strip:has(.perf-heard-latency) .perf-strip-right {
+    position: static;
+    transform: none;
+  }
+  .perf-strip:has(.perf-heard-latency) .perf-strip-left { flex-wrap: wrap; }
+  .perf-strip:has(.perf-heard-latency) .perf-strip-right {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: var(--space-8);
+  }
+}
+
 .perf-strip-toggle {
   padding: 1px var(--space-6);
   font-size: var(--font-micro);
@@ -410,6 +434,33 @@
 }
 
 .perf-strip-ghost { visibility: hidden; }
+
+/* Heard (#382): the active route's output latency next to the HEARD toggle,
+   nudgeable in 5 ms steps while practicing (double-click = reported). */
+.perf-heard-latency {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.perf-heard-ms {
+  min-width: 44px;
+  text-align: center;
+  font-size: var(--font-micro);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--overlay0);
+  user-select: none;
+}
+
+.perf-heard-step {
+  padding: 1px var(--space-6);
+  font-size: var(--font-micro);
+  font-weight: 800;
+  color: var(--overlay0);
+  border-color: var(--surface1);
+}
 
 /* Waveform/deck section toggles (perf-layout 12 / gh#68): WAVE / DECK next
    to KBD, same .perf-strip-toggle language (lit green while shown). The

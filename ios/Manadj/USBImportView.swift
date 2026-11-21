@@ -8,6 +8,8 @@ struct USBImportView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var choosing = false
     @State private var working = false
+    @State private var confirmCopy = false
+    @State private var copying = false
     @State private var source: URL?
     @State private var preview: USBImportPreview?
     @State private var selected: Set<Int> = []
@@ -20,6 +22,10 @@ struct USBImportView: View {
         #endif
         return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("USBImports")
     }
+    private var selectedBytes: Int64 {
+        preview?.available.filter { selected.contains($0.id) }.reduce(Int64(0)) { $0 + Int64($1.track.byteCount) } ?? 0
+    }
+    private var selectedSize: String { ByteCountFormatter.string(fromByteCount: selectedBytes, countStyle: .file) }
     var body: some View {
         NavigationStack {
             List {
@@ -48,9 +54,7 @@ struct USBImportView: View {
                                 }
                             }
                         }
-                        Text("Selected audio: " + ByteCountFormatter.string(fromByteCount: preview.available.filter { selected.contains($0.id) }.reduce(Int64(0)) { $0 + Int64($1.track.byteCount) }, countStyle: .file)).font(Ink.font(11)).foregroundStyle(Ink.muted)
-                        Button("Import \(selected.count) selected") { copy() }.disabled(working || selected.isEmpty)
-                            .accessibilityIdentifier("usb-confirm-import")
+
                     }
                     Section("USB playlists · preview") {
                         ForEach(preview.library.playlists) { playlist in
@@ -79,9 +83,42 @@ struct USBImportView: View {
                     }
                 }
             }.scrollContentBackground(.hidden).background(Ink.base)
+                .safeAreaInset(edge: .top) {
+                    if let preview {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("\(selected.count) selected · \(selectedSize)")
+                                .font(Ink.font(13, bold: true))
+                                .accessibilityIdentifier("usb-selection-summary")
+                            HStack {
+                                Button("SELECT ALL AVAILABLE") { selected = Set(preview.available.map(\.id)) }
+                                    .disabled(working)
+                                Spacer()
+                                Button("SELECT NONE") { selected = [] }.disabled(working)
+                            }.font(Ink.font(11))
+                            if copying {
+                                ProgressView("Copying \(selected.count) tracks to this iPhone… Keep USB connected.")
+                                    .font(Ink.font(11)).accessibilityIdentifier("usb-copy-progress")
+                            } else {
+                                Button("Import \(selected.count) selected") { confirmCopy = true }
+                                    .buttonStyle(FlatButtonStyle(color: Ink.play))
+                                    .disabled(working || selected.isEmpty)
+                                    .accessibilityIdentifier("usb-confirm-import")
+                            }
+                            Text("Copies into this iPhone only. Original USB stays unchanged.")
+                                .font(Ink.font(10)).foregroundStyle(Ink.muted)
+                        }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Ink.crust).overlay(alignment: .bottom) { Divider().overlay(Ink.edge) }
+                    }
+                }
                 .navigationTitle("Rekordbox USB").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.disabled(working) } }
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() }.disabled(working) } }
         }.preferredColorScheme(.dark).tint(Ink.accent).interactiveDismissDisabled(working)
+            .confirmationDialog("Copy \(selected.count) tracks (\(selectedSize)) to this iPhone?", isPresented: $confirmCopy, titleVisibility: .visible) {
+                Button("COPY TO THIS IPHONE") { copy() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Keep the USB connected until copying finishes. This uses iPhone storage, leaves the USB unchanged and does not sync the desktop. Audio decoding is checked when you load a track.")
+            }
             .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { result in
                 switch result {
                 case let .success(url): scan(url)
@@ -106,7 +143,7 @@ struct USBImportView: View {
                     return try RekordboxUSBPreview.scan(root: url)
                 }.value
                 preview = result
-                selected = Set(result.available.map(\.id))
+                selected = []
                 message = "Preview only. Nothing copied."
             } catch { message = error.localizedDescription }
             working = false
@@ -115,9 +152,15 @@ struct USBImportView: View {
     private func copy() {
         guard !working, let source, let preview else { return }
         let selected = selected, destination = imports
-        working = true
+        working = true; copying = true
         Task {
+            defer { working = false; copying = false }
             do {
+                let required = preview.available.filter { selected.contains($0.id) }.reduce(Int64(0)) { $0 + Int64($1.track.byteCount) }
+                let volume = try imports.deletingLastPathComponent().resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+                if let available = volume.volumeAvailableCapacityForImportantUsage, required > available {
+                    throw AppFailure("Not enough iPhone storage for the selected audio. Select fewer tracks.")
+                }
                 _ = try await Task.detached(priority: .userInitiated) {
                     let allowed = source.startAccessingSecurityScopedResource()
                     defer { if allowed { source.stopAccessingSecurityScopedResource() } }
@@ -127,7 +170,6 @@ struct USBImportView: View {
                 message = "Imported \(selected.count) track\(selected.count == 1 ? "" : "s") into this iPhone. USB unchanged."
                 refresh()
             } catch { message = error.localizedDescription }
-            working = false
         }
     }
     private func refresh() {

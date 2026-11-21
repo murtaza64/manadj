@@ -13,6 +13,7 @@ from tests.test_device_group_mesh import call, http
 from tests.test_peer_history_integration import history
 from tests.test_peer_session_exchange import get, post
 from tests.test_peer_session_exchange import instance as instance  # noqa: PLC0414
+from tests.windows_skips import posix_file_identity
 
 
 def receiver(instance, *, identical_assets=False):
@@ -62,6 +63,7 @@ def bound(instance):
     return peer, value, path, selections
 
 
+@posix_file_identity
 def test_exact_bound_receiver_bytes_restart_and_metadata_stays_nonplayable(instance):
     peer, value, path, _ = bound(instance)
     readiness = get(peer, path + "/readiness")
@@ -83,6 +85,7 @@ def test_exact_bound_receiver_bytes_restart_and_metadata_stays_nonplayable(insta
     assert history(peer).get(f"/api/sessions/{sid}/audio/73?generation={generation}").status_code == 409
 
 
+@posix_file_identity
 @pytest.mark.parametrize("mutation", ["replace-identical", "overwrite", "archive", "delete-reuse", "revoke", "signature", "missing", "row-path"])
 def test_current_authority_refuses_changed_or_replaced_receiver(instance, mutation):
     peer, value, path, _ = bound(instance)
@@ -123,6 +126,7 @@ def test_current_authority_refuses_changed_or_replaced_receiver(instance, mutati
     assert response.status_code == denied
 
 
+@posix_file_identity
 def test_explicit_binding_rejects_wrong_selection_identity_and_stale_generation(instance):
     peer, value, path = receiver(instance)
     assert get(peer, path + "/readiness")["state"] == "unbound"
@@ -149,6 +153,7 @@ def test_selection_strict_body_and_local_owner_gate(instance):
     assert response.status_code == 403
 
 
+@posix_file_identity
 def test_same_receiver_cannot_satisfy_two_distinct_logical_decode_identities(instance):
     from backend.peer_sync.models import GroupReplayBinding
     peer, value, path = receiver(instance, identical_assets=True)
@@ -200,3 +205,17 @@ def test_corrupt_local_authority_never_reclassifies_received_evidence_as_own_raw
     assert detail["events"] == [] and detail["replay_generation"] is None and detail["group_history"]
     assert normal.get(f"/api/sessions/{sid}/audio/1?generation=anything").status_code == 409
     assert normal.post(f"/api/sessions/{sid}/chunks", json={"seq": 2, "events": []}).status_code == 409
+
+
+def test_missing_nonblocking_identity_refuses_before_open(monkeypatch):
+    """Unsupported platforms must refuse before a pipe/device open can block."""
+    from types import SimpleNamespace
+    from backend.peer_sync import group_replay
+    from backend.peer_sync.service import SyncError
+    monkeypatch.delattr(group_replay.os, 'O_NONBLOCK', raising=False)
+    def forbidden_open(*args, **kwargs):
+        pytest.fail('unsupported platform attempted to open selected pathname')
+    monkeypatch.setattr(group_replay.os, 'open', forbidden_open)
+    with pytest.raises(SyncError) as error:
+        group_replay.read_selected(SimpleNamespace(filename='synthetic-not-opened', archived_at=None), 'guard')
+    assert error.value.code == 'unsupported-identity'

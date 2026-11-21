@@ -35,12 +35,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload, undefer
+from starlette.concurrency import run_in_threadpool
 
 from .. import shipped_defaults
 from ..database import get_db
+from ..feedback import REQUEST_LIMIT, Submission
 from ..key import Key
 from ..models import (
     AppSetting,
@@ -73,16 +75,21 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat()
 
 
-def audio_rev(filename: str) -> str | None:
-    """Identity of the audio bytes the device would cache, or None when the
-    file is missing. Path + size + mtime: cheap, and any replacement of the
-    file changes it (content hashing a whole Library is not)."""
+def _audio_identity(filename: str) -> tuple[str | None, int | None]:
+    """Revision and byte length must describe the same live file stat.
+
+    Imported DB metadata can be stale after tags or audio bytes change.
+    """
     try:
         st = Path(filename).stat()
     except OSError:
-        return None
+        return None, None
     raw = f"{filename}\0{st.st_size}\0{st.st_mtime_ns}".encode()
-    return hashlib.sha1(raw).hexdigest()[:16]
+    return hashlib.sha1(raw).hexdigest()[:16], st.st_size
+
+
+def audio_rev(filename: str) -> str | None:
+    return _audio_identity(filename)[0]
 
 
 def preview_rev(blob: bytes) -> str:
@@ -184,6 +191,7 @@ def build_snapshot(db: Session) -> dict:
 
     track_rows = []
     for t in tracks:
+        live_audio_rev, live_audio_size = _audio_identity(t.filename)
         grid = None
         bg: Beatgrid | None = t.beatgrid
         if bg is not None and bg.origin != "generated":
@@ -208,8 +216,8 @@ def build_snapshot(db: Session) -> dict:
                 "date_added": _iso(t.created_at),
                 "main_cue": t.cue_point_time,
                 "codec": t.codec,
-                "filesize_bytes": t.filesize_bytes,
-                "audio_rev": audio_rev(t.filename),
+                "filesize_bytes": live_audio_size,
+                "audio_rev": live_audio_rev,
                 "preview_rev": previews.get(t.id),
                 "waveform_rev": waveforms.get(t.id),
                 "stems_rev": stems_rev(t.id, t.filename),
@@ -588,3 +596,87 @@ def report_received(body: ReceivedIn, request: Request, db: Session = Depends(ge
     except (FieldError, KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"batch_id": batch}
+
+
+# ── Phone feedback: shake-to-report lands in the shared feedback store ──
+#
+# The phone captures, annotates and reviews the report on-device, then POSTs
+# it here. The desktop files it through the same FeedbackService as the
+# loopback /api/feedback router: scrubbed, durable, and the GitHub issue is
+# text-only (screenshot/context stay in the local feedback store). The full
+# feedback router stays loopback-only; this is the one scoped device write.
+
+
+async def _feedback_payload(request: Request) -> dict:
+    if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
+        raise _no_store(HTTPException(415, "Feedback requires application/json"))
+    try:
+        if int(request.headers.get("content-length", "0")) > REQUEST_LIMIT:
+            raise _no_store(HTTPException(413, "Feedback request is too large"))
+    except ValueError:
+        raise _no_store(HTTPException(400, "Invalid content length")) from None
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > REQUEST_LIMIT:
+            raise _no_store(HTTPException(413, "Feedback request is too large"))
+    try:
+        value = json.loads(data)
+    except ValueError:
+        raise _no_store(
+            HTTPException(422, "Invalid feedback input; check field, attachment and size limits")
+        ) from None
+    if not isinstance(value, dict):
+        raise _no_store(
+            HTTPException(422, "Invalid feedback input; check field, attachment and size limits")
+        )
+    return value
+
+
+def _no_store(exc: HTTPException) -> HTTPException:
+    exc.headers = {
+        **(exc.headers or {}),
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    return exc
+
+
+@router.post("/feedback")
+async def submit_feedback(request: Request, response: Response):
+    """File one reviewed phone report via the desktop's FeedbackService.
+
+    External filing requires a verified paired device (request.state.device,
+    set by the listener after token auth); the legacy shared pairing code
+    keeps its read paths but cannot file. Browser-originated requests are
+    refused. The desktop is the filer, so the running app is the origin; any
+    origin the caller claims is replaced. The device's identity is recorded
+    as evidence, never trusted as the filing origin.
+    """
+    service = getattr(request.app.state, "feedback_service", None)
+    if service is None:
+        raise _no_store(HTTPException(503, "Feedback filing is unavailable on this desktop"))
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    if getattr(request.state, "device", None) is None:
+        raise _no_store(HTTPException(401, "Feedback filing requires a paired device"))
+    if "origin" in request.headers or "referer" in request.headers:
+        raise _no_store(
+            HTTPException(403, "Feedback does not accept browser-originated requests")
+        )
+    body = await _feedback_payload(request)
+    body["origin"] = service.workspace.origin.model_dump()
+    device_id, name = _device(request)
+    snapshot = body.get("snapshot")
+    if isinstance(snapshot, dict):
+        session = snapshot.setdefault("session", {})
+        if isinstance(session, dict):
+            session["reporting_device"] = {"id": device_id, "name": name}
+    try:
+        submission = Submission.model_validate(body)
+    except (ValueError, ValidationError, RecursionError):
+        # Validation errors echo offending values by default (possibly secrets).
+        raise _no_store(
+            HTTPException(422, "Invalid feedback input; check field, attachment and size limits")
+        ) from None
+    return await run_in_threadpool(service.submit, submission)

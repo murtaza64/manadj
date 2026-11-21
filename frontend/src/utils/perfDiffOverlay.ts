@@ -9,6 +9,7 @@
 export interface TempoChangeLike {
   start_time: number; // seconds
   bpm: number;
+  time_signature_num?: number;
   bar_position: number; // 1-4: bar position of the segment's first beat
 }
 
@@ -39,7 +40,9 @@ export function beatMarkersFromTempoChanges(
   const sorted = [...changes].sort((a, b) => a.start_time - b.start_time);
   for (let i = 0; i < sorted.length; i++) {
     const change = sorted[i];
-    if (change.bpm <= 0) continue;
+    if (!Number.isFinite(change.bpm) || change.bpm <= 0 || !Number.isFinite(change.start_time) || !Number.isFinite(change.bar_position)) continue;
+    const beatsPerBar = change.time_signature_num ?? 4;
+    if (!Number.isInteger(beatsPerBar) || beatsPerBar < 1 || beatsPerBar > 32) continue;
     const segmentEnd = i + 1 < sorted.length
       ? Math.min(sorted[i + 1].start_time, duration)
       : duration;
@@ -52,7 +55,7 @@ export function beatMarkersFromTempoChanges(
     ) {
       if (t < 0) continue;
       // bar_position names the first beat's place in the bar (1-4)
-      const positionInBar = ((beat + change.bar_position - 1) % 4) + 1;
+      const positionInBar = ((beat + change.bar_position - 1) % beatsPerBar) + 1;
       markers.push({ time: t, isDownbeat: positionInBar === 1 });
     }
     if (markers.length >= MAX_MARKERS) break;

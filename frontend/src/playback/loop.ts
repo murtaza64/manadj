@@ -93,3 +93,27 @@ export function foldLoopPlayhead(
   if (position < end) return position;
   return start + ((position - end) % length);
 }
+
+/** A silence loop (gh#424): its region extends past the last audible
+ * sample. Detection is structural — the region end lies beyond the buffer
+ * duration — so the flag survives the projection round-trip without a
+ * separate marker on LoopRegion. The worklet never runs for the past-EOF
+ * span; DeckEngine keeps a silent anchor clock (the mirror of the
+ * pre-start lead-in) and folds the playhead into the region. */
+export function isSilenceLoop(loop: LoopRegion, bufferDuration: number): boolean {
+  return loop.end > bufferDuration;
+}
+
+/** The fold region end for a running loop: real audio wraps at
+ * min(loop.end, duration) (the worklet's sample wrap); a silence loop
+ * folds at its full projected end while the phantom clock runs past EOF.
+ * Callers pass whether the phantom clock is active so a silence loop that
+ * has not reached EOF yet still wraps on real audio. */
+export function loopFoldEnd(
+  loop: LoopRegion,
+  bufferDuration: number,
+  phantomActive: boolean
+): number {
+  if (phantomActive && isSilenceLoop(loop, bufferDuration)) return loop.end;
+  return Math.min(loop.end, bufferDuration);
+}

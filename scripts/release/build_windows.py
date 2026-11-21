@@ -61,6 +61,7 @@ from build_dmg import (  # noqa: E402  (shared release helpers)
     _fetch,
     build_frontend,
     copytree_pyclean,
+    copy_license_inventory,
     export_requirements,
     pyproject_version,
     run,
@@ -175,6 +176,7 @@ def assemble_app(python_runtime: Path, ffmpeg_dir: Path, version: str) -> Path:
         zf.extractall(app)
     (app / "electron.exe").rename(app / f"{APP_NAME}.exe")
     resources = app / "resources"
+    copy_license_inventory(resources)
     (resources / "default_app.asar").unlink(missing_ok=True)
 
     app_dir = resources / "app"

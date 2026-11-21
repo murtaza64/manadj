@@ -517,6 +517,79 @@ describe('loop-toggle', () => {
   });
 });
 
+describe('silence-loop entry (gh#424)', () => {
+  // 120 BPM grid to 2.25s; a 4-beat engage from the last beats crosses a
+  // short track's last audible sample.
+  const nearEofCtx = (overrides: Partial<TransportContext> = {}): TransportContext => ({
+    quantize: true,
+    beatTimes: [0.25, 0.75, 1.25, 1.75, 2.25],
+    audibleDurationSec: 2.4,
+    silenceEntry: { startSec: 2.5, endSec: 34.5, lengthBeats: 64 },
+    ...overrides,
+  });
+
+  it('installs the hypermetric region when the natural engage crosses the last audible sample', () => {
+    const s = state({ playing: true, playhead: 1.1 });
+    const [next, effects] = reduceTransport(s, { type: 'loop-toggle' }, nearEofCtx());
+    // Natural region would be 1.25..3.25 (end 3.25 > 2.4 audible).
+    expect(next.loop).toEqual({ start: 2.5, end: 34.5, lengthBeats: 64 });
+    expect(next.playhead).toBe(1.1); // never moves on engage
+    expect(effects).toEqual([]);
+  });
+
+  it('keeps the natural region when the engage stays within the audio', () => {
+    const s = state({ playing: true, playhead: 0.1 });
+    const [next] = reduceTransport(s, { type: 'loop-toggle' }, nearEofCtx());
+    // Natural region 0.25..2.25 stays within the 2.4s of audio.
+    expect(next.loop).toEqual({ start: 0.25, end: 2.25, lengthBeats: 4 });
+  });
+
+  it('keeps the natural region when no entry is computable (gridless/downbeat-less track)', () => {
+    const s = state({ playing: true, playhead: 1.1 });
+    const [next] = reduceTransport(
+      s,
+      { type: 'loop-toggle' },
+      nearEofCtx({ silenceEntry: null })
+    );
+    expect(next.loop).toEqual({ start: 1.25, end: 3.25, lengthBeats: 4 });
+  });
+
+  it('does not route when the audible duration is unknown', () => {
+    const s = state({ playing: true, playhead: 1.1 });
+    const [next] = reduceTransport(
+      s,
+      { type: 'loop-toggle' },
+      nearEofCtx({ audibleDurationSec: null })
+    );
+    expect(next.loop).toEqual({ start: 1.25, end: 3.25, lengthBeats: 4 });
+  });
+
+  it('routes loop-preset engages through the same entry', () => {
+    const s = state({ playing: true, playhead: 1.1 });
+    const [next] = reduceTransport(s, { type: 'loop-preset', beats: 8 }, nearEofCtx());
+    expect(next.loop).toEqual({ start: 2.5, end: 34.5, lengthBeats: 64 });
+    // The pressed size is still remembered for the next engagement.
+    expect(next.pendingLoopBeats).toBe(8);
+  });
+
+  it('release and inert gridless behavior are unchanged past EOF', () => {
+    const s = state({
+      playing: true,
+      playhead: 30,
+      loop: { start: 2.5, end: 34.5, lengthBeats: 64 },
+    });
+    const [next] = reduceTransport(s, { type: 'loop-toggle' }, nearEofCtx());
+    expect(next.loop).toBeNull();
+    // Gridless engage stays inert even with an entry in context.
+    const [idle] = reduceTransport(
+      state({ playing: true, playhead: 1.1 }),
+      { type: 'loop-toggle' },
+      nearEofCtx({ beatTimes: null })
+    );
+    expect(idle.loop).toBeNull();
+  });
+});
+
 describe('loop-resize', () => {
   const active = { start: 10, end: 12, lengthBeats: 4 }; // 0.5s/beat
 
@@ -1117,5 +1190,165 @@ describe('preview-release', () => {
     expect(next.playing).toBe(true);
     expect(next.previewing).toBe(false);
     expect(effects).toEqual([]);
+  });
+});
+
+describe('heard quantize (#382 desktop port)', () => {
+  // 120 BPM grid: beats every 0.5s from 0.25s.
+  const grid = [0.25, 0.75, 1.25, 1.75, 2.25];
+
+  /** Quantize on, reference deck playing at `refPlayhead`, output latency L. */
+  function heardLaunchCtx(refPlayhead: number, heardSeconds: number, playRate = 1): TransportContext {
+    return {
+      quantize: true,
+      beatTimes: null,
+      launchReference: { beatTimes: grid, playhead: refPlayhead },
+      playRate,
+      heardSeconds,
+    };
+  }
+
+  describe('cross-deck launch', () => {
+    it('targets the beat nearest the HEARD position — a press on a heard beat enters ~L·rate past the cue, never waiting for the next beat', () => {
+      // L = 0.35: the render playhead is 1.61, but the performer HEARS 1.26 —
+      // just after the 1.25 beat. Grid would snap the AHEAD beat (1.75) and
+      // defer 0.14; Heard enters immediately, 1.61 - 1.25 = 0.36 past the cue.
+      const [, gridEffects] = reduceTransport(
+        state({ playhead: 8 }),
+        { type: 'play' },
+        heardLaunchCtx(1.61, 0)
+      );
+      expect(gridEffects).toEqual([{ type: 'start', at: 8, delaySeconds: expect.closeTo(0.14, 6) }]);
+
+      const [, effects] = reduceTransport(
+        state({ playhead: 8 }),
+        { type: 'play' },
+        heardLaunchCtx(1.61, 0.35)
+      );
+      expect(effects).toEqual([{ type: 'start', at: expect.closeTo(8.36, 6) }]);
+    });
+
+    it('still defers when the beat nearest the heard position is genuinely ahead', () => {
+      // Heard 1.01 (render 1.11, L = 0.10): nearest heard beat 1.25 is 0.14
+      // ahead of the RENDER playhead — hold, then enter exactly on cue.
+      const [, effects] = reduceTransport(
+        state({ playhead: 8 }),
+        { type: 'play' },
+        heardLaunchCtx(1.11, 0.1)
+      );
+      expect(effects).toEqual([{ type: 'start', at: 8, delaySeconds: expect.closeTo(0.14, 6) }]);
+    });
+
+    it('scales the ahead-entry by the launching deck rate and reads the reference at its own rate', () => {
+      // Reference at half rate (0.5): heard = 1.61 - 0.35·0.5 = 1.435 → nearest
+      // beat 1.25, render delta (1.25-1.61)/0.5 = -0.72 → enter 0.72·rate past cue.
+      const [, effects] = reduceTransport(
+        state({ playhead: 8 }),
+        { type: 'play' },
+        {
+          quantize: true,
+          beatTimes: null,
+          launchReference: { beatTimes: grid, playhead: 1.61, playRate: 0.5 },
+          playRate: 2,
+          heardSeconds: 0.35,
+        }
+      );
+      expect(effects).toEqual([{ type: 'start', at: expect.closeTo(8 + 0.72 * 2, 6) }]);
+    });
+
+    it('leaves launches with no playing reference immediate and exact', () => {
+      const [, effects] = reduceTransport(
+        state({ playhead: 8 }),
+        { type: 'play' },
+        { quantize: true, beatTimes: grid, launchReference: null, heardSeconds: 0.35 }
+      );
+      expect(effects).toEqual([{ type: 'start', at: 8 }]);
+    });
+  });
+
+  describe('hot-cue press on a playing deck', () => {
+    // Longer grid reaching past the cue at 4.25 (beats every 0.5s from 0.25).
+    const longGrid = Array.from({ length: 11 }, (_, i) => 0.25 + i * 0.5);
+
+    it('lands phase from the heard position, L·rate later (Android: snap(cue) + (h − snap(h)) + L·rate)', () => {
+      // Playing at render 1.61, L = 0.35 → heard h = 1.26, phase +0.01 past
+      // beat 1.25. Cue on the 4.25 beat lands 4.25 + 0.01 + 0.35 = 4.61.
+      const [next, effects] = reduceTransport(
+        state({ playing: true, playhead: 1.61 }),
+        { type: 'hot-cue-down', slot: 0, time: 4.25 },
+        { quantize: true, beatTimes: longGrid, heardSeconds: 0.35 }
+      );
+      expect(next.playhead).toBeCloseTo(4.61, 6);
+      expect(effects).toEqual([{ type: 'start', at: expect.closeTo(4.61, 6) }]);
+    });
+
+    it('lands cue + L·rate with Quantize off (Heard compensates even unquantized)', () => {
+      const [next, effects] = reduceTransport(
+        state({ playing: true, playhead: 1.61 }),
+        { type: 'hot-cue-down', slot: 0, time: 4.25 },
+        { quantize: false, beatTimes: null, heardSeconds: 0.35 }
+      );
+      expect(next.playhead).toBeCloseTo(4.6, 6);
+      expect(effects).toEqual([{ type: 'start', at: expect.closeTo(4.6, 6) }]);
+    });
+
+    it('is unchanged with Heard off (render-phase rule)', () => {
+      const [next] = reduceTransport(
+        state({ playing: true, playhead: 1.61 }),
+        { type: 'hot-cue-down', slot: 0, time: 4.25 },
+        { quantize: true, beatTimes: longGrid }
+      );
+      // Phase from the render playhead: 1.61 - 1.75 = -0.14 → 4.25 - 0.14 = 4.11.
+      expect(next.playhead).toBeCloseTo(4.11, 6);
+    });
+  });
+
+  describe('auto-loop engage', () => {
+    it('anchors at the heard beat — the loop you get is the one you heard', () => {
+      // Render 1.61, L = 0.35 → heard 1.26 → anchor beat 1.25 (Grid: 1.75).
+      const [next, effects] = reduceTransport(
+        state({ playing: true, playhead: 1.61, pendingLoopBeats: 2 }),
+        { type: 'loop-toggle' },
+        { quantize: true, beatTimes: grid, heardSeconds: 0.35 }
+      );
+      expect(next.loop).toEqual({ start: 1.25, end: 2.25, lengthBeats: 2 });
+      expect(next.playhead).toBeCloseTo(1.61); // inside the region: no move
+      expect(effects).toEqual([]);
+    });
+
+    it('wraps the playhead in when the heard-anchored region already passed', () => {
+      // L = 0.7 → heard 0.91 → anchor beat 0.75; a 1-beat loop [0.75, 1.25)
+      // already ended at the render playhead 1.61 → wrap to its loop phase.
+      const [next, effects] = reduceTransport(
+        state({ playing: true, playhead: 1.61, pendingLoopBeats: 1 }),
+        { type: 'loop-toggle' },
+        { quantize: true, beatTimes: grid, heardSeconds: 0.7 }
+      );
+      expect(next.loop).toEqual({ start: 0.75, end: 1.25, lengthBeats: 1 });
+      // 0.75 + (1.61 - 0.75) % 0.5 = 0.75 + 0.36 = 1.11.
+      expect(next.playhead).toBeCloseTo(1.11, 6);
+      expect(effects).toEqual([{ type: 'start', at: expect.closeTo(1.11, 6) }]);
+    });
+
+    it('engages at the exact heard position with Quantize off', () => {
+      const [next] = reduceTransport(
+        state({ playing: true, playhead: 1.61, pendingLoopBeats: 2 }),
+        { type: 'loop-toggle' },
+        { quantize: false, beatTimes: grid, heardSeconds: 0.35 }
+      );
+      expect(next.loop?.start).toBeCloseTo(1.26, 6);
+    });
+  });
+
+  describe('paused placements', () => {
+    it('leaves a paused hot-cue hold-to-preview exact — nothing is in flight', () => {
+      const [next, effects] = reduceTransport(
+        state({ playhead: 8 }),
+        { type: 'hot-cue-down', slot: 0, time: 4.25 },
+        { quantize: true, beatTimes: grid, heardSeconds: 0.35 }
+      );
+      expect(next.playhead).toBe(4.25);
+      expect(effects).toEqual([{ type: 'start', at: 4.25 }]);
+    });
   });
 });

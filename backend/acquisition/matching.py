@@ -37,6 +37,54 @@ def normalize(text: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", text))
 
 
+# Artist credits join several names in one string ("Kanine, Andromedik",
+# "Mila Falls & Kanine x Sona"). Strong separators always split. Weak ones
+# (x, and) split only between two non-empty parts, so a name that merely
+# starts or ends with one survives: "X CLUB.", "Project X" stay whole.
+_ARTIST_SEPARATORS = re.compile(
+    r"\s*(?:,|;|&|\+|\bvs\.?\b|\bfeat\.?\b|\bft\.?\b|\bwith\b|\bpres\.?\b|\bpresents\b)\s*",
+    re.IGNORECASE,
+)
+_WEAK_ARTIST_SEPARATORS = re.compile(r"(?<=\S)\s+(?:x|and)\s+(?=\S)", re.IGNORECASE)
+
+# Placeholder credits that carry no artist identity and must not block a match.
+GENERIC_ARTISTS = {"various", "various artists", "va", "unknown", "unknown artist"}
+
+# A shared name shorter than this is too collision-prone ("TC", "X") to count
+# as evidence on its own; identical short credits still pass via string ratio.
+_MIN_SHARED_NAME_CHARS = 3
+
+
+def artist_names(text: str | None) -> set[str]:
+    """The individual normalized artist names in a credit string."""
+    if not text:
+        return set()
+    parts: list[str] = []
+    for chunk in _ARTIST_SEPARATORS.split(text):
+        parts.extend(_WEAK_ARTIST_SEPARATORS.split(chunk))
+    return {name for name in (normalize(part) for part in parts) if name}
+
+
+def artists_compatible(a: str | None, b: str | None) -> bool:
+    """Whether two artist credits can plausibly refer to the same track.
+
+    Credits differ across stores, rips and taggers: collaborators get dropped
+    or reordered, separators vary. Treat credits as compatible when either is
+    blank or generic, when they share an individual artist name long enough to
+    be evidence, or when the whole strings are close (typo tolerance, same
+    threshold the sync copy suggestions used before this was shared).
+    """
+    na, nb = normalize(a or ""), normalize(b or "")
+    if not na or not nb:
+        return True
+    if na in GENERIC_ARTISTS or nb in GENERIC_ARTISTS:
+        return True
+    shared = artist_names(a) & artist_names(b)
+    if any(len(name) >= _MIN_SHARED_NAME_CHARS for name in shared):
+        return True
+    return SequenceMatcher(None, na, nb).ratio() >= 0.65
+
+
 def _similarity(a: str, b: str) -> float:
     """Max of sequence similarity and token-set Jaccard (handles reordering)."""
     if not a or not b:

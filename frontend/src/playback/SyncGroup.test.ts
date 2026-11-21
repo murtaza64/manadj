@@ -5,6 +5,7 @@ import { CHANNEL_IDS, type ChannelId } from './mixer';
 import { _clearBufferCacheForTests, putCachedBuffer } from './bufferCache';
 import { _resetAudibleSurfacesForTests, claimAudible, registerSurface, releaseAudible } from './audibleSurface';
 import { setQuantize } from './quantizeStore';
+import { _resetSyncWantedForTests, isSyncWanted, setSyncWanted } from './syncWantedStore';
 import { effectiveBpm } from './tempo';
 
 vi.mock('../settings/persistedSettings', () => ({ writeSetting: vi.fn() }));
@@ -44,6 +45,7 @@ beforeEach(() => {
   clock.currentTime = 0;
   _resetAudibleSurfacesForTests();
   setQuantize(false);
+  _resetSyncWantedForTests();
   engines = Object.fromEntries(CHANNEL_IDS.map(deck => [deck, new DeckEngine({
     ensureAudio: () => ({ ctx, input: {} as AudioNode }),
   })])) as Record<ChannelId, DeckEngine>;
@@ -240,5 +242,78 @@ describe('one-shot phase alignment', () => {
     expect(group.launchReference('C')?.playhead).toBeCloseTo(20.2);
     engines.B.pause();
     expect(group.launchReference('C')).toBeNull();
+  });
+});
+
+describe('remembered membership (#399 desktop port)', () => {
+  /** Load an explicit trackId so "the next source" is distinguishable. */
+  async function loadTrack(deck: ChannelId, trackId: number, bpm: number | null = 120) {
+    putCachedBuffer(trackId, buffer);
+    await engines[deck].load({
+      trackId, audioUrl: '/test-audio', bpm,
+      beatTimes: Promise.resolve(bpm ? Array.from({ length: 400 }, (_, i) => i * 60 / bpm) : null),
+    });
+  }
+
+  it('an explicit toggle records the resulting membership', async () => {
+    await load('A');
+    group.toggle('A');
+    expect(isSyncWanted('A')).toBe(true);
+    group.toggle('A');
+    expect(isSyncWanted('A')).toBe(false);
+  });
+
+  it('a refused explicit join records NOT wanted', async () => {
+    await load('A', 120);
+    group.toggle('A'); // group tempo 120
+    await load('B', 200); // out of reach at every ratio
+    const result = group.toggle('B');
+    expect(result?.kind).not.toBe('match');
+    expect(isSyncWanted('B')).toBe(false);
+    expect(group.getSnapshot().decks.B).toBe('off');
+  });
+
+  it('a wanted deck joins on its own when a track lands ready', async () => {
+    setSyncWanted('B', true);
+    await load('B');
+    expect(group.getSnapshot().decks.B).not.toBe('off');
+  });
+
+  it('toggles on an empty deck are a no-op and never write the preference', () => {
+    setSyncWanted('A', true); // remembered from a previous launch
+    expect(group.toggle('A')).toBeNull(); // nothing loaded
+    expect(isSyncWanted('A')).toBe(true); // preference survives
+  });
+
+  it('a refused auto-join keeps the preference and retries on the NEXT source only', async () => {
+    await load('A', 120);
+    group.toggle('A'); // group tempo 120
+    setSyncWanted('B', true);
+    await loadTrack('B', 20, 200); // out of reach: join refused, preference kept
+    expect(group.getSnapshot().decks.B).toBe('off');
+    expect(isSyncWanted('B')).toBe(true);
+    engines.B.setTrackBpm(20, 122); // in reach now, but the SAME source: one attempt per track
+    expect(group.getSnapshot().decks.B).toBe('off');
+    await loadTrack('B', 21, 122); // the next source retries
+    expect(group.getSnapshot().decks.B).toBe('synced');
+    expect(tempo('B')).toBeCloseTo(120);
+  });
+
+  it('machine playback clears the group; the preference survives and the next track rejoins', async () => {
+    setSyncWanted('A', true);
+    setSyncWanted('B', true);
+    await load('A');
+    await load('B');
+    expect(group.getSnapshot().decks.A).not.toBe('off');
+    registerSurface('editor', { transport: { togglePlay() {} }, silence() {} });
+    claimAudible('editor');
+    expect(group.getSnapshot().decks.A).toBe('off');
+    expect(isSyncWanted('A')).toBe(true); // preference survives
+    releaseAudible('editor');
+    // No mid-track rejoin (the machine left the decks in an unknown
+    // state) — but the next loaded track joins on its own.
+    expect(group.getSnapshot().decks.A).toBe('off');
+    await loadTrack('A', 99);
+    expect(group.getSnapshot().decks.A).not.toBe('off');
   });
 });

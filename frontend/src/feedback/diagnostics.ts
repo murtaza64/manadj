@@ -1,4 +1,4 @@
-type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
+export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type Snapshot = Record<string, Json>;
 export type Section = 'view' | 'browse' | 'filters' | 'decks' | 'mixer' | 'editor' | 'set' | 'session' | 'audible_surface' | 'crash';
 export type Readers = Partial<Record<Section, () => unknown>>;
@@ -43,6 +43,35 @@ export function recordError(source: string, error: unknown): void {
   if (recent.length > 12) recent.shift();
 }
 
+export type TrailEntry = {
+  at: string;
+  event: string;
+  detail: string | null;
+};
+
+// Bounded recent navigation/playback trail (feedback #518): the form shows
+// and attaches WHAT the app was doing shortly before the report. Strings
+// only, redacted at record time; never event objects, queries or inputs.
+const TRAIL_LIMIT = 20;
+const trail: TrailEntry[] = [];
+
+export function recordTrail(event: string, detail?: string | number | null): void {
+  trail.push({
+    at: new Date().toISOString(),
+    event: redact(event, 40),
+    detail: detail === undefined || detail === null ? null : redact(String(detail), 160),
+  });
+  if (trail.length > TRAIL_LIMIT) trail.splice(0, trail.length - TRAIL_LIMIT);
+}
+
+export function trailEntries(): TrailEntry[] {
+  return trail.map((entry) => ({ ...entry }));
+}
+
+export function _resetTrailForTests(): void {
+  trail.length = 0;
+}
+
 export function installFeedbackErrors(): () => void {
   const onError = (e: ErrorEvent) => recordError('window.error', e.error ?? e.message);
   const onRejection = (e: PromiseRejectionEvent) => recordError('unhandledrejection', e.reason);
@@ -68,6 +97,7 @@ export function captureDiagnostics(extra: Readers = {}): { snapshot: Snapshot; w
     viewport: { width: window.innerWidth, height: window.innerHeight, pixel_ratio: window.devicePixelRatio },
     user_agent: redact(navigator.userAgent),
     errors: recent.map((entry) => ({ ...entry })),
+    trail: trailEntries(),
   };
   const warnings: string[] = [];
   for (const section of ['view', 'browse', 'filters', 'decks', 'mixer', 'editor', 'set', 'session', 'audible_surface', 'crash'] as const) {

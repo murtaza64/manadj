@@ -9,7 +9,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_fields, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config, device_sync, device_listener as device_listener_router, video_export, harmony
+from .routers import sync_sources, tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_fields, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config, device_sync, device_listener as device_listener_router, video_export, harmony, wallpaper_theme, external_drives
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
@@ -78,6 +78,7 @@ app.include_router(sync_playlists.router, prefix="/api")
 app.include_router(sync_tags.router, prefix="/api")
 app.include_router(sync_tracks.router, prefix="/api")
 app.include_router(sync_status.router, prefix="/api")
+app.include_router(sync_sources.router, prefix="/api")
 app.include_router(sync_performance.router, prefix="/api")
 app.include_router(sync_export.router, prefix="/api")
 app.include_router(sync_fields.router, prefix="/api")
@@ -100,6 +101,7 @@ app.include_router(device_sync.router, prefix="/api/device-sync", tags=["device-
 from .local_live import publisher as local_live_publisher
 app.include_router(local_live_publisher, prefix="/api/local-live", tags=["local-live"])
 app.include_router(device_listener_router.router, prefix="/api/device-listener", tags=["device-sync"])
+app.include_router(external_drives.router, prefix="/api/external-drives", tags=["external-drives"])
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(feedback_router)
@@ -112,6 +114,7 @@ app.include_router(spotify_router.want_router, prefix="/api/acquisition", tags=[
 from .routers import onboarding as onboarding_router  # noqa: E402
 
 app.include_router(onboarding_router.router, prefix="/api/onboarding", tags=["onboarding"])
+app.include_router(wallpaper_theme.router, prefix="/api/theme", tags=["theme"])
 
 
 
@@ -300,6 +303,7 @@ async def startup_event():
     from . import device_listener as _device_listener
 
     try:
+        _device_listener.set_feedback_service(app.state.feedback_service)
         _device_listener.apply_settings()
     except Exception:
         logging.getLogger("backend.main").exception("device listener failed to start")

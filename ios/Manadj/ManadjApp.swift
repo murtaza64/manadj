@@ -4,6 +4,7 @@ import CEngine
 
 @main struct ManadjApp: App {
     @StateObject private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
     var body: some Scene {
         WindowGroup {
             Group {
@@ -14,6 +15,8 @@ import CEngine
                 WorkspaceView()
                 #endif
             }.environmentObject(model)
+                .onAppear { model.syncWake.setActive(scenePhase == .active) }
+                .onChange(of: scenePhase) { _, phase in model.syncWake.setActive(phase == .active) }
                 .font(Ink.font()).foregroundStyle(Ink.text)
                 .tint(Ink.accent).preferredColorScheme(.dark)
         }
@@ -60,6 +63,8 @@ struct WorkspaceView: View {
         .alert("manaDJ", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
+        .feedbackReporter(model: model, browsing: browsing, settings: settings,
+                          autoPresent: ProcessInfo.processInfo.arguments.contains("--feedback-ui-fixture"))
     }
     private var portraitBody: some View {
         GeometryReader { geometry in
@@ -135,7 +140,8 @@ struct WorkspaceView: View {
     private func detailWave(_ index: Int, vertical: Bool = false) -> some View {
         let deck = model.decks[index]
         return PerformanceWave(index: index, vertical: vertical)
-            .overlay { if deck.duration == 0 { Text("\(Ink.deckName(index)) · no track").font(Ink.font(11)).foregroundStyle(Ink.muted) } }
+            .overlay { if deck.duration == 0 { Text("\(Ink.deckName(index)) · no track").font(Ink.font(11)).foregroundStyle(Ink.muted) }
+                else if let notice = deck.waveformNotice { Text(notice).font(Ink.font(9)).foregroundStyle(Ink.muted).padding(4) } }
             .accessibilityLabel("\(Ink.deckName(index)) detail wave")
     }
     private func minimap(_ index: Int) -> some View {

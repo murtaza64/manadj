@@ -31,6 +31,16 @@ def test_release_generates_and_packages_offline_help(tmp_path, monkeypatch):
     shutil.copyfile(ROOT / "frontend" / "public" / "logo.png", fe / "public" / "logo.png")
     (fe / "node_modules").mkdir()
     (fe / "node_modules" / ".package-lock.json").write_text("{}")
+    # The real packager now retains source license inventory alongside help.
+    for name in ("LICENSE", "THIRD-PARTY-NOTICES.md", "sbom.cdx.json"):
+        shutil.copyfile(ROOT / name, repo / name)
+    shutil.copytree(ROOT / "licenses", repo / "licenses")
+    evidence = json.loads((ROOT / "licenses/inventory-evidence.json").read_text())
+    for component in evidence["components"]:
+        for name in component.get("license_files", []):
+            target = repo / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / name, target)
     monkeypatch.setattr(build_dmg, "ROOT", repo)
     monkeypatch.setattr(build_dmg, "BUILD", repo / "build" / "release")
 
@@ -76,6 +86,7 @@ def test_release_generates_and_packages_offline_help(tmp_path, monkeypatch):
     icns.write_bytes(b"icon decoy")
     app = build_dmg.assemble_app(runtime, ffmpeg, icns, "0.1.0-test")
     manual = app / "Contents" / "Resources" / "backend" / "frontend" / "dist" / "manual"
+    assert (app / "Contents/Resources/licenses/LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes()
     manifest = json.loads((manual / "help" / "manifest.json").read_text())
     assert manifest
     for article in manifest:

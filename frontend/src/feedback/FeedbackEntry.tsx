@@ -2,7 +2,14 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { captureFeedback, fitScreenshot, withTimeout, type Capture } from './capture';
 import { feedbackApi, FeedbackError, type Kind, type Payload, type Reports } from './client';
-import { redact, type Readers } from './diagnostics';
+import { redact, type Json, type Readers, type Snapshot } from './diagnostics';
+import { pickElement, type PointerInfo } from './pointer';
+import {
+  appendPoint, compositeScreenshot, normalizePoint, PEN_COLORS, PEN_WIDTH,
+  renderAnnotations, type Stroke,
+} from './annotate';
+import { dictationAvailable, startDictation, type Dictation } from './dictate';
+import { CaptureOverlay } from './overlay';
 import { installModalKeyGuard } from '../focus/modalKeys';
 import './feedback.css';
 
@@ -15,6 +22,123 @@ const batchStatus = {
   submitted: 'Submitted to transport; not acknowledged by the agent',
   delivered: 'Delivered', 'needs-routing': 'Needs routing; no delivery confirmed',
 };
+
+/** Plain-literal copy so the descriptor is assignable to the snapshot's Json. */
+function pointerSnapshot(pointer: PointerInfo) {
+  return {
+    tag: pointer.tag, id: pointer.id, role: pointer.role, label: pointer.label, text: pointer.text,
+    rect: { x: pointer.rect.x, y: pointer.rect.y, width: pointer.rect.width, height: pointer.rect.height },
+  };
+}
+
+function pointerLabel(pointer: PointerInfo): string {
+  const named = pointer.label ?? pointer.text;
+  return `${pointer.tag}${pointer.id ? `#${pointer.id}` : ''}${named ? ` "${named}"` : ''}`;
+}
+
+/** Visible hint of what the capture actually contains (feedback #518). */
+function CaptureHint({ snapshot }: { snapshot: Snapshot }) {
+  const chips: string[] = [];
+  if (typeof snapshot.view === 'string' && snapshot.view) chips.push(snapshot.view);
+  const decks = snapshot.decks;
+  if (Array.isArray(decks)) {
+    const playing = decks
+      .filter((deck) => Boolean(deck) && typeof deck === 'object' && !Array.isArray(deck))
+      .map((deck) => deck as Record<string, Json>)
+      .filter((deck) => deck.playing === true)
+      .map((deck) => String(deck.id ?? '?'));
+    if (playing.length) chips.push(`${playing.join('+')} playing`);
+  }
+  const errors = Array.isArray(snapshot.errors) ? snapshot.errors.length : 0;
+  if (errors) chips.push(`${errors} recent error${errors === 1 ? '' : 's'}`);
+  const trail = Array.isArray(snapshot.trail) ? snapshot.trail : [];
+  if (trail.length) chips.push(`${trail.length} recent events`);
+  if (!chips.length) return null;
+  return <div className="feedback-hint">
+    <p className="feedback-capture-hint">Captured: {chips.join(' · ')}</p>
+    {trail.length > 0 && <details className="feedback-trail"><summary>Recent activity</summary>
+      <ul>{trail.slice(-8).map((entry, i) => {
+        const item = entry as { at?: unknown; event?: unknown; detail?: unknown };
+        const at = typeof item.at === 'string' ? new Date(item.at) : null;
+        const time = at && !Number.isNaN(at.getTime())
+          ? at.toLocaleTimeString([], { hour12: false }) : '';
+        const detail = typeof item.detail === 'string' && item.detail ? `, ${item.detail}` : '';
+        return <li key={i}><span className="text-tertiary">{time}</span> {String(item.event ?? '')}{detail}</li>;
+      })}</ul>
+    </details>}
+  </div>;
+}
+
+function ScreenshotCanvas({ image, strokes, pointer, viewport, annotating, penColor, onStroke }: {
+  image: string; strokes: Stroke[]; pointer: PointerInfo | null;
+  viewport: Json | undefined;
+  annotating: boolean; penColor: string; onStroke: (stroke: Stroke) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [draft, setDraft] = useState<Stroke['points'] | null>(null);
+  // jsdom and exotic runtimes without 2d canvas fall back to the plain img.
+  const [unsupported, setUnsupported] = useState(() => {
+    const probe = document.createElement('canvas');
+    try { return !probe.getContext('2d'); }
+    catch { return true; }
+  });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || unsupported) return;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    let dead = false;
+    const decoded = new Image();
+    decoded.onload = () => {
+      if (dead) return;
+      canvas.width = decoded.width;
+      canvas.height = decoded.height;
+      context.drawImage(decoded, 0, 0);
+      const live = draft?.length
+        ? [...strokes, { color: penColor, width: PEN_WIDTH, points: draft }]
+        : strokes;
+      const captured = viewport as { width?: unknown; height?: unknown } | undefined;
+      renderAnnotations(context, canvas.width, canvas.height, live, pointer, {
+        width: typeof captured?.width === "number" ? captured.width : window.innerWidth,
+        height: typeof captured?.height === "number" ? captured.height : window.innerHeight,
+      });
+    };
+    decoded.onerror = () => setUnsupported(true);
+    decoded.src = image;
+    return () => { dead = true; };
+  }, [image, strokes, draft, pointer, viewport, penColor, unsupported]);
+
+  if (unsupported) {
+    return <img className="feedback-screenshot" src={image} alt="App screenshot captured before this form opened" />;
+  }
+  const pointAt = (event: React.PointerEvent) =>
+    normalizePoint(event.clientX, event.clientY, canvasRef.current!.getBoundingClientRect());
+  return <canvas
+    ref={canvasRef}
+    className={`feedback-screenshot${annotating ? ' feedback-screenshot-draw' : ''}`}
+    role="img" aria-label="App screenshot captured before this form opened"
+    onPointerDown={(event) => {
+      if (!annotating) return;
+      event.preventDefault();
+      (event.target as Element).setPointerCapture?.(event.pointerId);
+      setDraft([pointAt(event)]);
+    }}
+    onPointerMove={(event) => {
+      if (!annotating || !draft) return;
+      event.preventDefault();
+      setDraft(appendPoint(draft, pointAt(event)));
+    }}
+    onPointerUp={(event) => {
+      if (!annotating || !draft) return;
+      event.preventDefault();
+      const points = appendPoint(draft, pointAt(event));
+      setDraft(null);
+      onStroke({ color: penColor, width: PEN_WIDTH, points });
+    }}
+    onPointerCancel={() => setDraft(null)}
+  />;
+}
 
 export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Readers; toolbar?: boolean }) {
   const [page, setPage] = useState<'form' | 'review' | null>(null);
@@ -29,14 +153,56 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
   const [error, setError] = useState('');
   const [listError, setListError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pointer, setPointer] = useState<PointerInfo | null>(null);
+  const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [penColor, setPenColor] = useState<string>(PEN_COLORS[0]);
+  const [annotating, setAnnotating] = useState(false);
+  const [dictating, setDictating] = useState<'title' | 'description' | null>(null);
+  // v3: capture starts as a small overlay bar over the live app; the
+  // report form opens only after Done captures (feedback #518).
+  const [overlay, setOverlay] = useState(false);
+  const [drawing, setDrawing] = useState(false);
   const captureLock = useRef(false);
   const actionLock = useRef(false);
+  const dictationRef = useRef<Dictation | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const entry = useRef<HTMLSpanElement>(null);
   const id = useId();
   const open = page !== null;
+  // MIDI boot recovery must not destroy active feedback or a retained draft.
+  useEffect(() => {
+    if (!(overlay || page || capture || title || description || strokes.length)) return;
+    document.documentElement.dataset.feedbackActive = 'true';
+    return () => { delete document.documentElement.dataset.feedbackActive; };
+  }, [overlay, page, capture, title, description, strokes.length]);
+  const canDictate = dictationAvailable();
 
-  useEffect(() => installModalKeyGuard(() => Boolean(dialog.current?.open), () => setPage(null)), []);
+  useEffect(() => installModalKeyGuard(
+    () => Boolean(dialog.current?.open || (document.querySelector('.feedback-overlay') && !document.querySelector('.feedback-picker'))),
+    () => { setPage(null); setOverlay(false); setDrawing(false); setPointer(null); setStrokes([]); },
+  ), []);
+
+  function stopDictation() {
+    dictationRef.current?.stop();
+    dictationRef.current = null;
+    setDictating(null);
+  }
+  useEffect(() => {
+    if (!open) stopDictation();
+  }, [open]);
+  useEffect(() => () => { dictationRef.current?.stop(); }, []);
+
+  function toggleDictation(field: 'title' | 'description') {
+    if (dictating) { stopDictation(); if (dictating === field) return; }
+    try {
+    const session = startDictation((text) => {
+      if (!text) return;
+      if (field === 'title') setTitle((current) => `${current.replace(/\s+$/, '')}${current ? ' ' : ''}${text}`.slice(0, 200));
+      else setDescription((current) => `${current.replace(/\s+$/, '')}${current ? ' ' : ''}${text}`.slice(0, 10000));
+    }, () => { dictationRef.current = null; setDictating(null); });
+    if (session) { dictationRef.current = session; setDictating(field); }
+    } catch { setError("Dictation could not start. Use the keyboard or system dictation."); }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -68,26 +234,93 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
     return () => { active = false; clearTimeout(timer); };
   }, [page]);
 
-  async function begin(recapture = false) {
+  // Yield two frames so a closed overlay leaves the compositor before a new
+  // Electron screenshot or element pick observes the bare app.
+  function twoFrames() {
+    return withTimeout(new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))), 250).catch(() => {});
+  }
+  async function settleClosed() {
+    flushSync(() => setPage(null));
+    await twoFrames();
+  }
+
+  // Feedback opens the overlay bar; nothing is captured until Done.
+  function openOverlay() {
+    if (overlay) return;
+    setPointer(null);
+    setStrokes([]); setAnnotating(false);
+    setDrawing(true);
+    setOverlay(true);
+  }
+
+  function cancelOverlay() {
+    setOverlay(false); setDrawing(false);
+    setPointer(null); setStrokes([]);
+  }
+
+  async function finishCapture() {
     if (captureLock.current || actionLock.current) return;
-    if (capture && !recapture) { setPage('form'); return; }
-    if (payload && filingIssue !== 'conflict') return;
     captureLock.current = true;
     setCapturing(true);
     setError('');
     try {
-      if (recapture) {
-        flushSync(() => setPage(null));
-        // Let the closed overlay leave the compositor before Electron capture.
-        await withTimeout(new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))), 250).catch(() => {});
-        setPayload(null); setFilingIssue(null);
-      }
+      // The overlay must leave the compositor before the screenshot.
+      flushSync(() => { setOverlay(false); setDrawing(false); });
+      await twoFrames();
       setCapture(await captureFeedback(readers));
       setPage('form');
     } catch {
       setCapture({ snapshot: {}, screenshot: null, context: null, warnings: ['Capture failed. Reporting is still available.'] });
       setPage('form');
     } finally { captureLock.current = false; setCapturing(false); }
+  }
+
+  async function begin(recapture = false) {
+    if (captureLock.current || actionLock.current) return;
+    if (capture && !recapture) { setPage('form'); return; }
+    if (payload && filingIssue !== 'conflict') return;
+    if (!recapture) { openOverlay(); return; }
+    captureLock.current = true;
+    setCapturing(true);
+    setError('');
+    try {
+      await settleClosed();
+      setPayload(null); setFilingIssue(null);
+      setPointer(null);
+      // Strokes were drawn on the previous pixels; the pointer descriptor
+      // names an element and survives a fresh screenshot of the same view.
+      setStrokes([]); setAnnotating(false);
+      setCapture(await captureFeedback(readers));
+      setPage('form');
+    } catch {
+      setCapture({ snapshot: {}, screenshot: null, context: null, warnings: ['Capture failed. Reporting is still available.'] });
+      setPage('form');
+    } finally { captureLock.current = false; setCapturing(false); }
+  }
+
+  async function point() {
+    if (captureLock.current || actionLock.current) return;
+    captureLock.current = true;
+    setError('');
+    try {
+      await settleClosed();
+      const picked = await pickElement();
+      if (picked) setPointer(picked);
+      setPage('form');
+    } finally { captureLock.current = false; }
+  }
+
+  // Pointing from the overlay: the ink canvas must stop intercepting
+  // pointer events before elementFromPoint observes the app.
+  async function pointFromOverlay() {
+    if (captureLock.current || actionLock.current) return;
+    captureLock.current = true;
+    setError('');
+    try {
+      flushSync(() => setDrawing(false));
+      const picked = await pickElement();
+      if (picked) setPointer(picked);
+    } finally { captureLock.current = false; }
   }
 
   async function action(run: () => Promise<void>) {
@@ -106,15 +339,24 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
   }
 
   function file() {
+    stopDictation();
     if (!capture?.context) { setError('Retry context before filing. Your draft is retained.'); return; }
     if (!title.trim() || !description.trim()) { setError('Title and detailed description are required.'); return; }
     void action(async () => {
+      let screenshot = capture.screenshot;
+      let warnings = capture.warnings;
+      if (screenshot && (strokes.length > 0 || pointer)) {
+        try { screenshot = await compositeScreenshot(screenshot, strokes, pointer, capture.snapshot.viewport); }
+        catch { warnings = [...warnings, 'Annotations could not be baked in; filing the plain screenshot.']; }
+      }
       // Lock all fields after the first attempt. An ambiguous POST retry must
       // reproduce the exact bytes/UUID, even after closing and reopening.
       const frozen: Payload = payload ?? {
         id: crypto.randomUUID(), kind, title: redact(title.trim(), 200), description: redact(description.trim(), 10000),
-        origin: capture.context!.origin, snapshot: capture.snapshot, screenshot: capture.screenshot,
-        capture_warnings: capture.warnings,
+        origin: capture.context!.origin,
+        snapshot: pointer ? { ...capture.snapshot, pointer: pointerSnapshot(pointer) } : capture.snapshot,
+        screenshot,
+        capture_warnings: warnings,
       };
       setPayload(frozen);
       let report;
@@ -137,6 +379,7 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
         batches: current?.batches ?? [],
       }));
       setCapture(null); setPayload(null); setFilingIssue(null); setTitle(''); setDescription('');
+      setPointer(null); setStrokes([]); setAnnotating(false);
       setPage('review');
     });
   }
@@ -149,14 +392,36 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
   const pendingCount = listing && !listError ? listing.reports.filter((r) => r.batch_id === null).length : '?';
   const savedPayload = payload && listing?.reports.find((r) => r.id === payload.id);
   const entryClass = toolbar ? 'btn btn-toolbar' : 'btn btn-secondary';
+  const dictateButton = (field: 'title' | 'description') => {
+    if (!canDictate) return null;
+    const active = dictating === field;
+    return <button type="button" className={`btn btn-secondary btn-mini${active ? ' btn-selected' : ''}`}
+      title="Dictate with the browser speech service; audio is processed by that service, the text stays editable here"
+      disabled={busy || payload !== null}
+      onClick={() => toggleDictation(field)}>{active ? 'Stop dictation' : 'Dictate'}</button>;
+  };
 
   return <>
     <span className="feedback-entry" ref={entry} data-focusable>
-      <button className={`${entryClass}${page === 'form' ? ' btn-selected' : ''}`} aria-haspopup="dialog" aria-expanded={page === 'form'} title="Report bug / Request feature" disabled={capturing || busy} onClick={() => void begin()}>
+      <button className={`${entryClass}${page === 'form' || overlay ? ' btn-selected' : ''}`} aria-haspopup="dialog" aria-expanded={page === 'form' || overlay} title="Report bug / Request feature" disabled={capturing || busy} onClick={() => void begin()}>
         {capturing ? 'Capturing...' : 'Feedback'}
       </button>
-      <button className={`${entryClass}${page === 'review' ? ' btn-selected' : ''}`} aria-haspopup="dialog" aria-expanded={page === 'review'} title={listError || 'Reports awaiting dispatch, including pending or failed filing'} disabled={capturing} onClick={() => { setError(''); setPage('review'); }}>Queue ({pendingCount})</button>
+      <button className={`${entryClass}${page === 'review' ? ' btn-selected' : ''}`} aria-haspopup="dialog" aria-expanded={page === 'review'} title={listError || 'Reports awaiting dispatch, including pending or failed filing'} disabled={capturing || overlay} onClick={() => { setError(''); setPage('review'); }}>Queue ({pendingCount})</button>
     </span>
+    {overlay && createPortal(<CaptureOverlay
+      drawing={drawing} strokes={strokes} pointer={pointer}
+      pointerText={pointer ? pointerLabel(pointer) : null} penColor={penColor}
+      onStroke={(stroke) => setStrokes((current) => [...current, stroke])}
+      onToggleDraw={() => setDrawing((current) => !current)}
+      onPenColor={setPenColor}
+      onUndo={() => setStrokes((current) => current.slice(0, -1))}
+      onClear={() => setStrokes([])}
+      onInvalidate={() => { setStrokes([]); setPointer(null); }}
+      onPoint={() => void pointFromOverlay()}
+      onRemovePointer={() => setPointer(null)}
+      onDone={() => void finishCapture()}
+      onCancel={cancelOverlay}
+    />, document.body)}
     {page && createPortal(<dialog ref={dialog} className="feedback-dialog" aria-labelledby={`${id}-heading`} data-focusable
       onCancel={(e) => { e.preventDefault(); setPage(null); }}
       onClick={(event) => {
@@ -171,18 +436,37 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
       {error && <p role="alert" className="feedback-error">{error}</p>}
       {page === 'form' && capture && <form className="feedback-form" onSubmit={(event) => { event.preventDefault(); file(); }}>
         <div className="feedback-body">
+        <CaptureHint snapshot={capture.snapshot} />
         <fieldset disabled={busy || payload !== null}>
           <div className="feedback-fields">
           <label>Kind<select value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
             <option value="bug">Report bug</option><option value="feature">Request feature</option>
           </select></label>
-          <label>Title<input autoFocus value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} /></label>
+          <label>Title<span className="feedback-field-row">
+            <input autoFocus value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />
+            {dictateButton('title')}
+          </span></label>
           </div>
-          <label>Detailed description<textarea rows={4} value={description} maxLength={10000} onChange={(e) => setDescription(e.target.value)} /></label>
+          <label>Detailed description<span className="feedback-field-row">
+            <textarea rows={4} value={description} maxLength={10000} onChange={(e) => setDescription(e.target.value)} />
+            {dictateButton('description')}
+          </span></label>
+          {canDictate && <p className="feedback-metadata">Starting Dictate may send microphone audio to the browser speech service for transcription immediately. The transcript stays editable here. Filing the feedback report is a separate action.</p>}
           <section className="feedback-attachments" aria-label="Local attachments">
           {capture.screenshot ? <div>
-            <img className="feedback-screenshot" src={capture.screenshot} alt="App screenshot captured before this form opened" />
-            <button type="button" className="btn btn-secondary btn-mini" onClick={() => setCapture({ ...capture, screenshot: null })}>Remove screenshot</button>
+            <ScreenshotCanvas image={capture.screenshot} strokes={strokes} pointer={pointer} viewport={capture.snapshot.viewport}
+              annotating={annotating} penColor={penColor} onStroke={(stroke) => setStrokes((current) => [...current, stroke])} />
+            <div className="feedback-shot-tools">
+              <button type="button" className={`btn btn-secondary btn-mini${annotating ? ' btn-selected' : ''}`} onClick={() => setAnnotating((current) => !current)}>{annotating ? 'Done drawing' : 'Draw'}</button>
+              <button type="button" className="btn btn-secondary btn-mini" onClick={() => setCapture({ ...capture, screenshot: null })}>Remove screenshot</button>
+            </div>
+            {annotating && <div className="feedback-pen-row">
+              {PEN_COLORS.map((color) => <button key={color} type="button" aria-label={`Pen ${color}`}
+                className={`feedback-pen${color === penColor ? ' feedback-pen-selected' : ''}`}
+                style={{ background: color }} onClick={() => setPenColor(color)} />)}
+              <button type="button" className="btn btn-secondary btn-mini" disabled={!strokes.length} onClick={() => setStrokes((current) => current.slice(0, -1))}>Undo</button>
+              <button type="button" className="btn btn-secondary btn-mini" disabled={!strokes.length} onClick={() => setStrokes([])}>Clear</button>
+            </div>}
           </div> : <label>Optional PNG screenshot<input type="file" accept="image/png" onChange={(e) => {
             const file = e.target.files?.[0];
             e.target.value = '';
@@ -199,6 +483,15 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
             });
           }} /></label>}
           <div className="feedback-evidence-info">
+          <div className="feedback-shot-tools">
+            <button type="button" className={`btn btn-secondary btn-mini${pointer ? ' btn-selected' : ''}`} disabled={busy} onClick={() => void point()}>
+              {pointer ? 'Repoint element' : 'Point at element'}
+            </button>
+          </div>
+          {pointer && <p className="feedback-pointer-chip">
+            Element: {pointerLabel(pointer)}
+            <button type="button" className="btn btn-secondary btn-mini" onClick={() => setPointer(null)}>Remove element</button>
+          </p>}
           <p className="text-secondary">Attachments stay local. Check the screenshot for private information.</p>
           {capture.warnings.map((warning, i) => <p className="feedback-warning" key={i}>{warning}</p>)}
           {Object.keys(capture.snapshot).length > 0 && <div>
@@ -232,10 +525,10 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
         </>}
         </div>
         <footer className="feedback-footer">
-          <p className="text-tertiary">Files an issue. Agent work starts only when you send the batch.</p>
+          <p className="text-tertiary">Files an issue with this text only; the screenshot, diagnostics and trail stay local. Agent work starts only when you send the batch.</p>
           <div className="feedback-actions">
           {!payload && <button className="btn btn-danger btn-mini" type="button" disabled={busy} onClick={() => {
-            setCapture(null); setTitle(''); setDescription(''); setPage(null);
+            setCapture(null); setTitle(''); setDescription(''); setPointer(null); setStrokes([]); setAnnotating(false); setPage(null);
           }}>Discard draft</button>}
           <button className="btn btn-secondary" type="button" onClick={() => { setError(''); setPage('review'); }}>Review batches</button>
           <button className="btn btn-primary" type="submit" disabled={busy || !capture.context}>{busy ? 'Working...' : payload ? 'Retry same report' : 'File report on GitHub'}</button>
@@ -264,7 +557,7 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
           {report.destination !== listing.destination && <p className="feedback-metadata">Destination: {report.destination}</p>}
           {report.issue_url && /^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/\d+$/.test(report.issue_url) && <a href={report.issue_url} target="_blank" rel="noreferrer">Open GitHub issue</a>}
           {report.error && <p className="feedback-error">{redact(report.error)}</p>}
-          {['filing_failed', 'filing_uncertain'].includes(report.status) && <button className="btn btn-secondary btn-mini" disabled={busy}
+          {['filing_failed', 'filing_uncertain'].includes(report.status) && <button type="button" className="btn btn-secondary btn-mini" disabled={busy}
             onClick={() => void action(async () => { await feedbackApi.retryReport(report.id); await refresh(); })}>Retry GitHub filing</button>}
         </article>)}
         {listing?.batches.map((batch) => <article key={batch.id}>
@@ -272,7 +565,7 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
           <p className="feedback-metadata">{batch.destination}</p>
           <p>{batchStatus[batch.status]}</p>
           {batch.error && <p className="feedback-error">{redact(batch.error)}</p>}
-          {batch.status !== 'delivered' && <button className="btn btn-secondary btn-mini" disabled={busy} onClick={() => void action(async () => {
+          {batch.status !== 'delivered' && <button type="button" className="btn btn-secondary btn-mini" disabled={busy} onClick={() => void action(async () => {
             await feedbackApi.retryBatch(batch.id); await refresh();
           })}>Retry authorized batch</button>}
         </article>)}

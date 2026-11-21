@@ -65,6 +65,30 @@ final class SyncIntegrationTests: XCTestCase, @unchecked Sendable {
         do { _ = try await fixture.client(token: "wrong").snapshotText(); XCTFail("Expected authorization failure") }
         catch let error as SyncError { XCTAssertEqual(error.status, 401) }
     }
+    func testDetailUsesFullEndpointAndIndependentRevisionKeyedCache() async throws {
+        let fixture = try Fixture()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = try LibraryRepository(root: root)
+        let connection = try DesktopConnection(url: fixture.url, deviceToken: "fixture-not-a-real-token")
+        let snapshot = try await repository.sync(connection)
+        let track = snapshot.tracks[0]
+        let preview = await repository.preview(track)
+        XCTAssertEqual(preview?.bandFrames, 256)
+        let full = try await repository.detail(track, connection: connection)
+        XCTAssertEqual(full?.bandFrames, 2048)
+        let reopened = try LibraryRepository(root: root)
+        let offline = try await reopened.detail(track, connection: nil)
+        XCTAssertEqual(offline?.bandFrames, 2048)
+        let store = await repository.store
+        XCTAssertNotEqual(store.detailFile(track), store.previewFile(track))
+        let originalText = try await fixture.client().snapshotText()
+        let changedText = originalText.replacingOccurrences(of: "detail-revision", with: "new-revision")
+        let changed = try SnapshotJson.parse(changedText).tracks[0]
+        XCTAssertNil(store.detail(changed))
+        do { _ = try await repository.detail(changed, connection: connection); XCTFail("Must reject stale full wave revision") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("revision changed")) }
+    }
     func testRepositoryBulkSyncSkipsUnavailableTracksAndPreservesOfflineAudio() async throws {
         let fixture = try Fixture()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -80,6 +104,26 @@ final class SyncIntegrationTests: XCTestCase, @unchecked Sendable {
         let reopened = try LibraryRepository(root: root)
         let reopenedIds = await reopened.downloadedIds()
         XCTAssertEqual(reopenedIds, [1])
+    }
+    actor ProgressLog {
+        var items: [LibrarySyncProgress] = []
+        func record(_ p: LibrarySyncProgress) { items.append(p) }
+    }
+    func testAudioProgressCountsValidatedAndCachedFilesNotUnavailableOnes() async throws {
+        let fixture = try Fixture()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = try LibraryRepository(root: root)
+        let connection = try DesktopConnection(url: fixture.url, deviceToken: "fixture-not-a-real-token")
+        let first = ProgressLog()
+        _ = try await repository.sync(connection, allAudio: true) { await first.record($0) }
+        let events = await first.items
+        XCTAssertEqual(events.first?.phase, .library)
+        XCTAssertEqual(events.filter { $0.phase == .audio }, [.init(phase: .audio, completed: 0, total: 1), .init(phase: .audio, completed: 1, total: 1)])
+        let retry = ProgressLog()
+        _ = try await repository.sync(connection, allAudio: true) { await retry.record($0) }
+        let retryEvents = await retry.items
+        XCTAssertEqual(retryEvents.filter { $0.phase == .audio }, [.init(phase: .audio, completed: 1, total: 1)])
     }
     func testRepositoryRejectsConcurrentSyncWithoutReplacingActiveWork() async throws {
         let fixture = try Fixture()

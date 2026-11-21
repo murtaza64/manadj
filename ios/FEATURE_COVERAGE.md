@@ -104,3 +104,21 @@ acknowledgements and approved operation/conflict semantics remain future work.
 Fixture tests cover persistence, discard, stale-source holds, validation and
 save failure without erasing pending work. Apple/Swift verification is required
 before treating the new prototype as tested. No real library was used.
+
+## November20 shake-to-report feedback prototype
+
+Shake → capture → review → file feedback, ported from the desktop feedback
+loop (`frontend/src/feedback`, `backend/feedback.py`) rather than Android.
+Core payload/scrub/outbox logic is Foundation-only in ManadjCore with fixture
+tests; the desktop accepts reviewed phone reports through one scoped write,
+POST /api/device-sync/feedback, filed by the paired desktop's own credentials
+through the existing FeedbackService. The full loopback feedback router is
+not exposed on the LAN. Screenshots and context stay in the desktop's local
+feedback store; the GitHub issue is text-only with a report marker, and the
+review sheet says so. Shaking never sends anything by itself. Offline or
+unpaired explicitly filed reports save on-device. REVIEW SAVED REPORTS makes
+each saved report inspectable with text, image, context and current destination.
+Only an explicit per-report reviewed-send can transmit it later; re-pairing,
+launching, shaking and filing another report never drain the outbox.
+Apple build/runtime verification, simulator pixels and physical-device shake
+checks are pending; treat as untested until those land.

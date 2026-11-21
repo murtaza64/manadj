@@ -24,7 +24,7 @@ TOKEN_HEADER = "X-Manadj-Device-Token"
 def fixture_server():
     proc = subprocess.Popen(
         [sys.executable, str(SERVE), "--seconds", "60"],
-        stdin=subprocess.PIPE,
+        stdin=subprocess.PIPE,  # keep open: the launcher exits on stdin EOF
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

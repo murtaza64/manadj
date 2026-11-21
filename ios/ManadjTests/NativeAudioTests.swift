@@ -114,6 +114,75 @@ final class NativeAudioTests: XCTestCase {
         }
     }
 
+    @MainActor func testLoadedDeckReadsOfflineFullWaveformCache() async throws {
+        let root = try XCTUnwrap(AppModel.makePerformanceUIFixture())
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(root: root.appendingPathComponent("library"))
+        let track = try XCTUnwrap(store.readSnapshot()?.tracks.first)
+        let model = AppModel(storageRoot: root)
+        for _ in 0..<100 { if model.snapshot != nil && model.audio != nil && model.downloaded.contains(track.id) { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(model.load(track, deck: 0), model.error ?? "No load error")
+        for _ in 0..<200 { if !model.decks[0].loading { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertGreaterThan(model.decks[0].waveform?.bandFrames ?? 0, 256)
+        XCTAssertNil(model.decks[0].waveformNotice)
+    }
+
+    @MainActor func testLoadedDeckUsesDecodedDurationAndDoesNotMagnifyPreviewAsDetail() async throws {
+        let root = try XCTUnwrap(AppModel.makePerformanceUIFixture())
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(root: root.appendingPathComponent("library"))
+        // Deliberately stale catalog duration. Preview exists but no full-wave revision.
+        let stale = try String(contentsOf: store.root.appendingPathComponent("snapshot.json"), encoding: .utf8)
+            .replacingOccurrences(of: "\"duration_secs\":24", with: "\"duration_secs\":240")
+            .replacingOccurrences(of: ",\"waveform_rev\":\"detail-fixture\"", with: "")
+        try store.saveSnapshot(stale)
+        let track = try SnapshotJson.parse(stale).tracks[0]
+        let model = AppModel(storageRoot: root)
+        for _ in 0..<100 { if model.snapshot != nil && model.audio != nil && model.downloaded.contains(track.id) { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(model.load(track, deck: 0), model.error ?? "No load error")
+        for _ in 0..<200 { if !model.decks[0].loading { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.decks[0].duration, 24, accuracy: 0.1)
+        XCTAssertNil(model.decks[0].waveform, "A cached preview is not a full performance waveform")
+        XCTAssertEqual(model.decks[0].waveformNotice, "Full waveform not generated on desktop")
+    }
+
+    @MainActor func testSyncWakeScopeRestoresAfterSuccessFailureAndCancellation() async throws {
+        var idle = false
+        let scope = SyncWakeScope(read: { idle }, write: { idle = $0 })
+        await scope.duringTransfer { XCTAssertTrue(idle) }
+        XCTAssertFalse(idle)
+        enum Expected: Error { case failed }
+        do { try await scope.duringTransfer { XCTAssertTrue(idle); throw Expected.failed }; XCTFail() }
+        catch Expected.failed {}
+        XCTAssertFalse(idle)
+        let work = Task { @MainActor in
+            do { try await scope.duringTransfer { try await Task.sleep(for: .seconds(30)) } }
+            catch { XCTAssertTrue(Task.isCancelled) }
+        }
+        for _ in 0..<100 where !idle { await Task.yield() }
+        XCTAssertTrue(idle)
+        work.cancel(); await work.value
+        XCTAssertFalse(idle)
+        idle = true
+        await scope.duringTransfer { XCTAssertTrue(idle) }
+        XCTAssertTrue(idle, "Restore previous owner policy, not a guessed false")
+    }
+    @MainActor func testSyncWakeScopeForegroundAndNestedLifetimes() async {
+        var idle = false
+        let scope = SyncWakeScope(read: { idle }, write: { idle = $0 })
+        await scope.duringTransfer {
+            XCTAssertTrue(idle)
+            await scope.duringTransfer { XCTAssertTrue(idle) }
+            XCTAssertTrue(idle)
+            scope.setActive(false); XCTAssertFalse(idle)
+            scope.setActive(true); XCTAssertTrue(idle)
+        }
+        XCTAssertFalse(idle)
+        scope.setActive(false)
+        await scope.duringTransfer { XCTAssertFalse(idle) }
+        scope.setActive(true); XCTAssertFalse(idle, "No idle suppression after transfer finishes")
+    }
+
     @MainActor func testCueFlagGeometryKeepsEdgesVisibleAndMinimapsCompact() {
         let lane = CGRect(x: 0, y: 0, width: 300, height: 48)
         for vertical in [false, true] {
@@ -348,6 +417,11 @@ final class NativeAudioTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertFalse(model.audio?.state(0).playing == true)
         XCTAssertFalse(model.liveListening)
+        XCTAssertTrue(model.liveStatus.hasPrefix("Stopped"), "Cancelled transport must not overwrite STOP")
+        // Let the cancelled URLSession completion return to the MainActor.
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertTrue(model.liveStatus.hasPrefix("Stopped"), "STOP stays authoritative after cancellation settles")
+        XCTAssertFalse(model.audio?.state(0).playing == true)
     }
 
 }

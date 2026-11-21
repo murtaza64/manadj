@@ -82,6 +82,18 @@ public final class SyncClient: Sendable {
         try check(response)
         return try PreviewPack.parse(data)
     }
+    /// Full-resolution MWF is separate from the 256-bin library preview.
+    public func detailWaveform(_ track: LibraryTrack) async throws -> Data {
+        guard track.id > 0, let revision = track.waveformRev else { throw SyncError("Full waveform not advertised by desktop") }
+        let (data, response) = try await session.data(for: connection.request(path: "/tracks/\(track.id)/waveform"))
+        try check(response)
+        guard data.count <= 64 * 1024 * 1024 else { throw SyncError("Full waveform exceeds size limit") }
+        guard (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Waveform-Rev") == revision else {
+            throw SyncError("Full waveform revision changed. Refresh the library before retrying.")
+        }
+        _ = try PreviewWaveform.parse(data)
+        return data
+    }
     /// URLSession streams to disk, never holds a whole audio download in Swift memory.
     public func downloadAudio(_ id: Int, to target: URL, expectedBytes: Int64? = nil, expectedRevision: String? = nil) async throws {
         guard id > 0 else { throw SyncError("Invalid track identity") }
@@ -95,7 +107,7 @@ public final class SyncClient: Sendable {
         }
         if let expectedBytes, expectedBytes > 0 {
             let size = try temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize
-            guard size.map(Int64.init) == expectedBytes else { throw SyncError("Audio length changed. Sync the library again.") }
+            guard size.map(Int64.init) == expectedBytes else { throw SyncError("Audio length mismatch (expected \(expectedBytes) bytes, received \(size.map(String.init) ?? "unknown")). Complete cached files were kept. Refresh the library before retrying.") }
         }
         try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
         let staging = target.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".part")

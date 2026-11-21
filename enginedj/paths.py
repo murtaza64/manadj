@@ -19,4 +19,9 @@ def absolute_track_path(stored: str | None, library_root: str | os.PathLike) -> 
         return ntpath.normpath(stored) if tail.startswith(('\\', '/')) else None
     if ntpath.splitdrive(root)[0]:
         return ntpath.normpath(ntpath.join(root, stored))
-    return posixpath.normpath(posixpath.join(os.path.abspath(root), stored.replace('\\', '/')))
+    base = os.path.abspath(root)
+    if ntpath.splitdrive(base)[0]:
+        # Windows host and a drive-less root (relative, or rooted on the current
+        # drive): it resolves onto this host's drive, so keep one separator style.
+        return ntpath.normpath(ntpath.join(base, stored))
+    return posixpath.normpath(posixpath.join(base, stored.replace('\\', '/')))

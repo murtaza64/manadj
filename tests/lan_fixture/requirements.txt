@@ -13,3 +13,6 @@ rfc8785>=0.1.4
 cryptography>=46.0.0
 psutil>=7.1.3
 zeroconf>=0.151.5
+
+# Paired feedback uses the same bounded PNG validator as the desktop.
+Pillow>=12.0.0

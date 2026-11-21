@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData, HotCue } from '../types';
 import { resolveLadder, resolvedMarkTimes } from '../meter/ladder';
+import { gridForOverlayRegions } from '../meter/gridProjection';
 import type { PersistedLadder } from '../meter/ladder';
 import type { DecodedWaveform } from './blob';
 import { WaveformRendererV2 } from './WaveformRendererV2';
@@ -196,15 +197,23 @@ export function useWaveformRendererV2({
       // gridlines with any persisted Reset marks applied; the renderer
       // never reads the ladder raw. Mark indicators draw at the RESOLVED
       // downbeats (what the count actually anchors to), not raw seconds.
-      const ladder = resolveLadder(beatgrid, metricLadder);
+      // Silence loop (gh#424): a region running past EOF extends the grid
+      // on the final tempo segment's own lattice so the flat tail keeps
+      // its beat/bar/hypermeter ticks. Stored arrays pass through
+      // untouched; projection only appends.
+      const duration = waveformData?.duration ?? 0;
+      const grid = regions
+        ? gridForOverlayRegions(beatgrid, regions.map((r) => r.end), duration)
+        : beatgrid;
+      const ladder = resolveLadder(grid, metricLadder);
       rendererRef.current?.setBeatgrid(
-        beatgrid.beat_times,
-        beatgrid.downbeat_times,
+        grid.beat_times,
+        grid.downbeat_times,
         ladder, // the projection IS the renderer's LadderGridInput slice
       );
       rendererRef.current?.setResetMarks(resolvedMarkTimes(beatgrid, metricLadder));
     }
-  }, [beatgrid, metricLadder, waveformData]);
+  }, [beatgrid, metricLadder, waveformData, regions]);
 
   useEffect(() => {
     if (regions) rendererRef.current?.setRegions(regions);

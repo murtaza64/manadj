@@ -440,7 +440,7 @@ it('opens a group by id and the Performance group stacks Filters and Beat FX', a
   root = createRoot(host);
   await act(async () => root!.render(<MixerContext value={new Mixer()}><SettingsPage /></MixerContext>));
   const blocks = [...host.querySelectorAll('.settings-subsection')].map((n) => n.id);
-  expect(blocks).toEqual(['settings-section-filters', 'settings-section-effects']);
+  expect(blocks).toEqual(['settings-section-filters', 'settings-section-effects', 'settings-section-heard']);
 });
 
 it('provides a valid Help context for every existing Settings subsection and registered Setup guide', () => {

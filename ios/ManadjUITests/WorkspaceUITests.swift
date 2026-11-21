@@ -59,6 +59,19 @@ final class WorkspaceUITests: XCTestCase {
         expectation(for: left, evaluatedWith: sync); waitForExpectations(timeout: 5)
     }
 
+    @MainActor func testSyncProgressShowsFileCountAndForegroundWarning() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--sync-progress-ui-fixture"]; app.launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
+        app.buttons["Settings"].tap()
+        let count = app.staticTexts["sync-audio-progress"]
+        XCTAssertTrue(count.waitForExistence(timeout: 10))
+        XCTAssertEqual(count.label, "Audio: 3 of 10 files ready")
+        XCTAssertTrue(app.staticTexts["Completed files, not bytes. Already cached files count as ready."].exists)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Synthetic full-audio file progress - not device transfer proof"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     @MainActor func testStandardWorkspaceSettingsAndPitch() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
@@ -151,11 +164,17 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(entry.isHittable); entry.tap()
         let confirm = app.buttons["usb-confirm-import"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+        XCTAssertTrue(confirm.isHittable, "import stays visible even with 1075 preview rows")
+        XCTAssertEqual(confirm.label, "Import 0 selected")
+        XCTAssertFalse(confirm.isEnabled, "never preselect a full physical library")
+        app.buttons["Import USB generated pulse"].tap()
         XCTAssertEqual(confirm.label, "Import 1 selected")
         XCTAssertTrue(app.staticTexts["Preview only. Nothing copied."].exists)
-        XCTAssertTrue(app.staticTexts["Missing USB audio"].exists)
+        XCTAssertTrue(app.staticTexts["usb-selection-summary"].exists)
         let preview = XCTAttachment(screenshot: app.screenshot()); preview.name = "Synthetic USB read-only preview before explicit copy"; preview.lifetime = .keepAlways; add(preview)
         confirm.tap()
+        XCTAssertTrue(app.buttons["COPY TO THIS IPHONE"].waitForExistence(timeout: 5))
+        app.buttons["COPY TO THIS IPHONE"].tap()
         XCTAssertTrue(app.buttons["Load A"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Imported 1 track into this iPhone. USB unchanged."].exists)
         let copied = XCTAttachment(screenshot: app.screenshot()); copied.name = "Synthetic USB app-owned import after confirmation"; copied.lifetime = .keepAlways; add(copied)

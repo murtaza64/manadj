@@ -7,7 +7,7 @@ import { CHANNEL_IDS, Mixer, STEM_NAMES } from '../playback/mixer';
 import { CaptureRecorder } from '../capture/recorder';
 import { persistTake } from '../capture/takeSink';
 import { SessionSink } from '../capture/sessionSink';
-import { registerDiagnostics } from '../feedback/diagnostics';
+import { recordTrail, registerDiagnostics } from '../feedback/diagnostics';
 import { notePlayedEvent, resetPlayed } from '../sessions/playedStore';
 import type { ChannelId } from '../playback/mixer';
 import { registerSurface, unregisterSurface } from '../playback/audibleSurface';
@@ -23,6 +23,8 @@ import { api } from '../api/client';
 import { initFollowPlaybackBridge } from '../follow/followPlaybackBridge';
 import { initWakeLockBridge } from '../playback/wakeLock';
 import { getKeyLockFlags } from '../playback/keyLockStore';
+import { registerHeardRouteProvider } from '../playback/heardStore';
+import { getRoutingSnapshot, subscribeRouting } from '../playback/routingStore';
 import type { BeatgridResponse, Track } from '../types';
 
 /** Loaded-Deck persistence: one Track id (or null) per fixed Deck. */
@@ -91,6 +93,51 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => syncGroup.start(), [syncGroup]);
+
+  // Recent playback trail (feedback #518): load/play/pause transitions feed
+  // the feedback form's visible capture context. Track ids only, and the
+  // per-deck edge compare ignores per-frame emits.
+  useEffect(() => {
+    const previous = Object.fromEntries(
+      CHANNEL_IDS.map((deck) => {
+        const s = engines[deck].getSnapshot();
+        return [deck, { playing: s.playing, trackId: s.trackId }];
+      })
+    ) as Record<ChannelId, { playing: boolean; trackId: number | null }>;
+    const unsubscribes = CHANNEL_IDS.map((deck) =>
+      engines[deck].subscribe(() => {
+        const s = engines[deck].getSnapshot();
+        const before = previous[deck];
+        if (s.trackId !== before.trackId) recordTrail('load', `deck ${deck} track ${s.trackId ?? 'none'}`);
+        if (s.playing !== before.playing) recordTrail(s.playing ? 'play' : 'pause', `deck ${deck}`);
+        previous[deck] = { playing: s.playing, trackId: s.trackId };
+      })
+    );
+    return () => {
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [engines]);
+
+  // Heard (#382 desktop port): the route provider pairs the master
+  // output's identity (routingStore's resolved sink) with its live
+  // reported latency (the Mixer's main AudioContext) — the desktop analog
+  // of Android's RouteLatency + EngineSnapshot.reportedLatencySeconds().
+  useEffect(() => {
+    const provider = () => {
+      const { resolved, devices } = getRoutingSnapshot();
+      return {
+        key: resolved.masterSinkId ?? 'default',
+        label:
+          devices.find((d) => d.deviceId === resolved.masterSinkId)?.label ??
+          'System default',
+        reportedSeconds: mixer.masterLatencySeconds(),
+      };
+    };
+    registerHeardRouteProvider(provider);
+    // A device (re)route changes the route key/label: re-notify so the
+    // HEARD cluster follows the device and its remembered latency.
+    return subscribeRouting(() => registerHeardRouteProvider(provider));
+  }, [mixer]);
 
   // Stem kill switches (stems #210/#212): mixer owns the state (MIDI,
   // capture, automation all route through it), the deck worklet applies it

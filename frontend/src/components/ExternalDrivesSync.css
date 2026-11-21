@@ -1,0 +1,328 @@
+.external-drives {
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.external-drives-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.external-drives-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.external-drives-hint {
+  color: var(--text-secondary, #9aa);
+  margin: 0;
+  max-width: 640px;
+}
+
+.external-drives-error {
+  color: #ff5c5c;
+}
+
+.external-drives-empty {
+  color: var(--text-secondary, #9aa);
+}
+
+.external-drives-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 760px;
+}
+
+.external-drive-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color, #334);
+  border-radius: 6px;
+}
+
+.external-drive-kind {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #3b82f6;
+  color: #fff;
+}
+
+.external-drive-kind.engine {
+  background: #f59e0b;
+}
+
+.external-drive-root {
+  font-family: monospace;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.external-drive-count {
+  color: var(--text-secondary, #9aa);
+  font-size: 13px;
+}
+
+.external-drive-preview,
+.external-drive-result {
+  border: 1px solid var(--border-color, #334);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 860px;
+}
+
+.external-drive-preview h3,
+.external-drive-result h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.external-drive-summary {
+  margin: 0;
+}
+
+.external-drive-dest {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.external-drive-dest input {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--input-bg, #1a1d24);
+  border: 1px solid var(--border-color, #334);
+  border-radius: 4px;
+  color: inherit;
+}
+
+/* Preview track list: every device entry rendered like a library track
+   row, with the verification state visible instead of a flat "new" table. */
+.external-drive-tracklist {
+  border-top: 1px solid var(--surface0, #2a2e38);
+}
+
+.external-drive-tracklist-body {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.external-drive-track-head {
+  color: var(--subtext1, #8b93a3);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.external-drive-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.external-drive-filter input {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--input-bg, #1a1d24);
+  border: 1px solid var(--border-color, #334);
+  border-radius: 4px;
+  color: inherit;
+}
+
+.external-drive-track {
+  display: grid;
+  grid-template-columns: 24px 128px minmax(110px, 1.2fr) minmax(180px, 2fr) 52px 64px 56px;
+  gap: var(--space-8, 8px);
+  align-items: baseline;
+  padding: 5px var(--space-8, 8px);
+  border-bottom: 1px solid var(--surface0, #2a2e38);
+  font-size: 13px;
+  background: var(--crust, #111);
+}
+
+.external-drive-track:hover {
+  background: var(--mantle, #181b22);
+}
+
+.external-drive-status {
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.external-drive-status.status-present {
+  color: var(--subtext1, #8b93a3);
+  border-color: var(--surface0, #2a2e38);
+}
+
+.external-drive-status.status-renamed {
+  color: #4a9eff;
+  border-color: #4a9eff;
+}
+
+.external-drive-status.status-uncertain {
+  color: #f59e0b;
+  border-color: #f59e0b;
+}
+
+/* No-match rows are neutral pending review, not green: "no match found"
+   is not proof the track is new or safe to import. */
+.external-drive-status.status-new {
+  color: var(--subtext1, #8b93a3);
+  border-color: var(--subtext1, #8b93a3);
+}
+
+.external-drive-status.status-duplicate,
+.external-drive-status.status-missing-file {
+  color: var(--subtext1, #8b93a3);
+  border-color: var(--surface0, #2a2e38);
+}
+
+.external-drive-track.status-missing-file .external-drive-artist,
+.external-drive-track.status-missing-file .external-drive-title,
+.external-drive-track.status-duplicate .external-drive-artist,
+.external-drive-track.status-duplicate .external-drive-title {
+  opacity: 0.55;
+}
+
+.external-drive-artist,
+.external-drive-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.external-drive-title {
+  font-weight: 500;
+}
+
+.external-drive-detail {
+  display: block;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--subtext1, #8b93a3);
+  white-space: normal;
+}
+
+.external-drive-key,
+.external-drive-bpm,
+.external-drive-time {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.external-drive-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.external-drive-confirm {
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 6px;
+}
+
+.external-drive-confirm:disabled {
+  opacity: 0.5;
+}
+
+.external-drive-errors {
+  color: #ff5c5c;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.external-drive-check {
+  display: flex;
+  align-items: center;
+}
+
+.external-drive-playlists {
+  margin: 8px 0 12px;
+}
+.external-drive-playlists h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+.external-drive-playlists ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.external-drive-playlist {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 4px 0;
+}
+.external-drive-playlist-name {
+  font-weight: 600;
+}
+.external-drive-playlist-counts {
+  color: #888;
+  font-size: 12px;
+  flex: 1 1 100%;
+  order: 10;
+}
+.external-drive-playlist-rename {
+  width: 180px;
+}
+.external-drive-playlist-result {
+  margin-top: 8px;
+}
+
+.external-drive-playlist-match {
+  color: #888;
+  font-size: 12px;
+  flex: 1 1 100%;
+  order: 11;
+}
+.external-drive-update-review {
+  border: 1px solid #333;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+.external-drive-update-review h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.external-drive-update-review p {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #aaa;
+}
+.external-drive-update-review .btn {
+  margin-right: 8px;
+}
+
+/* The playlist the user came from ("Sync from USB..." on a playlist
+ * surface): highlighted only, never pre-selected or bound. */
+.external-drive-playlist.focused {
+  outline: 1px solid var(--accent, #4a9eff);
+  outline-offset: -1px;
+}

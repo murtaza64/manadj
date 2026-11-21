@@ -6,7 +6,7 @@ import json
 import pytest
 
 from tests import test_peer_session_exchange as exchange
-from tests.test_peer_folder_transport import configured
+from tests.test_peer_folder_transport import configured, posix_folder_transport
 from tests.test_peer_session_exchange import post, seed
 from backend.peer_sync.folder import FolderTransport
 
@@ -23,6 +23,7 @@ def archive(peer, transport):
     })
 
 
+@posix_folder_transport
 def test_archive_rotate_restart_reactivate_retains_outbox_without_autoexport(instance, monkeypatch):
     peer = instance("rotation")
     post(peer, "identity")
@@ -58,6 +59,7 @@ def test_archive_rotate_restart_reactivate_retains_outbox_without_autoexport(ins
     assert before == {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 
 
+@posix_folder_transport
 def test_capacity_is_per_root_and_reselection_keeps_immutable_evidence(instance):
     peer = instance("capacity")
     post(peer, "identity")
@@ -87,6 +89,7 @@ def test_capacity_is_per_root_and_reselection_keeps_immutable_evidence(instance)
     assert len(list(root.iterdir())) == 256  # No pruning.
 
 
+@posix_folder_transport
 def test_archive_requires_disable_fresh_counts_and_explicit_retention(instance):
     peer = instance("consent")
     post(peer, "identity")
@@ -112,6 +115,7 @@ def test_archive_requires_disable_fresh_counts_and_explicit_retention(instance):
     assert transport.status()["state"] == "archived"
 
 
+@posix_folder_transport
 @pytest.mark.parametrize("failure", [False, True])
 def test_late_old_root_result_cannot_change_new_root_state_or_outbox(instance, monkeypatch, failure):
     peer = instance("late-rotation")
@@ -138,6 +142,7 @@ def test_late_old_root_result_cannot_change_new_root_state_or_outbox(instance, m
     assert not any(p.is_dir() for p in fresh.iterdir())
 
 
+@posix_folder_transport
 def test_migration_preserves_legacy_root_outbox_and_refuses_lossy_multi_root_downgrade(instance):
     from pathlib import Path
     from alembic import command
@@ -172,6 +177,7 @@ def test_migration_preserves_legacy_root_outbox_and_refuses_lossy_multi_root_dow
     assert len(transport.status()['roots']) == 2
 
 
+@posix_folder_transport
 def test_selection_started_on_old_root_cannot_silently_publish_to_rotated_root(instance, monkeypatch):
     from backend.peer_sync.service import PeerSync
     peer = instance('selection-rotation')

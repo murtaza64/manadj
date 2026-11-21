@@ -23,6 +23,7 @@ class EnginePlaylistReader:
             engine_db: EngineDJDatabase instance
         """
         self.db = engine_db
+        self._skipped: dict[int, int] = {}
 
     def get_all_playlists(self) -> list[PlaylistInfo]:
         """Load all playlists from Engine DJ with hierarchy flattened.
@@ -36,6 +37,16 @@ class EnginePlaylistReader:
         with self.db.session_m() as session:
             # Query all playlists
             playlists = session.query(Playlist).all()
+            parent_ids = {pl.parentListId for pl in playlists if pl.parentListId}
+            by_id = {pl.id: pl for pl in playlists}
+
+            def path_of(pl: Playlist) -> list[str]:
+                parts, seen, cur = [], set(), pl
+                while cur is not None and cur.id not in seen:
+                    seen.add(cur.id)
+                    parts.insert(0, cur.title or '')
+                    cur = by_id.get(cur.parentListId) if cur.parentListId else None
+                return parts
 
             result = []
             for playlist in playlists:
@@ -67,7 +78,13 @@ class EnginePlaylistReader:
                     source_id=playlist.id,
                     hierarchy_parts=hierarchy_parts if len(hierarchy_parts) > 1 else None,
                     last_modified=None,  # Engine DJ uses Unix timestamps, convert if needed
-                    color=None  # Engine DJ playlists don't have colors
+                    color=None,  # Engine DJ playlists don't have colors
+                    skipped_tracks=self._skipped.get(playlist.id, 0),
+                    # Engine stores no type. Treated as a folder only when it has child
+                    # playlists AND no entries of its own; one with children and its own
+                    # tracks is kept as a playlist, and any other is unknown.
+                    is_folder=True if (playlist.id in parent_ids and not tracks and not self._skipped.get(playlist.id, 0)) else None,
+                    path_parts=path_of(playlist),
                 ))
 
             return result
@@ -92,6 +109,7 @@ class EnginePlaylistReader:
                 .all()
             )
 
+            self._skipped[playlist_id] = 0
             if not entities:
                 return []
 
@@ -126,11 +144,17 @@ class EnginePlaylistReader:
 
             # Convert to TrackReference objects
             result = []
+            # Entries the linked-list walk never reached are not in the list either.
+            skipped = len(entities) - len(ordered_entities)
             for entity in ordered_entities:
                 track = session.query(Track).filter_by(id=entity.trackId).first()
+                if not (track and track.path):
+                    skipped += 1
+                    continue
                 if track and track.path:
                     absolute = absolute_track_path(track.path, Path(self.db.database_path).parent)
                     if absolute is None:
+                        skipped += 1
                         continue
                     result.append(TrackReference(
                         path=absolute,
@@ -140,6 +164,7 @@ class EnginePlaylistReader:
                         track_id=entity.trackId
                     ))
 
+            self._skipped[playlist_id] = skipped
             return result
 
     def flatten_hierarchy_name(self, playlist_id: int) -> str:
