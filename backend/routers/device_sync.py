@@ -35,12 +35,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload, undefer
+from starlette.concurrency import run_in_threadpool
 
 from .. import shipped_defaults
 from ..database import get_db
+from ..feedback import REQUEST_LIMIT, Submission
 from ..key import Key
 from ..models import (
     AppSetting,
@@ -594,3 +596,87 @@ def report_received(body: ReceivedIn, request: Request, db: Session = Depends(ge
     except (FieldError, KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"batch_id": batch}
+
+
+# ── Phone feedback: shake-to-report lands in the shared feedback store ──
+#
+# The phone captures, annotates and reviews the report on-device, then POSTs
+# it here. The desktop files it through the same FeedbackService as the
+# loopback /api/feedback router: scrubbed, durable, and the GitHub issue is
+# text-only (screenshot/context stay in the local feedback store). The full
+# feedback router stays loopback-only; this is the one scoped device write.
+
+
+async def _feedback_payload(request: Request) -> dict:
+    if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
+        raise _no_store(HTTPException(415, "Feedback requires application/json"))
+    try:
+        if int(request.headers.get("content-length", "0")) > REQUEST_LIMIT:
+            raise _no_store(HTTPException(413, "Feedback request is too large"))
+    except ValueError:
+        raise _no_store(HTTPException(400, "Invalid content length")) from None
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > REQUEST_LIMIT:
+            raise _no_store(HTTPException(413, "Feedback request is too large"))
+    try:
+        value = json.loads(data)
+    except ValueError:
+        raise _no_store(
+            HTTPException(422, "Invalid feedback input; check field, attachment and size limits")
+        ) from None
+    if not isinstance(value, dict):
+        raise _no_store(
+            HTTPException(422, "Invalid feedback input; check field, attachment and size limits")
+        )
+    return value
+
+
+def _no_store(exc: HTTPException) -> HTTPException:
+    exc.headers = {
+        **(exc.headers or {}),
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    return exc
+
+
+@router.post("/feedback")
+async def submit_feedback(request: Request, response: Response):
+    """File one reviewed phone report via the desktop's FeedbackService.
+
+    External filing requires a verified paired device (request.state.device,
+    set by the listener after token auth); the legacy shared pairing code
+    keeps its read paths but cannot file. Browser-originated requests are
+    refused. The desktop is the filer, so the running app is the origin; any
+    origin the caller claims is replaced. The device's identity is recorded
+    as evidence, never trusted as the filing origin.
+    """
+    service = getattr(request.app.state, "feedback_service", None)
+    if service is None:
+        raise _no_store(HTTPException(503, "Feedback filing is unavailable on this desktop"))
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    if getattr(request.state, "device", None) is None:
+        raise _no_store(HTTPException(401, "Feedback filing requires a paired device"))
+    if "origin" in request.headers or "referer" in request.headers:
+        raise _no_store(
+            HTTPException(403, "Feedback does not accept browser-originated requests")
+        )
+    body = await _feedback_payload(request)
+    body["origin"] = service.workspace.origin.model_dump()
+    device_id, name = _device(request)
+    snapshot = body.get("snapshot")
+    if isinstance(snapshot, dict):
+        session = snapshot.setdefault("session", {})
+        if isinstance(session, dict):
+            session["reporting_device"] = {"id": device_id, "name": name}
+    try:
+        submission = Submission.model_validate(body)
+    except (ValueError, ValidationError, RecursionError):
+        # Validation errors echo offending values by default (possibly secrets).
+        raise _no_store(
+            HTTPException(422, "Invalid feedback input; check field, attachment and size limits")
+        ) from None
+    return await run_in_threadpool(service.submit, submission)

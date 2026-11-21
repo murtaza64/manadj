@@ -1,0 +1,67 @@
+name: iOS unsigned simulator
+
+on:
+  push:
+    branches: ["instinct/ios-app", "instinct/ios-android-parity", "instinct/ios-local-live"]
+  pull_request:
+    paths: ["ios/**", "android/audio-engine/src/main/cpp/**", ".github/workflows/ios-simulator.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-simulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Report Apple toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          xcrun simctl list devices available
+      - name: Prepare real desktop LAN fixture
+        run: |
+          brew list python@3.13 || brew install python@3.13
+          "$(brew --prefix python@3.13)/bin/python3.13" -m venv /tmp/manadj-lan-venv
+          /tmp/manadj-lan-venv/bin/python -m pip install -r tests/lan_fixture/requirements.txt
+          /tmp/manadj-lan-venv/bin/python -m pytest -q tests/lan_fixture/test_serve.py --confcutdir=tests/lan_fixture
+      - name: Build and test without signing
+        timeout-minutes: 18
+        shell: bash
+        run: |
+          set -o pipefail
+          /tmp/manadj-lan-venv/bin/python ios/scripts/with_lan_fixture.py 2>&1 | tee ios-verification.log
+      - name: Export simulator diagnostics and attachments
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p ios/.test-results/export
+          for result in ios/.test-results/*.xcresult; do
+            [ -d "$result" ] || continue
+            destination="ios/.test-results/export/$(basename "$result" .xcresult)"
+            mkdir -p "$destination"
+            xcrun xcresulttool get test-results summary --path "$result" | tee "$destination/summary.json"
+            xcrun xcresulttool get test-results tests --path "$result" | tee "$destination/tests.json"
+            xcrun xcresulttool export diagnostics --path "$result" --output-path "$destination/diagnostics" || true
+            xcrun xcresulttool export attachments --path "$result" --output-path "$destination/attachments" || true
+          done
+          find ios/.test-results/export -type f -name '*.ips' -exec cat {} \;
+      - name: Preserve test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-simulator-evidence
+          path: |
+            ios-verification.log
+            ios/.test-results/
+          retention-days: 3
+          if-no-files-found: warn
+          include-hidden-files: true

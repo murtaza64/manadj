@@ -25,6 +25,7 @@ import { AppFeedbackEntry } from '../feedback/AppFeedbackEntry';
 import { hasKeyboardOverlay, isQuantizeShortcut, isTypingTarget } from './performance/performanceKeys';
 import { TourReplayButton } from '../tour/TourReplayButton';
 import './TopBar.css';
+import { LocalLiveControl } from '../live/LocalLiveControl';
 
 export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync' | 'clip';
 
@@ -274,6 +275,7 @@ export function TopBar({
         <TasksWidget />
         <span className="topbar-divider" />
         <MasterRecorderControl />
+        <LocalLiveControl />
         <span className="topbar-divider" />
         <div className="topbar-group">
           <AudioRoutingPicker />
