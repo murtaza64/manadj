@@ -47,6 +47,15 @@ final class WorkspaceUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(pad.frame.width, 44)
         } }
         XCUIDevice.shared.orientation = .landscapeLeft
+        let settled = NSPredicate { _, _ in
+            let a = app.buttons["deck-0-info"].frame
+            let b = app.buttons["deck-1-info"].frame
+            let bounds = app.frame
+            return bounds.width > bounds.height && a.width > 0 && b.width > 0
+                && b.midX > a.maxX + 50 && a.maxY < bounds.height && b.maxY < bounds.height
+                && b.maxX <= bounds.maxX + 2
+        }
+        expectation(for: settled, evaluatedWith: app); waitForExpectations(timeout: 15)
         XCTAssertTrue(knob.waitForExistence(timeout: 10))
         let landscape = XCTAttachment(screenshot: app.screenshot()); landscape.name = "Landscape square hotcues and fullscreen safe edges"; landscape.lifetime = .keepAlways; add(landscape)
         XCTAssertTrue(app.otherElements["performance-battery"].exists)
