@@ -46,6 +46,49 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
+    /// Native callbacks/draw submissions, not presented frames or touch-to-photon.
+    /// UI automation overhead is excluded from the interval probes, but the
+    /// simulator host still affects scheduling. Never call these phone FPS.
+    @MainActor func testContinuousPlaybackDrawerAndGlassPacing() {
+        defer { captureFailure() }
+        for plain in [true, false] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--performance-ui-fixture", "--wave-pacing-metrics"] + (plain ? ["--plain-center-tabs"] : [])
+            app.launch()
+            let playA = app.buttons["A play pause"], playB = app.buttons["B play pause"]
+            XCTAssertTrue(playA.waitForExistence(timeout: 20)); waitForReadyTransport(playA, app: app)
+            let ready = NSPredicate(format: "enabled == true AND hittable == true")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: playB)], timeout: 15), .completed)
+            playA.tap(); playB.tap()
+            let wave = app.otherElements["deck-0-detail-wave"]
+            Thread.sleep(forTimeInterval: 4)
+            print("SYNTHETIC_PACING_IDLE plain=\(plain) \(wave.value ?? "missing") simulatorNotPhone=true")
+            for _ in 0..<6 {
+                app.buttons["browser-open"].tap()
+                let search = app.textFields["Search title, artist, file"]
+                XCTAssertTrue(search.waitForExistence(timeout: 5))
+                let list = app.descendants(matching: .any)["library-track-list"].firstMatch
+                if list.exists { list.swipeUp(velocity: .fast); list.swipeDown(velocity: .fast) }
+                let close = app.buttons["browser-close"]
+                XCTAssertTrue(close.isHittable); close.tap()
+                let audio = app.buttons["center-tab-audio"]
+                let audioTab = audio.exists ? audio : app.segmentedControls.buttons["Audio"]
+                if audioTab.exists { audioTab.tap() }
+                let fx = app.buttons["center-tab-fx"]
+                let fxTab = fx.exists ? fx : app.segmentedControls.buttons["Fx"]
+                if fxTab.exists { fxTab.tap() }
+            }
+            let aValue = wave.value as? String ?? "missing"
+            let bValue = app.otherElements["deck-1-detail-wave"].value as? String ?? "missing"
+            XCTAssertTrue(aValue.hasPrefix("playing"), aValue); XCTAssertTrue(bValue.hasPrefix("playing"), bValue)
+            XCTAssertTrue(aValue.contains("callbackSamples="), aValue)
+            print("SYNTHETIC_PACING_STRESS plain=\(plain) A=\(aValue) B=\(bValue) simulatorNotPhone=true rollingWindowMayOverlapIdle=true")
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = plain ? "Plain icons after continuous playback and drawer stress" : "Native segmented icons after continuous playback and drawer stress"
+            shot.lifetime = .keepAlways; add(shot)
+        }
+    }
+
     @MainActor func testBrowserOpenResponsivenessSyntheticFixture() {
         let options = XCTMeasureOptions(); options.iterationCount = 3
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()

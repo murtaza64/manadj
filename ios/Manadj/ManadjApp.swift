@@ -211,6 +211,40 @@ struct WorkspaceView: View {
             return accepted
         })
     }
+    @ViewBuilder private var centerModePicker: some View {
+        if ProcessInfo.processInfo.arguments.contains("--plain-center-tabs") { plainCenterTabs }
+        else { nativeCenterModePicker }
+    }
+    private var plainCenterTabs: some View {
+HStack(spacing: 0) {
+                    ForEach(["FX", "FEEDBACK", "AUDIO", "SYNC"], id: \.self) { tab in
+                        Button {
+                            if tab == "FEEDBACK" { feedback.open() }
+                            else { feedback.contextual = tab == "AUDIO" ? "OUTPUT" : tab }
+                        } label: {
+                            Image(systemName: tab == "FX" ? "sparkles" : tab == "FEEDBACK" ? "bubble.left.and.text.bubble.right" : tab == "AUDIO" ? outputSymbol : "desktopcomputer").font(.system(size: 14)).frame(maxWidth: .infinity, minHeight: 44)
+                                .background((feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")) ? Ink.accent.opacity(0.15) : .clear)
+                                .overlay(alignment: .bottom) { Rectangle().fill((feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")) ? Ink.accent : Ink.edge).frame(height: 2) }
+                        }.buttonStyle(.plain).accessibilityLabel(tab == "FEEDBACK" ? "Feedback" : tab.capitalized).accessibilityIdentifier(tab == "FEEDBACK" ? "feedback-open" : "center-tab-" + tab.lowercased())
+                    }
+                }.foregroundStyle(Ink.accent)
+    }
+    private var nativeCenterModePicker: some View {
+        Picker("Center controls", selection: Binding(get: {
+            feedback.contextual == "OUTPUT" ? "AUDIO" : (["FX", "FEEDBACK", "SYNC"].contains(feedback.contextual) ? feedback.contextual : "FX")
+        }, set: { tab in
+            if tab == "FEEDBACK" { feedback.open() }
+            else { feedback.contextual = tab == "AUDIO" ? "OUTPUT" : tab }
+        })) {
+            ForEach(["FX", "FEEDBACK", "AUDIO", "SYNC"], id: \.self) { tab in
+                Image(systemName: tab == "FX" ? "sparkles" : tab == "FEEDBACK" ? "bubble.left.and.text.bubble.right" : tab == "AUDIO" ? outputSymbol : "desktopcomputer")
+                    .accessibilityLabel(tab == "FEEDBACK" ? "Feedback" : tab.capitalized)
+                    .accessibilityIdentifier(tab == "FEEDBACK" ? "feedback-open" : "center-tab-" + tab.lowercased())
+                    .tag(tab)
+            }
+        }.pickerStyle(.segmented).tint(Ink.accent).frame(minHeight: 44)
+            .accessibilityIdentifier("center-mode-picker")
+    }
     private var mixer: some View {
         HStack(spacing: 0) {
             knobColumn(0).frame(width: 48)
@@ -231,18 +265,7 @@ struct WorkspaceView: View {
                 }.frame(height: 44)
                 recordingBar.frame(height: 44)
                 Spacer(minLength: 0)
-                HStack(spacing: 0) {
-                    ForEach(["FX", "FEEDBACK", "AUDIO", "SYNC"], id: \.self) { tab in
-                        Button {
-                            if tab == "FEEDBACK" { feedback.open() }
-                            else { feedback.contextual = tab == "AUDIO" ? "OUTPUT" : tab }
-                        } label: {
-                            Image(systemName: tab == "FX" ? "sparkles" : tab == "FEEDBACK" ? "bubble.left.and.text.bubble.right" : tab == "AUDIO" ? outputSymbol : "desktopcomputer").font(.system(size: 14)).frame(maxWidth: .infinity, minHeight: 44)
-                                .background((feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")) ? Ink.accent.opacity(0.15) : .clear)
-                                .overlay(alignment: .bottom) { Rectangle().fill((feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")) ? Ink.accent : Ink.edge).frame(height: 2) }
-                        }.buttonStyle(.plain).accessibilityLabel(tab == "FEEDBACK" ? "Feedback" : tab.capitalized).accessibilityIdentifier(tab == "FEEDBACK" ? "feedback-open" : "center-tab-" + tab.lowercased())
-                    }
-                }.foregroundStyle(Ink.accent)
+                centerModePicker
                 if feedback.contextual == "FEEDBACK" { LiveFeedbackToolbar(session: feedback, model: model) }
                 else if feedback.contextual == "SYNC" { SettingsView(syncOnly: true).frame(height: 160).accessibilityIdentifier("center-sync-panel") }
                 else if feedback.contextual == "OUTPUT" { outputContext }
