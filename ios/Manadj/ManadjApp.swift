@@ -237,7 +237,7 @@ struct WorkspaceView: View {
                             if tab == "FEEDBACK" { feedback.open() }
                             else { feedback.contextual = tab == "AUDIO" ? "OUTPUT" : tab }
                         } label: {
-                            Image(systemName: tab == "FX" ? "sparkles" : tab == "FEEDBACK" ? "bubble.left.and.text.bubble.right" : tab == "AUDIO" ? outputSymbol : "arrow.triangle.2.circlepath").font(.system(size: 14)).frame(maxWidth: .infinity, minHeight: 44)
+                            Image(systemName: tab == "FX" ? "sparkles" : tab == "FEEDBACK" ? "bubble.left.and.text.bubble.right" : tab == "AUDIO" ? outputSymbol : "desktopcomputer").font(.system(size: 14)).frame(maxWidth: .infinity, minHeight: 44)
                                 .background((feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")) ? Ink.accent.opacity(0.15) : .clear)
                                 .overlay(alignment: .bottom) { Rectangle().fill((feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")) ? Ink.accent : Ink.edge).frame(height: 2) }
                         }.buttonStyle(.plain).accessibilityLabel(tab == "FEEDBACK" ? "Feedback" : tab.capitalized).accessibilityIdentifier(tab == "FEEDBACK" ? "feedback-open" : "center-tab-" + tab.lowercased())
