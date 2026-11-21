@@ -1,4 +1,5 @@
 import SwiftUI
+import ManadjCore
 
 /// Android Library.kt SwipeToLoad parity: drag left → deck A, drag right →
 /// deck B. The row slides over a deck-colored reveal with the target letter;
@@ -67,17 +68,13 @@ struct SwipeToLoad<Content: View>: View {
                 if now != armed { armed = now; haptic.selectionChanged() }
             }
             .onEnded { value in
-                let travel = value.translation.width
-                let projected = value.predictedEndTranslation.width
-                // A deliberate short flick counts; tiny motions and reversal do not.
-                let flick = abs(travel) >= 24 && abs(projected) >= 100 && travel * projected > 0
-                let commit = horizontal && (abs(travel) >= Self.armDistance || flick)
-                let left = value.translation.width < 0
+                let target = horizontal ? LoadSwipeIntent.target(travel: value.translation.width,
+                    vertical: value.translation.height, projected: value.predictedEndTranslation.width) : nil
                 withAnimation(.easeOut(duration: 0.16)) { dx = 0 }
                 horizontal = false
                 armed = false
-                guard commit else { return }
-                if left { loadA() } else { loadB() }
+                guard let target else { return }
+                if target == 0 { loadA() } else { loadB() }
             }
     }
 }

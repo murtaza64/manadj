@@ -8,6 +8,36 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    @MainActor func testRendererBeforeAfterFrozenBaselineSynthetic() throws {
+        let resource = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "mwf"))
+        let wave = try PreviewWaveform.parse(Data(contentsOf: resource))
+        var state = MDJDeck(); state.ready = true; state.bpm = 128; state.position = 8
+        state.hotCues = (-1,-1,-1,-1,-1,-1,-1,-1)
+        for overview in [false, true] {
+            let size = CGSize(width: overview ? 150 : 390, height: overview ? 36 : 60)
+            let old = BaselinePerformanceWaveView(frame: CGRect(origin: .zero, size: size))
+            let now = PerformanceWaveView(frame: CGRect(origin: .zero, size: size))
+            old.wave = wave; old.duration = wave.durationSecs; old.state = { state }; old.overview = overview
+            now.wave = wave; now.duration = wave.durationSecs; now.state = { state }; now.overview = overview
+            old.contentScaleFactor = 3; now.contentScaleFactor = 3
+            let format = UIGraphicsImageRendererFormat(); format.scale = 3
+            let renderer = UIGraphicsImageRenderer(size: size, format: format)
+            func run(_ draw: () -> Void) -> Double {
+                let begin = ProcessInfo.processInfo.systemUptime
+                for i in 0..<90 { state.position = 8 + Double(i) / 60; autoreleasepool { _ = renderer.image { _ in draw() } } }
+                return (ProcessInfo.processInfo.systemUptime - begin) * 1000 / 90
+            }
+            _ = run { old.draw(old.bounds) }; _ = run { now.draw(now.bounds) }
+            let baseline = run { old.draw(old.bounds) }, revised = run { now.draw(now.bounds) }
+            print("SYNTHETIC_WAVE_DRAW overview=\(overview) baselineMsPerFrame=\(baseline) revisedMsPerFrame=\(revised) scale=3 frames=90 mode=Debug simulatorNotDevice=true")
+            state.position = 8
+            for (name, draw) in [("Frozen baseline", { old.draw(old.bounds) }), ("Revised Android columns", { now.draw(now.bounds) })] {
+                let image = renderer.image { _ in draw() }; let shot = XCTAttachment(image: image)
+                shot.name = "\(name) synthetic wave overview=\(overview)"; shot.lifetime = .keepAlways; add(shot)
+            }
+        }
+    }
+
     @MainActor func testIdleControlPollingDoesNotPublishUnchangedDecks() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

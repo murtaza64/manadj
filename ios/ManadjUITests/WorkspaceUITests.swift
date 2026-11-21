@@ -324,6 +324,19 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertFalse(search.exists, "Accepted swipe closes browser")
     }
 
+    @MainActor func testLibraryRightShortSwipeLoadsBNotA() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
+        app.buttons["BROWSE"].tap()
+        let row = app.staticTexts["Cached Test Tone"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
+        from.press(forDuration: 0.01, thenDragTo: from.withOffset(CGVector(dx: 45, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+        let loaded = NSPredicate(format: "value CONTAINS %@", "Cached Test Tone")
+        expectation(for: loaded, evaluatedWith: app.buttons["deck-1-info"]); waitForExpectations(timeout: 8)
+        XCTAssertFalse((app.buttons["deck-0-info"].value as? String ?? "").contains("Cached Test Tone"))
+    }
+
     @MainActor func testLocalLiveSyntheticPairedHostMonitor() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--local-live-ui-fixture"]; app.launch()
