@@ -34,7 +34,9 @@ struct PerformanceDeckControls: View {
     var body: some View {
         GeometryReader { geometry in
             let padHeight: CGFloat = compact ? 80 : 104
-            let row = max(CGFloat(22), (geometry.size.height - padHeight - 60) / 5)
+            let row = max(CGFloat(22), (geometry.size.height - padHeight - 158) / 2)
+            let transportHeight: CGFloat = 44
+            let pitchHeight: CGFloat = 44
             VStack(spacing: 4) {
                 HStack(spacing: 0) {
                     if index == 0 { shiftKey }
@@ -67,8 +69,8 @@ struct PerformanceDeckControls: View {
                     Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
                     Button("▶▶") { model.set(MDJBeatJump, index, jump) }.frame(maxWidth: 40)
                 }.buttonStyle(PerformanceStripStyle(color: color)).clipShape(Capsule()).overlay(Capsule().stroke(color.opacity(0.7), lineWidth: 1.5)).padding(3).frame(height: row).disabled(!state.ready)
-                onTransport().frame(height: row + 8)
-                PerformanceBend(color: color, enabled: state.ready, value: Double(state.bend)) { model.set(MDJBend, index, $0) }.frame(height: row)
+                onTransport().frame(height: transportHeight)
+                PerformanceBend(color: color, enabled: state.ready, value: Double(state.bend)) { model.set(MDJBend, index, $0) }.frame(height: 22)
                 Button { withAnimation(.easeOut(duration: 0.24)) { pitch.toggle() } } label: {
                     VStack(spacing: 0) {
                         Capsule().fill(color).frame(width: 28, height: 3).padding(.top, 3)
@@ -82,7 +84,7 @@ struct PerformanceDeckControls: View {
                         }.padding(.horizontal, 7).frame(maxHeight: .infinity)
                     }.background(Ink.panel).clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
                         .overlay(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12).stroke(color.opacity(0.6), lineWidth: 1.5)).padding(2)
-                }.buttonStyle(.plain).frame(height: row).accessibilityLabel("\(Ink.deckName(index)) PITCH panel").feedbackTarget("Deck \(Ink.deckName(index)) pitch panel")
+                }.buttonStyle(.plain).frame(height: pitchHeight).accessibilityLabel("\(Ink.deckName(index)) PITCH panel").feedbackTarget("Deck \(Ink.deckName(index)) pitch panel")
 
             }
             .overlay {

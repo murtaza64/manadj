@@ -79,15 +79,21 @@ struct WorkspaceView: View {
     private var portraitBody: some View {
         GeometryReader { geometry in
             let compact = geometry.size.height < 860
-            let gap: CGFloat = compact ? 5 : 8
+            let gap: CGFloat = compact ? 3 : 8
+            let infoHeight: CGFloat = compact ? 36 : 44
+            let deckHeight: CGFloat = compact ? 316 : 360
+            let mixerFloor: CGFloat = feedback.active ? 302 : 284
+            // Budget real row heights rather than letting the deck's minimum
+            // overflow the viewport. Only waveform height yields on standard phones.
+            let waveHeight: CGFloat = compact ? max(36, min(83, geometry.size.height - infoHeight - deckHeight - 36 - gap * 5 - mixerFloor)) : 135
             VStack(spacing: gap) {
-                HStack(spacing: 10) { deckInfo(0); deckInfo(1) }.frame(height: browsing && keyboardOpen ? 36 : 44)
-                if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: compact ? 83 : 135) }
+                HStack(spacing: 10) { deckInfo(0); deckInfo(1) }.frame(height: browsing && keyboardOpen ? 36 : infoHeight)
+                if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: waveHeight) }
                 ZStack(alignment: .bottom) {
                     if !browsing && !settings { VStack(spacing: gap) {
                         mixer.frame(maxHeight: .infinity)
                         HStack(spacing: 6) { minimap(0); browseKey.frame(width: 84); minimap(1) }.frame(height: compact ? 36 : 44)
-                        HStack(alignment: .top, spacing: 14) { deckControls(0, compact: compact); deckControls(1, compact: compact) }
+                        HStack(alignment: .top, spacing: 14) { deckControls(0, compact: compact); deckControls(1, compact: compact) }.frame(height: deckHeight)
                     }
                     }
                     if browsing {
@@ -107,7 +113,7 @@ struct WorkspaceView: View {
                         }.background(Ink.base).transition(.move(edge: .bottom))
                     }
                 }.clipped()
-            }.padding(.horizontal, 8).padding(.bottom, 20)
+            }.frame(height: geometry.size.height, alignment: .top).padding(.horizontal, 8)
             .animation(.easeOut(duration: 0.24), value: browsing)
             .animation(.easeOut(duration: 0.24), value: settings)
         }
