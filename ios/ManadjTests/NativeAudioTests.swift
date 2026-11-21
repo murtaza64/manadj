@@ -19,6 +19,27 @@ final class NativeAudioTests: XCTestCase {
         print("SYSTEM_AUDIO_ENCODER_CAPABILITY mp3=\(formats.contains(kAudioFormatMPEGLayer3)) aac=\(formats.contains(kAudioFormatMPEG4AAC)) simulatorOnly=true")
     }
 
+    @MainActor func testSeekHoldPixelsMatchAcknowledgedTransportWithoutSnapback() throws {
+        let wave = try syntheticMultibandWave()
+        for overview in [false, true] {
+            let view = PerformanceWaveView(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
+            var state = MDJDeck(); state.position = 4; state.transport = 1
+            view.wave = wave; view.duration = wave.durationSecs; view.overview = overview; view.state = { state }
+            let renderer = UIGraphicsImageRenderer(size: view.bounds.size)
+            let before = renderer.image { _ in view.draw(view.bounds) }
+            view.beginSeekHold(12)
+            let held = renderer.image { _ in view.draw(view.bounds) }
+            XCTAssertNotEqual(before.pngData(), held.pngData(), "Seek must visibly leave the old position")
+            let stale = renderer.image { _ in view.draw(view.bounds) }
+            XCTAssertEqual(held.pngData(), stale.pngData(), "Stale engine state must not snap back the wave")
+            state.position = 12; state.transport = 2
+            let acknowledged = renderer.image { _ in view.draw(view.bounds) }
+            XCTAssertEqual(held.pngData(), acknowledged.pngData(), "Acknowledging the same drop position must not shift pixels")
+            for (name, image) in [("before", before), ("held", held), ("acknowledged", acknowledged)] {
+                let shot = XCTAttachment(image: image); shot.name = "Native seek continuity overview=\(overview) " + name; shot.lifetime = .keepAlways; add(shot)
+            }
+        }
+    }
     private func syntheticMultibandWave() throws -> PreviewWaveform {
         let resource = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "mwf"))
         var bytes = [UInt8](try Data(contentsOf: resource))

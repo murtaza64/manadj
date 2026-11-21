@@ -107,7 +107,7 @@ struct WorkspaceView: View {
                         }.background(Ink.base).transition(.move(edge: .bottom))
                     }
                 }.clipped()
-            }.padding(.horizontal, 8)
+            }.padding(.horizontal, 8).padding(.bottom, 20)
             .animation(.easeOut(duration: 0.24), value: browsing)
             .animation(.easeOut(duration: 0.24), value: settings)
         }

@@ -6,10 +6,19 @@ public struct WaveClock {
     private var target = Double.nan
     private var targetAt = 0.0
     private var last = 0.0
+    private var transport: UInt64?
     public init() {}
-    public mutating func at(_ now: Double, raw: Double, moving: Bool, rate: Double) -> Double {
-        if raw != target { target = raw; targetAt = now }
+    /// `transport` is the engine relocation counter (CEngine MDJDeck.transport). When it
+    /// changes the engine applied a seek/cue/loop wrap: snap to the reported position
+    /// immediately instead of easing or predicting across the discontinuity. Callers
+    /// without the counter pass nil and keep the distance-threshold behavior.
+    public mutating func at(_ now: Double, raw: Double, moving: Bool, rate: Double, transport: UInt64? = nil) -> Double {
+        let relocated = transport != nil && transport != self.transport
+        if raw != target || relocated { target = raw; targetAt = now }
         let predicted = moving ? target + (now - targetAt) * rate : target
+        if let transport, relocated {
+            self.transport = transport; shown = predicted; last = now; return shown
+        }
         if !moving || !shown.isFinite || last == 0 || now <= last { shown = predicted; last = now; return shown }
         let dt = now - last; last = now
         let free = shown + dt * rate
