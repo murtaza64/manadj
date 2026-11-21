@@ -9,6 +9,7 @@ import {
   renderAnnotations, type Stroke,
 } from './annotate';
 import { dictationAvailable, startDictation, type Dictation } from './dictate';
+import { CaptureOverlay } from './overlay';
 import { installModalKeyGuard } from '../focus/modalKeys';
 import './feedback.css';
 
@@ -157,6 +158,10 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
   const [penColor, setPenColor] = useState<string>(PEN_COLORS[0]);
   const [annotating, setAnnotating] = useState(false);
   const [dictating, setDictating] = useState<'title' | 'description' | null>(null);
+  // v3: capture starts as a small overlay bar over the live app; the
+  // report form opens only after Done captures (feedback #518).
+  const [overlay, setOverlay] = useState(false);
+  const [drawing, setDrawing] = useState(false);
   const captureLock = useRef(false);
   const actionLock = useRef(false);
   const dictationRef = useRef<Dictation | null>(null);
@@ -164,6 +169,12 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
   const entry = useRef<HTMLSpanElement>(null);
   const id = useId();
   const open = page !== null;
+  // MIDI boot recovery must not destroy active feedback or a retained draft.
+  useEffect(() => {
+    if (!(overlay || page || capture || title || description || strokes.length)) return;
+    document.documentElement.dataset.feedbackActive = 'true';
+    return () => { delete document.documentElement.dataset.feedbackActive; };
+  }, [overlay, page, capture, title, description, strokes.length]);
   const canDictate = dictationAvailable();
 
   useEffect(() => installModalKeyGuard(() => Boolean(dialog.current?.open), () => setPage(null)), []);
@@ -222,23 +233,56 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
 
   // Yield two frames so a closed overlay leaves the compositor before a new
   // Electron screenshot or element pick observes the bare app.
+  function twoFrames() {
+    return withTimeout(new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))), 250).catch(() => {});
+  }
   async function settleClosed() {
     flushSync(() => setPage(null));
-    await withTimeout(new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))), 250).catch(() => {});
+    await twoFrames();
+  }
+
+  // Feedback opens the overlay bar; nothing is captured until Done.
+  function openOverlay() {
+    if (overlay) return;
+    setPointer(null);
+    setStrokes([]); setAnnotating(false);
+    setDrawing(true);
+    setOverlay(true);
+  }
+
+  function cancelOverlay() {
+    setOverlay(false); setDrawing(false);
+    setPointer(null); setStrokes([]);
+  }
+
+  async function finishCapture() {
+    if (captureLock.current || actionLock.current) return;
+    captureLock.current = true;
+    setCapturing(true);
+    setError('');
+    try {
+      // The overlay must leave the compositor before the screenshot.
+      flushSync(() => { setOverlay(false); setDrawing(false); });
+      await twoFrames();
+      setCapture(await captureFeedback(readers));
+      setPage('form');
+    } catch {
+      setCapture({ snapshot: {}, screenshot: null, context: null, warnings: ['Capture failed. Reporting is still available.'] });
+      setPage('form');
+    } finally { captureLock.current = false; setCapturing(false); }
   }
 
   async function begin(recapture = false) {
     if (captureLock.current || actionLock.current) return;
     if (capture && !recapture) { setPage('form'); return; }
     if (payload && filingIssue !== 'conflict') return;
+    if (!recapture) { openOverlay(); return; }
     captureLock.current = true;
     setCapturing(true);
     setError('');
     try {
-      if (recapture) {
-        await settleClosed();
-        setPayload(null); setFilingIssue(null);
-      }
+      await settleClosed();
+      setPayload(null); setFilingIssue(null);
       setPointer(null);
       // Strokes were drawn on the previous pixels; the pointer descriptor
       // names an element and survives a fresh screenshot of the same view.
@@ -260,6 +304,19 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
       const picked = await pickElement();
       if (picked) setPointer(picked);
       setPage('form');
+    } finally { captureLock.current = false; }
+  }
+
+  // Pointing from the overlay: the ink canvas must stop intercepting
+  // pointer events before elementFromPoint observes the app.
+  async function pointFromOverlay() {
+    if (captureLock.current || actionLock.current) return;
+    captureLock.current = true;
+    setError('');
+    try {
+      flushSync(() => setDrawing(false));
+      const picked = await pickElement();
+      if (picked) setPointer(picked);
     } finally { captureLock.current = false; }
   }
 
@@ -343,11 +400,25 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
 
   return <>
     <span className="feedback-entry" ref={entry} data-focusable>
-      <button className={`${entryClass}${page === 'form' ? ' btn-selected' : ''}`} aria-haspopup="dialog" aria-expanded={page === 'form'} title="Report bug / Request feature" disabled={capturing || busy} onClick={() => void begin()}>
+      <button className={`${entryClass}${page === 'form' || overlay ? ' btn-selected' : ''}`} aria-haspopup="dialog" aria-expanded={page === 'form' || overlay} title="Report bug / Request feature" disabled={capturing || busy} onClick={() => void begin()}>
         {capturing ? 'Capturing...' : 'Feedback'}
       </button>
-      <button className={`${entryClass}${page === 'review' ? ' btn-selected' : ''}`} aria-haspopup="dialog" aria-expanded={page === 'review'} title={listError || 'Reports awaiting dispatch, including pending or failed filing'} disabled={capturing} onClick={() => { setError(''); setPage('review'); }}>Queue ({pendingCount})</button>
+      <button className={`${entryClass}${page === 'review' ? ' btn-selected' : ''}`} aria-haspopup="dialog" aria-expanded={page === 'review'} title={listError || 'Reports awaiting dispatch, including pending or failed filing'} disabled={capturing || overlay} onClick={() => { setError(''); setPage('review'); }}>Queue ({pendingCount})</button>
     </span>
+    {overlay && createPortal(<CaptureOverlay
+      drawing={drawing} strokes={strokes} pointer={pointer}
+      pointerText={pointer ? pointerLabel(pointer) : null} penColor={penColor}
+      onStroke={(stroke) => setStrokes((current) => [...current, stroke])}
+      onToggleDraw={() => setDrawing((current) => !current)}
+      onPenColor={setPenColor}
+      onUndo={() => setStrokes((current) => current.slice(0, -1))}
+      onClear={() => setStrokes([])}
+      onInvalidate={() => { setStrokes([]); setPointer(null); }}
+      onPoint={() => void pointFromOverlay()}
+      onRemovePointer={() => setPointer(null)}
+      onDone={() => void finishCapture()}
+      onCancel={cancelOverlay}
+    />, document.body)}
     {page && createPortal(<dialog ref={dialog} className="feedback-dialog" aria-labelledby={`${id}-heading`} data-focusable
       onCancel={(e) => { e.preventDefault(); setPage(null); }}
       onClick={(event) => {

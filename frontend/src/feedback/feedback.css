@@ -174,4 +174,45 @@
 .feedback-field-row { display: flex; align-items: flex-start; gap: var(--space-6); }
 .feedback-field-row > input, .feedback-field-row > textarea { flex: 1; min-width: 0; }
 .feedback-capture-hint { font-size: var(--font-small); color: var(--subtext0); }
+
+/* Capture overlay bar (feedback #518 v3): floats over the live app; the
+   form opens only after Done captures. */
+.feedback-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  max-width: none;
+  height: 100vh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  z-index: 900;
+  overflow: hidden;
+  background: transparent;
+  color: var(--text);
+  pointer-events: none;
+}
+.feedback-overlay-canvas { position: fixed; inset: 0; pointer-events: none; }
+.feedback-overlay-drawing { pointer-events: auto; cursor: crosshair; touch-action: none; }
+.feedback-bar {
+  position: fixed;
+  top: var(--space-16);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  max-width: calc(100vw - 2 * var(--space-16));
+  padding: var(--space-6) var(--space-8);
+  background: color-mix(in srgb, var(--mantle) 92%, transparent);
+  color: var(--text);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--crust) 60%, transparent);
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+.feedback-bar .feedback-pointer-chip { margin-inline: var(--space-4); }
 .feedback-trail ul { margin: var(--space-6) 0 0; padding-left: var(--space-16); font-size: var(--font-small); color: var(--subtext0); }

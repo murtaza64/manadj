@@ -183,7 +183,8 @@ export function attachMidiController({
       if (disposed || access || failureHandled) return;
       failureHandled = true;
       const attemptsMade = attempt + 1;
-      if (attemptsMade >= reloadAfterAttempts && sessionStorage.getItem(reloadFlag) === null) {
+      if (attemptsMade >= reloadAfterAttempts && sessionStorage.getItem(reloadFlag) === null
+          && document.documentElement.dataset.feedbackActive !== 'true') {
         sessionStorage.setItem(reloadFlag, '1');
         console.warn(
           `MIDI access dead after ${attemptsMade} attempts (${reason}) — reloading once (a fresh renderer is the known-good recovery)`

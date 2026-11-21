@@ -29,6 +29,11 @@ vi.mock('../hooks/useHotCueActions', () => ({
 vi.mock('./capture', async (original) => ({ ...await original<typeof import('./capture')>(), captureFeedback: vi.fn() }));
 const pointerMock = vi.hoisted(() => ({ pickElement: vi.fn() }));
 vi.mock('./pointer', async (original) => ({ ...await original<typeof import('./pointer')>(), pickElement: pointerMock.pickElement }));
+// jsdom cannot decode Image/canvas 2d; the bake is covered in annotate.test.ts.
+const annotateMock = vi.hoisted(() => ({
+  compositeScreenshot: vi.fn<(base: string, strokes: unknown[], pointer: unknown, viewport?: unknown) => Promise<string>>(async (base) => base),
+}));
+vi.mock('./annotate', async (original) => ({ ...await original<typeof import('./annotate')>(), compositeScreenshot: annotateMock.compositeScreenshot }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const origin = { lane: 'captured-lane', owner: 'captured-owner', revision: 'captured-rev' };
 const context = { origin, destination: 'captured-lane' };
@@ -67,6 +72,13 @@ function button(text: string) {
   return buttons.at(-1)!;
 }
 async function click(text: string) { await act(async () => { button(text).click(); }); }
+// Feedback opens the capture overlay; the form follows Done + capture.
+async function openForm() {
+  await click('Feedback');
+  await click('Done');
+  await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
+  expect(document.querySelector('dialog')?.open, 'report form').toBe(true);
+}
 async function queue() {
   await act(async () => { [...document.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Queue ('))!.click(); });
 }
@@ -87,10 +99,18 @@ async function fill() {
   });
 }
 
-it('does not open the form until capture settles; deduplicates clicks', async () => {
+it('opens the overlay before any capture; the form opens only after capture settles; deduplicates clicks', async () => {
   let resolve!: (value: Capture) => void;
   vi.mocked(captureFeedback).mockReturnValue(new Promise((r) => { resolve = r; }));
   await click('Feedback');
+  expect(document.querySelector('.feedback-overlay')).not.toBeNull();
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(captureFeedback).not.toHaveBeenCalled();
+  await click('Done');
+  expect(document.querySelector('.feedback-overlay')).toBeNull();
+  expect(document.querySelector('dialog')).toBeNull();
+  await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
+  expect(captureFeedback).toHaveBeenCalledTimes(1);
   expect(document.querySelector('dialog')).toBeNull();
   act(() => button('Capturing...').click());
   expect(captureFeedback).toHaveBeenCalledTimes(1);
@@ -101,7 +121,7 @@ it('does not open the form until capture settles; deduplicates clicks', async ()
 
 it('permits failure fallback and context retry without recapturing or losing form text', async () => {
   vi.mocked(captureFeedback).mockResolvedValue({ ...capture, context: null, screenshot: null, warnings: ['Screenshot unavailable'] });
-  await click('Feedback'); await feature(); await fill();
+  await openForm(); await feature(); await fill();
   expect(button('File report on GitHub').disabled).toBe(true);
   expect(document.querySelector('input[type=file]')).not.toBeNull();
   await click('Retry context');
@@ -118,7 +138,7 @@ it('validates text, previews redaction, removes attachments, and retries one imm
     if (payloads.length === 1) throw new Error('Timed out; may be saved');
     return { ...report, id: payload.id };
   });
-  await click('Feedback'); await click('File report on GitHub');
+  await openForm(); await click('File report on GitHub');
   expect(document.body.textContent).toContain('Title and detailed description are required');
   expect(feedbackApi.file).not.toHaveBeenCalled();
   await fill();
@@ -157,7 +177,7 @@ it('polls status without mutation; closing, reopening, and filing never dispatch
 
 it('keeps an unknown payload locked, even after a later conflict, until the queue confirms the saved ID', async () => {
   vi.spyOn(feedbackApi, 'file').mockRejectedValueOnce(new FeedbackError(null)).mockRejectedValue(new FeedbackError(409));
-  await click('Feedback'); await fill(); await click('File report on GitHub');
+  await openForm(); await fill(); await click('File report on GitHub');
   const first = vi.mocked(feedbackApi.file).mock.calls[0][0];
   expect(button('Recapture').disabled).toBe(true);
   await click('Retry same report');
@@ -206,7 +226,7 @@ it('blocks playback keyboard handlers, supports Escape, and keeps a closed draft
   const shortcut = vi.fn();
   document.addEventListener('keydown', shortcut, true);
   try {
-    await click('Feedback'); await fill();
+    await openForm(); await fill();
     act(() => { document.querySelector('input')!.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })); });
     expect(shortcut).not.toHaveBeenCalled();
     act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
@@ -222,6 +242,8 @@ it('offers crash reporting without DeckProvider or QueryClient', async () => {
   function Bomb(): never { throw new Error('render broke'); }
   act(() => root.render(<RootErrorBoundary><Bomb /></RootErrorBoundary>));
   await click('Feedback');
+  await click('Done');
+  await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
   const readers = vi.mocked(captureFeedback).mock.calls.at(-1)![0]!;
   expect(readers.crash!()).toMatchObject({ message: 'render broke' });
   expect(document.body.textContent).toContain('File a report');
@@ -235,7 +257,7 @@ it.each(['form', 'queue'])('releases pre-held cue/pad through the %s without acc
   key('keydown', 'z'); key('keydown', 'f');
   expect(hotCues.down).toHaveBeenCalledTimes(1);
   expect(engine.cueDown).toHaveBeenCalledTimes(1);
-  if (page === 'form') await click('Feedback'); else await queue();
+  if (page === 'form') await openForm(); else await queue();
   expect(engine.cueUp).not.toHaveBeenCalled();
   const target = document.querySelector('textarea') ?? button('Close');
   key('keyup', 'z', target); key('keyup', 'f', target);
@@ -259,7 +281,7 @@ it.each(['form', 'queue'])('releases pre-held cue/pad through the %s without acc
 
 it('recaptures a definite stale conflict before showing the form, retaining text and kind with a fresh UUID', async () => {
   vi.spyOn(feedbackApi, 'file').mockRejectedValueOnce(new FeedbackError(409)).mockResolvedValue(report);
-  await click('Feedback'); await feature(); await fill(); await click('File report on GitHub');
+  await openForm(); await feature(); await fill(); await click('File report on GitHub');
   const first = vi.mocked(feedbackApi.file).mock.calls[0][0];
   expect(document.body.textContent).toContain('captured origin may be stale');
   expect(button('Recapture').disabled).toBe(false);
@@ -284,7 +306,7 @@ it('recaptures a definite stale conflict before showing the form, retaining text
 });
 
 it('reopens a text-preserving fallback when recapture itself fails', async () => {
-  await click('Feedback'); await feature(); await fill();
+  await openForm(); await feature(); await fill();
   vi.mocked(captureFeedback).mockRejectedValue(new Error('capture unavailable'));
   await click('Recapture');
   await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
@@ -313,7 +335,7 @@ it('shows a globally polled pending count without opening any overlay or mutatin
 
 it('keeps text editable after a definite attachment rejection, but never unlocks an earlier unknown submission', async () => {
   vi.spyOn(feedbackApi, 'file').mockRejectedValue(new FeedbackError(422));
-  await click('Feedback'); await fill(); await click('File report on GitHub');
+  await openForm(); await fill(); await click('File report on GitHub');
   expect(document.querySelector('fieldset')?.disabled).toBe(false);
   expect(document.querySelector('textarea')?.value).toContain('Details');
   expect(button('Recapture').disabled).toBe(false);
@@ -330,6 +352,8 @@ it('uses the toolbar recipe only for entry controls and shows their open state',
   await click('Feedback');
   expect(button('Feedback').getAttribute('aria-expanded')).toBe('true');
   expect(button('Feedback').classList.contains('btn-selected')).toBe(true);
+  await click('Done');
+  await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
   expect(button('File report on GitHub').classList.contains('btn-toolbar')).toBe(false);
   expect(button('File report on GitHub').closest('.feedback-footer')).not.toBeNull();
   expect(document.querySelector('.feedback-body .feedback-footer')).toBeNull();
@@ -338,7 +362,7 @@ it('uses the toolbar recipe only for entry controls and shows their open state',
 });
 
 it('dismisses only backdrop clicks and preserves the draft without dispatch', async () => {
-  await click('Feedback'); await fill();
+  await openForm(); await fill();
   const dialog = document.querySelector('dialog')!;
   vi.spyOn(dialog, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 100, right: 700, bottom: 600 } as DOMRect);
   act(() => dialog.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 200, clientY: 200 })));
@@ -360,7 +384,7 @@ it('hints at the captured view, playback state and recent activity trail', async
       { at: '2026-11-20T12:00:01Z', event: 'play', detail: 'deck A' },
     ],
   } });
-  await click('Feedback');
+  await openForm();
   expect(document.body.textContent).toContain('Captured: performance · A playing · 1 recent error · 2 recent events');
   expect(document.body.textContent).toContain('Recent activity');
   expect(document.body.textContent).toContain('view, library');
@@ -379,9 +403,14 @@ it('points at an element, shows a removable chip and files the descriptor in the
     return { ...report, id: payload.id };
   });
   await click('Feedback');
-  await click('Point at element');
+  expect(document.querySelector('dialog')).toBeNull();
+  await click('Point');
   await act(async () => { await new Promise((r) => setTimeout(r, 60)); });
   expect(pointerMock.pickElement).toHaveBeenCalledTimes(1);
+  // The chip shows on the overlay bar before the form ever opens.
+  expect(document.querySelector('.feedback-bar')?.textContent).toContain('Element: button#play "Play deck A"');
+  await click('Done');
+  await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
   expect(document.body.textContent).toContain('Element: button#play "Play deck A"');
   await fill();
   await click('File report on GitHub');
@@ -391,11 +420,12 @@ it('points at an element, shows a removable chip and files the descriptor in the
 
   await click('Feedback');
   expect(document.body.textContent).not.toContain('Element: button#play');
+  await click('Cancel');
 });
 
 it('cancelling the element pick keeps the draft and adds nothing', async () => {
   pointerMock.pickElement.mockResolvedValue(null);
-  await click('Feedback'); await fill();
+  await openForm(); await fill();
   await click('Point at element');
   await act(async () => { await new Promise((r) => setTimeout(r, 60)); });
   expect(pointerMock.pickElement).toHaveBeenCalledTimes(1);
@@ -403,8 +433,62 @@ it('cancelling the element pick keeps the draft and adds nothing', async () => {
   expect(document.querySelector('textarea')?.value).toContain('Details');
 });
 
-it('offers draw controls on the screenshot with undo and clear', async () => {
+it('cancelling the overlay captures nothing and discards the session', async () => {
+  pointerMock.pickElement.mockResolvedValue({
+    tag: 'button', id: 'play', role: null, label: 'Play deck A', text: null,
+    rect: { x: 10, y: 20, width: 64, height: 32 },
+  });
   await click('Feedback');
+  await click('Point');
+  await act(async () => { await new Promise((r) => setTimeout(r, 60)); });
+  expect(document.querySelector('.feedback-bar')?.textContent).toContain('Element: button#play');
+  await click('Cancel');
+  expect(document.querySelector('.feedback-overlay')).toBeNull();
+  expect(captureFeedback).not.toHaveBeenCalled();
+  expect(document.querySelector('dialog')).toBeNull();
+  await click('Feedback');
+  expect(document.body.textContent).not.toContain('Element: button#play');
+  await click('Cancel');
+});
+
+it('cancels the overlay with Escape without touching the app draft state', async () => {
+  await click('Feedback');
+  expect(document.querySelector('.feedback-overlay')).not.toBeNull();
+  await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+  expect(document.querySelector('.feedback-overlay')).toBeNull();
+  expect(captureFeedback).not.toHaveBeenCalled();
+});
+
+it('draws full-screen strokes in the overlay and bakes them at filing', async () => {
+  await click('Feedback');
+  // Drawing is active by default: pen row visible, nothing to undo yet.
+  expect(button('Undo').disabled).toBe(true);
+  expect(button('Clear').disabled).toBe(true);
+  const canvas = document.querySelector('.feedback-overlay-canvas')!;
+  const stroke = (type: string, x: number, y: number) => act(() => {
+    canvas.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+  });
+  stroke('pointerdown', 10, 10); stroke('pointermove', 40, 40); stroke('pointerup', 40, 40);
+  expect(button('Undo').disabled).toBe(false);
+  await click('Undo');
+  expect(button('Undo').disabled).toBe(true);
+  stroke('pointerdown', 10, 10); stroke('pointerup', 60, 60);
+  await click('Done');
+  await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
+  await fill();
+  const payloads: Payload[] = [];
+  vi.spyOn(feedbackApi, 'file').mockImplementation(async (payload) => {
+    payloads.push(payload);
+    return { ...report, id: payload.id };
+  });
+  await click('File report on GitHub');
+  expect(annotateMock.compositeScreenshot).toHaveBeenCalledTimes(1);
+  expect(annotateMock.compositeScreenshot.mock.calls[0][1]).toHaveLength(1);
+  expect(payloads[0].screenshot).toBe(capture.screenshot);
+});
+
+it('offers draw controls on the screenshot with undo and clear', async () => {
+  await openForm();
   await click('Draw');
   expect(button('Done drawing')).toBeDefined();
   expect(button('Undo').disabled).toBe(true);
@@ -432,7 +516,7 @@ it('dictates editable draft text into the title only after an explicit start', a
     start() { this.started += 1; }
     stop() { this.onend?.(); }
   });
-  await click('Feedback');
+  await openForm();
   // Disclosure is visible before the mic can start.
   expect(document.body.textContent).toContain('browser speech service');
   const dictateButtons = () => [...document.querySelectorAll('button')].filter((b) => b.textContent === 'Dictate');
@@ -449,7 +533,7 @@ it('dictates editable draft text into the title only after an explicit start', a
 });
 
 it('omits dictation controls when the runtime lacks speech recognition', async () => {
-  await click('Feedback');
+  await openForm();
   expect([...document.querySelectorAll('button')].filter((b) => b.textContent === 'Dictate')).toHaveLength(0);
   expect(document.body.textContent).not.toContain('browser speech service');
 });
@@ -466,7 +550,7 @@ it('stops recognition before in-flight filing and ignores late transcripts', asy
     stop() { stop(); this.onend?.(); }
   }
   vi.stubGlobal('SpeechRecognition', FakeRecognition);
-  await click('Feedback'); await fill();
+  await openForm(); await fill();
   const dictate = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Dictate')!;
   await act(async () => dictate.click());
   let finish!: (value: Report) => void;
@@ -480,4 +564,32 @@ it('stops recognition before in-flight filing and ignores late transcripts', asy
   expect(document.querySelector('textarea')?.value).not.toContain('late text');
   expect(frozen.description).not.toContain('late text');
   await act(async () => finish(report));
+});
+
+it('clears viewport marks on resize and protects the active draft from boot reload', async () => {
+  const file = vi.spyOn(feedbackApi, 'file');
+  await click('Feedback');
+  expect(document.documentElement.dataset.feedbackActive).toBe('true');
+  const canvas = document.querySelector('.feedback-overlay-canvas')!;
+  const stroke = (type: string, clientX: number, clientY: number) => {
+    act(() => canvas.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX, clientY })));
+  };
+  stroke('pointerdown', 10, 10); stroke('pointerup', 60, 60);
+  expect(button('Undo').disabled).toBe(false);
+  await act(async () => { window.dispatchEvent(new Event('resize')); });
+  expect(button('Undo').disabled).toBe(true);
+  expect(document.body.textContent).toContain('View changed. Marks cleared');
+  await click('Cancel');
+  expect(document.querySelector('.feedback-overlay')).toBeNull();
+  expect(document.documentElement.dataset.feedbackActive).toBeUndefined();
+  expect(captureFeedback).not.toHaveBeenCalled();
+  expect(file).not.toHaveBeenCalled();
+});
+
+it('excludes capture chrome from fallback screenshots and cancels safely with Escape', async () => {
+  await click('Feedback');
+  expect(document.querySelector('.feedback-overlay')?.hasAttribute('data-feedback-private')).toBe(true);
+  await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+  expect(document.querySelector('.feedback-overlay')).toBeNull();
+  expect(captureFeedback).not.toHaveBeenCalled();
 });

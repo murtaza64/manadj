@@ -74,6 +74,27 @@ Application map and initial standing-area designation remain separate work.
   diagnostics snapshot as `trail`; both stay local until explicit dispatch,
   exactly like the rest of the bundle.
 
+## Overlay capture bar (v3, #518)
+
+The popup is no longer the entry point. Feedback opens a small floating
+bar over the live app (Editspace-surfaces style, top layer via a manual
+popover so it stays reachable above modal dialogs without inerting them):
+
+- Draw is active by default: freehand pen strokes land directly on the
+  real app, full screen. Toggling Draw off hands pointer events back to
+  the app so the reporter can navigate to the view they mean.
+- Point uses the same sanitized element picker from the bar; the picked
+  element shows as a chip on the bar.
+- Esc or Cancel discards the session without capturing anything.
+- Done hides the overlay, waits two frames, then captures screenshot,
+  diagnostics and trail, and only then opens the report form with the
+  annotated preview for review and filing. Strokes drawn between opening
+  the overlay and Done are baked against the pixels captured at Done, so
+  app changes mid-session can misalign ink; the form preview shows the
+  truth and strokes remain editable there.
+- Review, redaction, filing and dispatch semantics are unchanged: text
+  only to the tracker, evidence stays local until an explicit batch.
+
 ## Deferred
 
 - Automatic bundle retention/deletion; v1 keeps evidence until manually removed.
