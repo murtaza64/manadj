@@ -1,4 +1,5 @@
 import type { MidiAction } from './actions';
+import { shouldReloadForBootRecovery } from './bootRecovery';
 import { controllerAttached, controllerDetached } from './connectionStore';
 import { allOffMessages } from './feedback';
 import type { Mapping } from './mapping';
@@ -183,8 +184,11 @@ export function attachMidiController({
       if (disposed || access || failureHandled) return;
       failureHandled = true;
       const attemptsMade = attempt + 1;
-      if (attemptsMade >= reloadAfterAttempts && sessionStorage.getItem(reloadFlag) === null
-          && document.documentElement.dataset.feedbackActive !== 'true') {
+      if (shouldReloadForBootRecovery({
+        attemptsMade, reloadAfterAttempts,
+        alreadyReloaded: sessionStorage.getItem(reloadFlag) !== null,
+        feedbackActive: document.documentElement.dataset.feedbackActive === 'true',
+      })) {
         sessionStorage.setItem(reloadFlag, '1');
         console.warn(
           `MIDI access dead after ${attemptsMade} attempts (${reason}) — reloading once (a fresh renderer is the known-good recovery)`
