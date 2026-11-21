@@ -10,7 +10,7 @@ concurrency:
 jobs:
   device-compile:
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 22
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -29,6 +29,34 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/device-current" CODE_SIGNING_ALLOWED=NO ARCHS=arm64 SWIFT_STRICT_CONCURRENCY=complete build 2>&1 | tee device-current.log
+      - name: Current-runtime knob and fullscreen visual check
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEVICE=$(xcrun simctl list devices available --json | python3 -c 'import json,sys,re; groups=json.load(sys.stdin)["devices"]; phones=[d for r,ds in sorted(groups.items(),reverse=True) if "iOS" in r and tuple(map(int,re.findall(r"\d+",r))) >= (26,0) for d in ds if d.get("isAvailable") and d["name"].startswith("iPhone")]; assert phones,"No iOS26+ simulator: native glass not visually verified"; print(phones[0]["udid"])')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          mkdir -p ios/.current-ui
+          STOP="$PWD/ios/.current-ui/stop"
+          bash ios/scripts/record_ui_simulator.sh "$STOP" "$PWD/ios/.current-ui/knob-actual-runtime.mp4" > ios/.current-ui/record.log 2>&1 &
+          VIDEO=$!
+          trap 'touch "$STOP"; wait "$VIDEO" || true' EXIT
+          xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath "$RUNNER_TEMP/current-ui" -parallel-testing-enabled NO -only-testing:ManadjUITests/WorkspaceUITests/testKnobDetentFullscreenAndSquarePads -resultBundlePath ios/.current-ui/Knob.xcresult CODE_SIGNING_ALLOWED=NO test 2>&1 | tee ios/.current-ui/test.log
+      - name: Export current-runtime visual evidence
+        if: always()
+        shell: bash
+        run: |
+          if [ -d ios/.current-ui/Knob.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path ios/.current-ui/Knob.xcresult > ios/.current-ui/summary.json
+            xcrun xcresulttool export attachments --path ios/.current-ui/Knob.xcresult --output-path ios/.current-ui/attachments
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ios-current-knob-visuals
+          path: ios/.current-ui/
+          include-hidden-files: true
+          retention-days: 3
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
