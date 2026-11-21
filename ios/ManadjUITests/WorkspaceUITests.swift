@@ -42,7 +42,7 @@ final class WorkspaceUITests: XCTestCase {
             let pad = app.buttons["deck-\(deck)-hotcue-\(slot)"]
             XCTAssertTrue(pad.exists)
             XCTAssertEqual(pad.frame.width, pad.frame.height, accuracy: 1)
-            XCTAssertGreaterThanOrEqual(pad.frame.width, 38)
+            XCTAssertGreaterThanOrEqual(pad.frame.width, 44)
         } }
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(knob.waitForExistence(timeout: 10))

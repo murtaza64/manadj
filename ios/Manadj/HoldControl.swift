@@ -13,6 +13,7 @@ struct HoldControl: UIViewRepresentable {
     var bare = false
     var marked = false
     var compact = false
+    var visualInset: CGFloat = 0
     var down: () -> Void
     var up: () -> Void
     var canLatch: () -> Bool = { false }
@@ -47,7 +48,7 @@ struct HoldControl: UIViewRepresentable {
             view.setTitleColor(UIColor(color), for: .normal)
         }
         if let button = view as? HoldButton {
-            button.rounded = rounded; button.bare = bare; button.compact = compact; button.ink = UIColor(color); button.engaged = active; button.marked = marked
+            button.visualInset = visualInset; button.rounded = rounded; button.bare = bare; button.compact = compact; button.ink = UIColor(color); button.engaged = active; button.marked = marked
             button.refreshAppearance()
         }
         view.setNeedsLayout()
@@ -85,11 +86,14 @@ private final class HoldButton: UIButton {
     var slideProgress: CGFloat = 0
     private var originX: CGFloat = 0
     private let progressFill = CALayer()
+    private let insetSurface = CAShapeLayer()
+    var visualInset: CGFloat = 0
     private let latchBadge = UILabel()
     override init(frame: CGRect) {
         super.init(frame: frame)
         progressFill.backgroundColor = UIColor.clear.cgColor
-        layer.insertSublayer(progressFill, at: 0)
+        layer.insertSublayer(insetSurface, at: 0)
+        layer.insertSublayer(progressFill, above: insetSurface)
         latchBadge.text = "▶"; latchBadge.textAlignment = .center
         latchBadge.font = .systemFont(ofSize: 14, weight: .bold); latchBadge.alpha = 0
         latchBadge.isUserInteractionEnabled = false; addSubview(latchBadge)
@@ -125,12 +129,20 @@ private final class HoldButton: UIButton {
         else { UIView.animate(withDuration: 0.24, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) { self.backgroundColor = target } }
         layer.borderWidth = bare ? 0 : compact ? 1.5 : rounded ? 2 : marked || lit ? 1.5 : 1
         layer.borderColor = ink.withAlphaComponent(lit || rounded || marked || compact ? 1 : 0.45).cgColor
+        if visualInset > 0 {
+            insetSurface.fillColor = target.cgColor
+            insetSurface.strokeColor = layer.borderColor
+            insetSurface.lineWidth = layer.borderWidth
+            layer.borderWidth = 0; backgroundColor = .clear
+        } else { insetSurface.fillColor = UIColor.clear.cgColor; insetSurface.strokeColor = nil }
     }
     override func layoutSubviews() {
         super.layoutSubviews(); layer.cornerRadius = rounded ? bounds.height / 2 : 0
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        let width = bounds.width * abs(slideProgress)
-        progressFill.frame = CGRect(x: slideProgress < 0 ? bounds.width - width : 0, y: 0, width: width, height: bounds.height)
+        let face = bounds.insetBy(dx: visualInset, dy: visualInset)
+        insetSurface.path = UIBezierPath(rect: face).cgPath
+        let width = face.width * abs(slideProgress)
+        progressFill.frame = CGRect(x: slideProgress < 0 ? face.maxX - width : face.minX, y: face.minY, width: width, height: face.height)
         progressFill.backgroundColor = ink.withAlphaComponent(0.3).cgColor
         progressFill.cornerRadius = rounded ? bounds.height / 2 : 0
         CATransaction.commit()

@@ -126,6 +126,7 @@ struct WorkspaceView: View {
                     HStack(spacing: 3) { detailWave(0, vertical: true); detailWave(1, vertical: true) }.frame(maxHeight: .infinity)
                     mixer
                     browseKey.frame(height: 36)
+                    if !browsing && !settings { PerformanceBattery().frame(height: 14) }
                 }
                 VStack(spacing: 4) { HStack(spacing: 4) { deckInfo(1); feedbackButton }.frame(height: 36); minimap(1).frame(height: 30); deckControls(1, compact: true) }.frame(width: geometry.size.width * 0.28)
             }.padding(.horizontal, 8)
