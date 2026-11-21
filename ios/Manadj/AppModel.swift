@@ -138,7 +138,21 @@ struct DeckViewState {
         }
         // Wave views read the engine on their own display clock. Publish the
         // slower control snapshot only when visible values actually changed.
+        #if DEBUG
+        // Diagnostic only: isolate position-driven SwiftUI invalidation while
+        // native wave views still read live engine state on their display clock.
+        // All transport, error, loading and parameter changes keep publishing.
+        let isolatePosition = ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture")
+            && ProcessInfo.processInfo.arguments.contains("--probe-no-position-publication")
+        let controlsChanged = zip(decks, updated).contains { previous, next in
+            var candidate = next.engine
+            if isolatePosition { candidate.position = previous.engine.position }
+            return !Self.sameControlState(previous.engine, candidate)
+        }
+        if controlsChanged { decks = updated }
+        #else
         if zip(decks, updated).contains(where: { !Self.sameControlState($0.engine, $1.engine) }) { decks = updated }
+        #endif
         if recording && audio.recordingState != 1 {
             recording = false
             if audio.recordingState == 4 { error = "Recording stopped with error \(audio.recordingError). The partial file was not marked saved." }
