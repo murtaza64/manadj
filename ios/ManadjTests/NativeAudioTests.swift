@@ -7,6 +7,43 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    @MainActor func testSyncWakeScopeRestoresAfterSuccessFailureAndCancellation() async throws {
+        var idle = false
+        let scope = SyncWakeScope(read: { idle }, write: { idle = $0 })
+        await scope.duringTransfer { XCTAssertTrue(idle) }
+        XCTAssertFalse(idle)
+        enum Expected: Error { case failed }
+        do { try await scope.duringTransfer { XCTAssertTrue(idle); throw Expected.failed }; XCTFail() }
+        catch Expected.failed {}
+        XCTAssertFalse(idle)
+        let work = Task { @MainActor in
+            do { try await scope.duringTransfer { try await Task.sleep(for: .seconds(30)) } }
+            catch { XCTAssertTrue(Task.isCancelled) }
+        }
+        for _ in 0..<100 where !idle { await Task.yield() }
+        XCTAssertTrue(idle)
+        work.cancel(); await work.value
+        XCTAssertFalse(idle)
+        idle = true
+        await scope.duringTransfer { XCTAssertTrue(idle) }
+        XCTAssertTrue(idle, "Restore previous owner policy, not a guessed false")
+    }
+    @MainActor func testSyncWakeScopeForegroundAndNestedLifetimes() async {
+        var idle = false
+        let scope = SyncWakeScope(read: { idle }, write: { idle = $0 })
+        await scope.duringTransfer {
+            XCTAssertTrue(idle)
+            await scope.duringTransfer { XCTAssertTrue(idle) }
+            XCTAssertTrue(idle)
+            scope.setActive(false); XCTAssertFalse(idle)
+            scope.setActive(true); XCTAssertTrue(idle)
+        }
+        XCTAssertFalse(idle)
+        scope.setActive(false)
+        await scope.duringTransfer { XCTAssertFalse(idle) }
+        scope.setActive(true); XCTAssertFalse(idle, "No idle suppression after transfer finishes")
+    }
+
     @MainActor func testCueFlagGeometryKeepsEdgesVisibleAndMinimapsCompact() {
         let lane = CGRect(x: 0, y: 0, width: 300, height: 48)
         for vertical in [false, true] {

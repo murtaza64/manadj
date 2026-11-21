@@ -4,6 +4,7 @@ import CEngine
 
 @main struct ManadjApp: App {
     @StateObject private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
     var body: some Scene {
         WindowGroup {
             Group {
@@ -14,6 +15,8 @@ import CEngine
                 WorkspaceView()
                 #endif
             }.environmentObject(model)
+                .onAppear { model.syncWake.setActive(scenePhase == .active) }
+                .onChange(of: scenePhase) { _, phase in model.syncWake.setActive(phase == .active) }
                 .font(Ink.font()).foregroundStyle(Ink.text)
                 .tint(Ink.accent).preferredColorScheme(.dark)
         }

@@ -81,6 +81,26 @@ final class SyncIntegrationTests: XCTestCase, @unchecked Sendable {
         let reopenedIds = await reopened.downloadedIds()
         XCTAssertEqual(reopenedIds, [1])
     }
+    actor ProgressLog {
+        var items: [LibrarySyncProgress] = []
+        func record(_ p: LibrarySyncProgress) { items.append(p) }
+    }
+    func testAudioProgressCountsValidatedAndCachedFilesNotUnavailableOnes() async throws {
+        let fixture = try Fixture()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = try LibraryRepository(root: root)
+        let connection = try DesktopConnection(url: fixture.url, deviceToken: "fixture-not-a-real-token")
+        let first = ProgressLog()
+        _ = try await repository.sync(connection, allAudio: true) { await first.record($0) }
+        let events = await first.items
+        XCTAssertEqual(events.first?.phase, .library)
+        XCTAssertEqual(events.filter { $0.phase == .audio }, [.init(phase: .audio, completed: 0, total: 1), .init(phase: .audio, completed: 1, total: 1)])
+        let retry = ProgressLog()
+        _ = try await repository.sync(connection, allAudio: true) { await retry.record($0) }
+        let retryEvents = await retry.items
+        XCTAssertEqual(retryEvents.filter { $0.phase == .audio }, [.init(phase: .audio, completed: 1, total: 1)])
+    }
     func testRepositoryRejectsConcurrentSyncWithoutReplacingActiveWork() async throws {
         let fixture = try Fixture()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

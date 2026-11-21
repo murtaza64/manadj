@@ -19,6 +19,19 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
+    @MainActor func testSyncProgressShowsFileCountAndForegroundWarning() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--sync-progress-ui-fixture"]; app.launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
+        app.buttons["Settings"].tap()
+        let count = app.staticTexts["sync-audio-progress"]
+        XCTAssertTrue(count.waitForExistence(timeout: 10))
+        XCTAssertEqual(count.label, "Audio: 3 of 10 files ready")
+        XCTAssertTrue(app.staticTexts["Completed files, not bytes. Already cached files count as ready."].exists)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Synthetic full-audio file progress - not device transfer proof"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     @MainActor func testStandardWorkspaceSettingsAndPitch() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
