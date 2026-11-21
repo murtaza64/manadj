@@ -165,7 +165,18 @@ struct FeedbackReporter: ViewModifier {
                 if let capture {
                     FeedbackReviewView(capture: capture, targets: capturedTargets, onSubmit: { draft in
                         session.reviewing = false; session.sending = true; session.deliveryStatus = nil
-                        let result = await FeedbackSubmitter(queue: FeedbackQueue(directory: model.feedbackQueueRoot)).submit(draft, via: model.syncConnection)
+                        let result: FeedbackOutcome
+                        #if DEBUG
+                        if ProcessInfo.processInfo.arguments.contains("--feedback-receipt-ui-fixture") {
+                            // Deterministic receipt-state UI only. No network or filing.
+                            try? await Task.sleep(for: .seconds(2))
+                            result = .savedOnDesktop(status: "synthetic-ui-receipt", detail: "UI test only, no report sent")
+                        } else {
+                            result = await FeedbackSubmitter(queue: FeedbackQueue(directory: model.feedbackQueueRoot)).submit(draft, via: model.syncConnection)
+                        }
+                        #else
+                        result = await FeedbackSubmitter(queue: FeedbackQueue(directory: model.feedbackQueueRoot)).submit(draft, via: model.syncConnection)
+                        #endif
                         session.sending = false
                         switch result {
                         case .filed:

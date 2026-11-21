@@ -90,6 +90,27 @@ final class FeedbackUITests: XCTestCase {
         XCTAssertFalse(springboard.alerts.firstMatch.exists, "Typing and saving must not request microphone access")
         capture("Typed action report saved without recording voice", app: app)
     }
+    @MainActor func testReceiptStateAllowsFreshReportWithoutReopeningFeedback() {
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture", "--feedback-receipt-ui-fixture"]; app.launch()
+        app.buttons["feedback-open"].tap(); app.buttons["feedback-review-open"].tap()
+        let comment = field(app); XCTAssertTrue(comment.waitForExistence(timeout: 10))
+        comment.tap(); comment.typeText("First synthetic receipt report")
+        app.buttons["feedback-hide-keyboard"].tap(); app.buttons["feedback-submit"].tap()
+        XCTAssertTrue(app.otherElements["feedback-center-sending"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.otherElements["feedback-review"].exists)
+        XCTAssertFalse(app.sheets.firstMatch.exists)
+        let delivered = app.staticTexts["feedback-center-delivery"]
+        XCTAssertTrue(delivered.waitForExistence(timeout: 8)); XCTAssertTrue(delivered.label.contains("RECEIVED ON DESKTOP"))
+        XCTAssertTrue(app.otherElements["feedback-live-toolbar"].exists)
+        app.buttons["feedback-review-open"].tap()
+        XCTAssertTrue(comment.waitForExistence(timeout: 5))
+        XCTAssertFalse((comment.value as? String ?? "").contains("First synthetic"), "Receipt resets the comment for a new report")
+        XCTAssertFalse(app.buttons["feedback-submit"].isEnabled)
+        comment.tap(); comment.typeText("Second report without closing feedback")
+        app.buttons["feedback-hide-keyboard"].tap()
+        XCTAssertTrue(app.buttons["feedback-submit"].isEnabled)
+        capture("Synthetic receipt state permits fresh typed report without reopening", app: app)
+    }
     @MainActor func testBlankTitleCannotSubmit() {
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture", "--feedback-ui-fixture"]; app.launch()
         XCTAssertTrue(app.otherElements["feedback-review"].waitForExistence(timeout: 15))
