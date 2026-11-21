@@ -30,7 +30,7 @@ print(target)
 # Real generated PCM is bundled separately. Only track1 exists in UI fixture.
 audio = root / 'ios/Manadj/Resources/synthetic-A.wav'
 ui_rows = []
-for i in (1, 2):
+for i in range(1, 1076):
     strings = [m.sql_string('') for _ in range(21)]
     strings[17] = m.sql_string('USB generated pulse' if i == 1 else 'Missing USB audio')
     strings[19] = m.sql_string(f'tone{i}.wav')
