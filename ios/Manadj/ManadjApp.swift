@@ -121,7 +121,7 @@ struct WorkspaceView: View {
                             SettingsView()
                         }.background(Ink.base).transition(.move(edge: .bottom))
                     }
-                }.clipped()
+                }.modifier(WorkspaceViewportClip(enabled: browsing || settings))
             }.frame(height: availableHeight, alignment: .top).padding(.horizontal, 8).padding(.bottom, 24)
             .animation(.spring(response: 0.3, dampingFraction: 0.9), value: browsing)
             .onChange(of: browsing) { _, _ in browserDrag = 0 }
@@ -408,5 +408,14 @@ private struct CenterSelectionGlass: ViewModifier {
         #else
         content
         #endif
+    }
+}
+
+/// Drawer motion stays inside its viewport. Fixed-height deck controls may
+/// extend their drawing to their measured safe-area-contained target bounds.
+private struct WorkspaceViewportClip: ViewModifier {
+    var enabled: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled { content.clipped() } else { content }
     }
 }

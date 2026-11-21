@@ -146,6 +146,9 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertLessThanOrEqual(pair.frame.maxY, panel.frame.maxY + 1, "Whole Pair target must fit, not merely its center")
         XCTAssertEqual(app.buttons["A play pause"].frame.minY, beforeTransport.minY, accuracy: 2)
         print("PORTRAIT_GEOMETRY app=\(app.frame) window=\(app.windows.firstMatch.frame) panel=\(panel.frame) pair=\(pair.frame) pitch=\(app.buttons["A PITCH panel"].frame)")
+        // A second frame after a no-input runloop interval distinguishes a
+        // transient capture from persistent missing drawing on older runtimes.
+        Thread.sleep(forTimeInterval: 0.5)
         shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "Whole device portrait Sync"; shot.lifetime = .keepAlways; add(shot)
         shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Actual Sync tab reuses desktop pairing and library sync"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["center-tab-fx"].tap()
