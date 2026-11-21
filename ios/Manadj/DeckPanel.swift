@@ -112,8 +112,8 @@ struct DeckPanel: View {
             }
             HStack {
                 Text("FILTER").font(Ink.font(11)).frame(width: 40, alignment: .leading)
-                Slider(value: Binding(get: { Double(state.filter) }, set: { model.audio?.filter(index, position: $0) }), in: -1...1).tint(Ink.cue).accessibilityLabel("Filter")
-                Button("0") { model.audio?.filter(index, position: 0) }.frame(minWidth: 44, minHeight: 36).accessibilityLabel("Reset filter")
+                Slider(value: Binding(get: { Double(state.filter) }, set: { model.filter(index, position: $0) }), in: -1...1).tint(Ink.cue).accessibilityLabel("Filter")
+                Button("0") { model.filter(index, position: 0) }.frame(minWidth: 44, minHeight: 36).accessibilityLabel("Reset filter")
             }
             HStack {
                 Text("FADER").font(Ink.font(11)).frame(width: 40, alignment: .leading)

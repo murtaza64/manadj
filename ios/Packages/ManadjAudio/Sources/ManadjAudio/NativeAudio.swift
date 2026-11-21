@@ -104,11 +104,12 @@ private final class NotificationTokens: @unchecked Sendable {
     }
     deinit { handle.cancel() }
 
+    public var feedbackNarration = false
     public func start() throws {
         guard !requiresRebuild else { throw AudioFailure("Audio services reset. Close and reopen manaDJ before resuming.") }
         guard !running else { return }
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default, options: [])
+        if !feedbackNarration { try session.setCategory(.playback, mode: .default, options: []) }
         try session.setPreferredSampleRate(48_000)
         try session.setPreferredIOBufferDuration(0.005)
         try session.setActive(true)

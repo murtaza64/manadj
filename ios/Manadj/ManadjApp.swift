@@ -1,4 +1,6 @@
 import SwiftUI
+import AVFoundation
+import AVKit
 import UniformTypeIdentifiers
 import CEngine
 
@@ -26,6 +28,8 @@ import CEngine
 /// Android STANDARD structure, native SwiftUI/UIKit controls. Runtime parity remains under review.
 struct WorkspaceView: View {
     @EnvironmentObject var model: AppModel
+    @StateObject private var feedback = LiveFeedbackSession()
+    @State private var outputRoute = AVAudioSession.sharedInstance().currentRoute
     @State private var browsing = false
     @State private var feedbackRequested = false
     @State private var feedbackTargets: [FeedbackTarget] = []
@@ -65,8 +69,11 @@ struct WorkspaceView: View {
         .alert("manaDJ", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in outputRoute = AVAudioSession.sharedInstance().currentRoute }
+        .onChange(of: browsing) { _, value in model.noteFeedbackAction(value ? "browser-open" : "browser-close") }
+        .onChange(of: settings) { _, value in model.noteFeedbackAction(value ? "settings-open" : "settings-close") }
         .onPreferenceChange(FeedbackTargetPreference.self) { feedbackTargets = $0 }
-        .feedbackReporter(model: model, browsing: browsing, settings: settings, requested: $feedbackRequested, targets: feedbackTargets,
+        .feedbackReporter(model: model, session: feedback, browsing: browsing, settings: settings, requested: $feedbackRequested, targets: feedbackTargets,
                           autoPresent: ProcessInfo.processInfo.arguments.contains("--feedback-ui-fixture"))
     }
     private var portraitBody: some View {
@@ -74,7 +81,7 @@ struct WorkspaceView: View {
             let compact = geometry.size.height < 860
             let gap: CGFloat = compact ? 5 : 8
             VStack(spacing: gap) {
-                HStack(spacing: 10) { deckInfo(0); deckInfo(1); feedbackButton }.frame(height: browsing && keyboardOpen ? 36 : 44)
+                HStack(spacing: 10) { deckInfo(0); deckInfo(1) }.frame(height: browsing && keyboardOpen ? 36 : 44)
                 if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: compact ? 83 : 135) }
                 ZStack(alignment: .bottom) {
                     if !browsing && !settings { VStack(spacing: gap) {
@@ -86,6 +93,7 @@ struct WorkspaceView: View {
                     if browsing {
                         VStack(spacing: 0) {
                             if !keyboardOpen { Capsule().fill(Ink.muted.opacity(0.7)).frame(width: 40, height: 4).frame(height: 16) }
+                            if feedback.active { LiveFeedbackToolbar(session: feedback, model: model).frame(maxWidth: 300) }
                             library
                             HStack(spacing: 12) { transport(0, browser: true); transport(1, browser: true) }.frame(height: 44).padding(.horizontal, 6).background(Ink.panel)
                         }.background(Ink.base).transition(.move(edge: .bottom))
@@ -94,6 +102,7 @@ struct WorkspaceView: View {
                     if settings {
                         VStack(spacing: 0) {
                             HStack { Text("SETTINGS").font(Ink.font(14, bold: true)); Spacer(); Button("CLOSE") { settings = false }.buttonStyle(PerformanceKeyStyle()).frame(width: 75, height: 38) }
+                            if feedback.active { LiveFeedbackToolbar(session: feedback, model: model).frame(maxWidth: 300) }
                             SettingsView()
                         }.background(Ink.base).transition(.move(edge: .bottom))
                     }
@@ -106,7 +115,7 @@ struct WorkspaceView: View {
     private var feedbackButton: some View {
         Button { feedbackRequested = true } label: {
             Image(systemName: "bubble.left.and.text.bubble.right")
-                .font(.system(size: 16, weight: .medium)).frame(width: 36, height: 44)
+                .font(.system(size: 13, weight: .medium)).frame(maxWidth: .infinity, minHeight: 28)
         }.buttonStyle(.plain).foregroundStyle(Ink.accent)
             .accessibilityLabel("Feedback").accessibilityIdentifier("feedback-open")
             .feedbackTarget("Feedback button")
@@ -120,11 +129,11 @@ struct WorkspaceView: View {
                     mixer
                     browseKey.frame(height: 36)
                 }
-                VStack(spacing: 4) { HStack(spacing: 4) { deckInfo(1); feedbackButton }.frame(height: 36); minimap(1).frame(height: 30); deckControls(1, compact: true) }.frame(width: geometry.size.width * 0.28)
+                VStack(spacing: 4) { deckInfo(1).frame(height: 36); minimap(1).frame(height: 30); deckControls(1, compact: true) }.frame(width: geometry.size.width * 0.28)
             }.padding(.horizontal, 8)
             .overlay(alignment: .leading) {
-                if browsing { VStack { library; browseKey.frame(height: 36) }.frame(width: geometry.size.width * 0.6).background(Ink.base) }
-                if settings { VStack { Button("CLOSE SETTINGS") { settings = false }; SettingsView() }.frame(width: geometry.size.width * 0.6).background(Ink.base) }
+                if browsing { VStack { if feedback.active { LiveFeedbackToolbar(session: feedback, model: model).frame(maxWidth: 300) }; library; browseKey.frame(height: 36) }.frame(width: geometry.size.width * 0.6).background(Ink.base) }
+                if settings { VStack { Button("CLOSE SETTINGS") { settings = false }; if feedback.active { LiveFeedbackToolbar(session: feedback, model: model).frame(maxWidth: 300) }; SettingsView() }.frame(width: geometry.size.width * 0.6).background(Ink.base) }
             }
         }
     }
@@ -182,6 +191,7 @@ struct WorkspaceView: View {
             VStack(spacing: 4) {
                 HStack(spacing: 2) {
                     Button("QUANT") { model.quantize.toggle(); model.set(MDJQuantize, 0, model.quantize ? 1 : 0) }.buttonStyle(PerformanceKeyStyle(active: model.quantize)).feedbackTarget("Quantize")
+                    Button { feedback.contextual = feedback.contextual == "HEARD" ? "FX" : "HEARD" } label: { Image(systemName: "slider.horizontal.3").font(.system(size: 10)) }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 24).disabled(feedback.active).accessibilityLabel("Heard quantization settings")
                     Button("XF") { xf.toggle(); if !xf { model.crossfade = 0; model.set(MDJCrossfade, 0, 0) } }.buttonStyle(PerformanceKeyStyle(active: xf))
                 }.frame(height: 36)
                 HStack(spacing: 2) {
@@ -190,7 +200,14 @@ struct WorkspaceView: View {
                 }.frame(height: 36)
                 recordingBar.frame(height: 44)
                 Spacer(minLength: 0)
-                fxCard
+                if feedback.contextual == "FEEDBACK" { LiveFeedbackToolbar(session: feedback, model: model) }
+                else if feedback.contextual == "OUTPUT" { outputContext }
+                else if feedback.contextual == "HEARD" { heardContext }
+                else { fxCard }
+                HStack(spacing: 2) {
+                    feedbackButton
+                    Button { feedback.contextual = feedback.contextual == "OUTPUT" ? "FX" : "OUTPUT" } label: { Image(systemName: outputSymbol).frame(width: 30, height: 28) }.buttonStyle(.plain).foregroundStyle(Ink.accent).disabled(feedback.active).accessibilityLabel("Audio output: " + outputDescription)
+                }.frame(height: 28)
                 if xf { PerformanceFader(value: Binding(get: { (model.crossfade + 1) / 2 }, set: { model.crossfade = $0 * 2 - 1; model.set(MDJCrossfade, 0, model.crossfade) }), color: Ink.accent, vertical: false, label: "Crossfader").frame(height: 40).feedbackTarget("Crossfader") }
             }.padding(.horizontal, 3)
             channel(1).frame(width: 42)
@@ -204,7 +221,7 @@ struct WorkspaceView: View {
                 let eq = model.decks[index].engine.eq
                 PerformanceKnob(label: ["HI", "MID", "LOW"][i], color: Ink.bands[2 - i], value: Binding(get: { Double([eq.2, eq.1, eq.0][i]) }, set: { model.set(MDJEq, index, $0, slot: 2 - i) }), eqKillToggle: true).feedbackTarget("Deck \(Ink.deckName(index)) \(["HI", "MID", "LOW"][i]) EQ")
             }
-            PerformanceKnob(label: "FILTER", color: Ink.muted, value: Binding(get: { Double(model.decks[index].engine.filter) }, set: { model.audio?.filter(index, position: $0) }), range: -1...1, neutral: 0).feedbackTarget("Deck \(Ink.deckName(index)) filter")
+            PerformanceKnob(label: "FILTER", color: Ink.muted, value: Binding(get: { Double(model.decks[index].engine.filter) }, set: { model.filter(index, position: $0) }), range: -1...1, neutral: 0).feedbackTarget("Deck \(Ink.deckName(index)) filter")
         }
     }
     private func channel(_ index: Int) -> some View {
@@ -229,6 +246,32 @@ struct WorkspaceView: View {
                 .accessibilityLabel("Saved recordings")
         }
     }
+    private var outputDescription: String { outputRoute.outputs.map(\.portName).joined(separator: ", ") }
+    private var outputSymbol: String {
+        guard let output = outputRoute.outputs.first else { return "speaker.slash" }
+        switch output.portType {
+        case .builtInSpeaker: return "iphone.gen3.radiowaves.left.and.right"
+        case .headphones: return "headphones"
+        case .bluetoothA2DP, .bluetoothHFP, .bluetoothLE: return "antenna.radiowaves.left.and.right"
+        case .usbAudio, .lineOut, .HDMI: return "cable.connector"
+        default: return "speaker.wave.2"
+        }
+    }
+    private var outputContext: some View {
+        VStack(spacing: 4) {
+            HStack { Text("OUTPUT"); Spacer(); Button("×") { feedback.contextual = "FX" } }.font(Ink.font(11, bold: true))
+            Text(outputDescription.isEmpty ? "No output route" : outputDescription).font(Ink.font(10)).lineLimit(2)
+            NativeRoutePicker().frame(height: 28).accessibilityLabel("Choose system audio output")
+            Toggle("SPLIT MONO", isOn: $model.splitOutput).font(Ink.font(9)).onChange(of: model.splitOutput) { _, on in model.noteFeedbackAction("split-mono", value: on ? 1 : 0); model.audio?.splitOutput(on) }
+            Text("L master / R cue. DJ splitter needed.").font(Ink.font(8)).foregroundStyle(Ink.muted)
+        }.padding(5).background(Ink.panel).onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in outputRoute = AVAudioSession.sharedInstance().currentRoute }
+    }
+    private var heardContext: some View {
+        VStack(spacing: 5) {
+            HStack { Text("HEARD"); Spacer(); Button("×") { feedback.contextual = "FX" } }.font(Ink.font(11, bold: true))
+            Text("Heard-latency calibration isn't implemented on iOS yet. Quantize still uses the engine timeline.").font(Ink.font(10)).foregroundStyle(Ink.warning)
+        }.padding(5).background(Ink.panel)
+    }
     private var fxCard: some View {
         VStack(spacing: 2) {
             HStack(spacing: 2) {
@@ -242,7 +285,7 @@ struct WorkspaceView: View {
             }.frame(height: 40)
         }.padding(3).background(Ink.warning.opacity(0.05)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Ink.warning.opacity(0.4)))
     }
-    private func updateFX() { model.audio?.beatFX(effect: effect, target: fxTarget, on: fx, depth: fxDepth, beats: fxBeats[fxBeatIndex]) }
+    private func updateFX() { model.noteFeedbackAction("beat-fx", value: fxDepth, slot: effect); model.noteFeedbackAction("beat-fx-enabled", value: fx ? 1 : 0, slot: fxTarget); model.noteFeedbackAction("beat-fx-beats", value: fxBeats[fxBeatIndex]); model.audio?.beatFX(effect: effect, target: fxTarget, on: fx, depth: fxDepth, beats: fxBeats[fxBeatIndex]) }
     private func value(_ index: Int, _ op: MDJOp, _ current: Double) -> Binding<Double> { Binding(get: { current }, set: { model.set(op, index, $0) }) }
     private func transport(_ index: Int, browser: Bool = false) -> some View {
         let state = model.decks[index].engine
@@ -255,4 +298,9 @@ struct WorkspaceView: View {
     private func deckControls(_ index: Int, compact: Bool) -> some View {
         PerformanceDeckControls(index: index, pitch: Binding(get: { pitch == index }, set: { pitch = $0 ? index : nil }), compact: compact, onTransport: { AnyView(transport(index)) })
     }
+}
+
+private struct NativeRoutePicker: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView { let view = AVRoutePickerView(); view.tintColor = .white; return view }
+    func updateUIView(_ view: AVRoutePickerView, context: Context) {}
 }
