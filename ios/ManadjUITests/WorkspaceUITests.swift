@@ -19,6 +19,50 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
+    @MainActor func testKnobDetentFullscreenAndSquarePads() { verifyKnobWorkspace(reduced: false) }
+    @MainActor func testKnobReducedMotionOpaqueFallback() { verifyKnobWorkspace(reduced: true) }
+    @MainActor private func verifyKnobWorkspace(reduced: Bool) {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"] + (reduced ? ["--popup-accessibility-fixture"] : [])
+        app.launch()
+        waitForReadyTransport(app.buttons["A play pause"], app: app)
+        let knob = app.otherElements["knob-Deck A HI"]
+        XCTAssertTrue(knob.waitForExistence(timeout: 10))
+        let before = XCTAttachment(screenshot: app.screenshot()); before.name = (reduced ? "Reduced motion transparency and high contrast fixture: " : "") + "Fullscreen square pads and neutral EQ notch"; before.lifetime = .keepAlways; add(before)
+        let p = knob.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        // Real touch-hold is recorded by the simulator video. It must not jump.
+        p.press(forDuration: 2)
+        XCTAssertTrue((knob.value as? String ?? "").contains("neutral"))
+        p.press(forDuration: 0.1, thenDragTo: p.withOffset(CGVector(dx: 0, dy: -45)), withVelocity: .slow, thenHoldForDuration: 2)
+        XCTAssertFalse((knob.value as? String ?? "").contains("neutral"))
+        knob.doubleTap()
+        XCTAssertTrue((knob.value as? String ?? "").contains("KILL"))
+        knob.doubleTap()
+        XCTAssertTrue((knob.value as? String ?? "").contains("neutral"))
+        XCTAssertTrue(app.otherElements["performance-battery"].exists)
+        for deck in 0..<2 { for slot in 0..<8 {
+            let pad = app.buttons["deck-\(deck)-hotcue-\(slot)"]
+            XCTAssertTrue(pad.exists)
+            XCTAssertEqual(pad.frame.width, pad.frame.height, accuracy: 1)
+            XCTAssertGreaterThanOrEqual(pad.frame.width, 44)
+        } }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let settled = NSPredicate { _, _ in
+            let a = app.buttons["deck-0-info"].frame
+            let b = app.buttons["deck-1-info"].frame
+            let bounds = app.frame
+            return bounds.width > bounds.height && a.width > 0 && b.width > 0
+                && b.midX > a.maxX + 50 && a.maxY < bounds.height && b.maxY < bounds.height
+                && b.maxX <= bounds.maxX + 2
+        }
+        expectation(for: settled, evaluatedWith: app); waitForExpectations(timeout: 15)
+        XCTAssertTrue(knob.waitForExistence(timeout: 10))
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); landscape.name = "Landscape square hotcues and fullscreen safe edges"; landscape.lifetime = .keepAlways; add(landscape)
+        XCTAssertTrue(app.otherElements["performance-battery"].exists)
+        knob.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 2)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     @MainActor func testMetalPrototypeWorkspacePixelsAndFallbackStatus() {
         defer { captureFailure() }
         for metal in [false, true] {
@@ -141,10 +185,11 @@ final class WorkspaceUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "LOOP")).firstMatch.tap()
         let cue = app.buttons["A hotcue 1"]
         XCTAssertTrue(cue.exists); cue.press(forDuration: 0.4)
-        let eq = app.otherElements["HI control"].firstMatch
+        let eq = app.otherElements["knob-Deck A HI"].firstMatch
         XCTAssertTrue(eq.exists); eq.doubleTap()
-        expectation(for: NSPredicate(format: "value == %@", "0.00"), evaluatedWith: eq); waitForExpectations(timeout: 5)
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "KILL"), evaluatedWith: eq); waitForExpectations(timeout: 5)
         eq.doubleTap()
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "neutral"), evaluatedWith: eq); waitForExpectations(timeout: 5)
         let bend = app.buttons["Momentary pitch bend"].firstMatch
         XCTAssertTrue(bend.exists)
         bend.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)).press(forDuration: 0.3)

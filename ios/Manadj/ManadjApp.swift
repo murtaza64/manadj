@@ -26,6 +26,7 @@ import CEngine
 /// Android STANDARD structure, native SwiftUI/UIKit controls. Runtime parity remains under review.
 struct WorkspaceView: View {
     @EnvironmentObject var model: AppModel
+    @StateObject private var knobPopups = KnobPopups()
     @State private var browsing = false
     @State private var feedbackRequested = false
     @State private var feedbackTargets: [FeedbackTarget] = []
@@ -53,6 +54,11 @@ struct WorkspaceView: View {
                     if let notice { Text(notice).font(Ink.font(11)).padding(8).background(Ink.crust).padding(.top, 50).onTapGesture { self.notice = nil } }
                 }
         }
+        .statusBarHidden(!settings && !browsing)
+        .persistentSystemOverlays(!settings && !browsing ? .hidden : .automatic)
+        .modifier(KnobPopupLayer(popups: knobPopups))
+        .environmentObject(knobPopups)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in knobPopups.removeAll() }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardOpen = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardOpen = false }
         .fileImporter(isPresented: $files, allowedContentTypes: [.audio]) { result in
@@ -72,6 +78,10 @@ struct WorkspaceView: View {
     private var portraitBody: some View {
         GeometryReader { geometry in
             let compact = geometry.size.height < 860
+            // The SE cannot fit square pads and all transport controls at the
+            // regular-phone density. Fit one intact canvas, not a clipped stack.
+            let canvasHeight = geometry.size.height < 760 ? CGFloat(860) : geometry.size.height
+            let fit = min(CGFloat(1), geometry.size.height / canvasHeight)
             let gap: CGFloat = compact ? 5 : 8
             VStack(spacing: gap) {
                 HStack(spacing: 10) { deckInfo(0); deckInfo(1); feedbackButton }.frame(height: browsing && keyboardOpen ? 36 : 44)
@@ -80,7 +90,7 @@ struct WorkspaceView: View {
                     if !browsing && !settings { VStack(spacing: gap) {
                         mixer.frame(maxHeight: .infinity)
                         HStack(spacing: 6) { minimap(0); browseKey.frame(width: 84); minimap(1) }.frame(height: compact ? 36 : 44)
-                        HStack(alignment: .top, spacing: 14) { deckControls(0, compact: compact); deckControls(1, compact: compact) }
+                        HStack(alignment: .top, spacing: 6) { deckControls(0, compact: compact); deckControls(1, compact: compact) }
                     }
                     }
                     if browsing {
@@ -98,7 +108,11 @@ struct WorkspaceView: View {
                         }.background(Ink.base).transition(.move(edge: .bottom))
                     }
                 }.clipped()
+                if !browsing && !settings { PerformanceBattery().frame(height: 14) }
             }.padding(.horizontal, 8)
+            .frame(width: geometry.size.width, height: canvasHeight)
+            .scaleEffect(fit, anchor: .top)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
             .animation(.easeOut(duration: 0.24), value: browsing)
             .animation(.easeOut(duration: 0.24), value: settings)
         }
@@ -119,6 +133,7 @@ struct WorkspaceView: View {
                     HStack(spacing: 3) { detailWave(0, vertical: true); detailWave(1, vertical: true) }.frame(maxHeight: .infinity)
                     mixer
                     browseKey.frame(height: 36)
+                    if !browsing && !settings { PerformanceBattery().frame(height: 14) }
                 }
                 VStack(spacing: 4) { HStack(spacing: 4) { deckInfo(1); feedbackButton }.frame(height: 36); minimap(1).frame(height: 30); deckControls(1, compact: true) }.frame(width: geometry.size.width * 0.28)
             }.padding(.horizontal, 8)
@@ -199,12 +214,12 @@ struct WorkspaceView: View {
     }
     private func knobColumn(_ index: Int) -> some View {
         VStack(spacing: 0) {
-            PerformanceKnob(label: "TRIM", color: Ink.muted, value: value(index, MDJTrim, Double(model.decks[index].engine.trim))).feedbackTarget("Deck \(Ink.deckName(index)) trim")
+            PerformanceKnob(label: "TRIM", color: Ink.muted, value: value(index, MDJTrim, Double(model.decks[index].engine.trim)), controlName: "Deck \(Ink.deckName(index)) TRIM").feedbackTarget("Deck \(Ink.deckName(index)) trim")
             ForEach(0..<3) { i in
                 let eq = model.decks[index].engine.eq
-                PerformanceKnob(label: ["HI", "MID", "LOW"][i], color: Ink.bands[2 - i], value: Binding(get: { Double([eq.2, eq.1, eq.0][i]) }, set: { model.set(MDJEq, index, $0, slot: 2 - i) }), eqKillToggle: true).feedbackTarget("Deck \(Ink.deckName(index)) \(["HI", "MID", "LOW"][i]) EQ")
+                PerformanceKnob(label: ["HI", "MID", "LOW"][i], color: Ink.bands[2 - i], value: Binding(get: { Double([eq.2, eq.1, eq.0][i]) }, set: { model.set(MDJEq, index, $0, slot: 2 - i) }), eqKillToggle: true, controlName: "Deck \(Ink.deckName(index)) \(["HI", "MID", "LOW"][i])").feedbackTarget("Deck \(Ink.deckName(index)) \(["HI", "MID", "LOW"][i]) EQ")
             }
-            PerformanceKnob(label: "FILTER", color: Ink.muted, value: Binding(get: { Double(model.decks[index].engine.filter) }, set: { model.audio?.filter(index, position: $0) }), range: -1...1, neutral: 0).feedbackTarget("Deck \(Ink.deckName(index)) filter")
+            PerformanceKnob(label: "FILTER", color: Ink.muted, value: Binding(get: { Double(model.decks[index].engine.filter) }, set: { model.audio?.filter(index, position: $0) }), range: -1...1, neutral: 0, controlName: "Deck \(Ink.deckName(index)) FILTER").feedbackTarget("Deck \(Ink.deckName(index)) filter")
         }
     }
     private func channel(_ index: Int) -> some View {
