@@ -82,8 +82,10 @@ struct WorkspaceView: View {
             let compact = geometry.size.height < 860
             let gap: CGFloat = compact ? 3 : 8
             let infoHeight: CGFloat = compact ? 36 : 44
-            let deckHeight: CGFloat = compact ? 316 : 360
             let mixerFloor: CGFloat = 344
+            // Reserve the full mixer, overview and safe-area-contained transport
+            // before allocating flexible loop/jump spacing on shorter phones.
+            let deckHeight: CGFloat = compact ? min(316, max(284, geometry.size.height - infoHeight - 36 - gap * 5 - mixerFloor - 36)) : 360
             // Budget real row heights rather than letting the deck's minimum
             // overflow the viewport. Only waveform height yields on standard phones.
             let waveHeight: CGFloat = compact ? max(36, min(83, geometry.size.height - infoHeight - deckHeight - 36 - gap * 5 - mixerFloor)) : 135
@@ -225,7 +227,8 @@ HStack(spacing: 0) {
                             Image(systemName: tab == "FX" ? "sparkles" : tab == "FEEDBACK" ? "bubble.left.and.text.bubble.right" : tab == "AUDIO" ? outputSymbol : "desktopcomputer").font(.system(size: 14)).frame(maxWidth: .infinity, minHeight: 44)
                                 .background((feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")) ? Ink.accent.opacity(0.15) : .clear)
                                 .overlay(alignment: .bottom) { Rectangle().fill((feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")) ? Ink.accent : Ink.edge).frame(height: 2) }
-                        }.buttonStyle(.plain).accessibilityLabel(tab == "FEEDBACK" ? "Feedback" : tab.capitalized).accessibilityIdentifier(tab == "FEEDBACK" ? "feedback-open" : "center-tab-" + tab.lowercased())
+                        }.buttonStyle(.plain).frame(height: 44).contentShape(Rectangle())
+                            .accessibilityLabel(tab == "FEEDBACK" ? "Feedback" : tab.capitalized).accessibilityIdentifier(tab == "FEEDBACK" ? "feedback-open" : "center-tab-" + tab.lowercased())
                     }
                 }.foregroundStyle(Ink.accent)
     }
