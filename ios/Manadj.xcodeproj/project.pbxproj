@@ -1,720 +1,582 @@
 // !$*UTF8*$!
 {
-	"archiveVersion" = "1";
-	"classes" = {
+	archiveVersion = 1;
+	classes = {
 	};
-	"objectVersion" = "56";
-	"objects" = {
-		"B6CCF6DD2C669EE22189A0BE" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/AppModel.swift";
-			"sourceTree" = "<group>";
-		};
-		"0C5DDEB9FFDFEC8AEE8C87E1" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "B6CCF6DD2C669EE22189A0BE";
-		};
-		"408495BABA2882DD79B6083D" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/DeckPanel.swift";
-			"sourceTree" = "<group>";
-		};
-		"1597544FAC0E8262AF5B161F" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "408495BABA2882DD79B6083D";
-		};
-		"41595082BC68E17CED3490BA" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/FeedbackCapture.swift";
-			"sourceTree" = "<group>";
-		};
-		"964681B923424E0D86EA6981" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "41595082BC68E17CED3490BA";
-		};
-		"5BF733380053CF5E5748076D" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/FeedbackDrawing.swift";
-			"sourceTree" = "<group>";
-		};
-		"863BDC7987C2C4A2452F176B" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "5BF733380053CF5E5748076D";
-		};
-		"332FEA8B746FD7E7DAAFDC4A" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/FeedbackOutboxView.swift";
-			"sourceTree" = "<group>";
-		};
-		"CE5EE24556FE3346F2965DF4" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "332FEA8B746FD7E7DAAFDC4A";
-		};
-		"E55464A31BDA8C2F440BF3FD" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/FeedbackReporter.swift";
-			"sourceTree" = "<group>";
-		};
-		"4DBA9C765E5D441BA3DBF1C3" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "E55464A31BDA8C2F440BF3FD";
-		};
-		"53AEEC7E675DA40F70D11BE5" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/FeedbackReviewView.swift";
-			"sourceTree" = "<group>";
-		};
-		"6713B7E60383489821397303" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "53AEEC7E675DA40F70D11BE5";
-		};
-		"C0B9E42AE682E6F7055FC31F" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/FeedbackShake.swift";
-			"sourceTree" = "<group>";
-		};
-		"5BECCF1ADEC5BA5FA7A563C5" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "C0B9E42AE682E6F7055FC31F";
-		};
-		"70E77657F583E42EC6A45274" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/HoldControl.swift";
-			"sourceTree" = "<group>";
-		};
-		"E052604597102E80EE331EBA" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "70E77657F583E42EC6A45274";
-		};
-		"13549ABE64A39A39257DC333" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/LibraryBrowser.swift";
-			"sourceTree" = "<group>";
-		};
-		"40C48AB6B17CC06A65832468" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "13549ABE64A39A39257DC333";
-		};
-		"6F826538A1324194F0AC3FD6" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/LibraryUIFixture.swift";
-			"sourceTree" = "<group>";
-		};
-		"1BA049E8D4277A31E08F36B2" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "6F826538A1324194F0AC3FD6";
-		};
-		"DB35650A4ACE8F109AD3BDEB" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/LocalLiveView.swift";
-			"sourceTree" = "<group>";
-		};
-		"4415ECB8C8FC0A8A5D2E6104" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "DB35650A4ACE8F109AD3BDEB";
-		};
-		"E7D218D0E84EF24A370DF7DE" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/ManadjApp.swift";
-			"sourceTree" = "<group>";
-		};
-		"572F7BFA4453CEB2C79A0BE7" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "E7D218D0E84EF24A370DF7DE";
-		};
-		"FC2F07F0E421947BDC29C2E7" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/PairingKeychain.swift";
-			"sourceTree" = "<group>";
-		};
-		"204E18768B90B66EE770B10A" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "FC2F07F0E421947BDC29C2E7";
-		};
-		"29AB76729B8B5F565F57B879" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/PerformanceBend.swift";
-			"sourceTree" = "<group>";
-		};
-		"B6D81B424E1FC9A158F21932" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "29AB76729B8B5F565F57B879";
-		};
-		"1A97C8336E1B43A3AA05D7BE" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/PerformanceControls.swift";
-			"sourceTree" = "<group>";
-		};
-		"2559CAB0E88E35ED4ADA6C71" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "1A97C8336E1B43A3AA05D7BE";
-		};
-		"0E5BC8DB19D29813F6990DAB" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/PerformanceDeckControls.swift";
-			"sourceTree" = "<group>";
-		};
-		"90163E095ED8233E6DB77D95" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "0E5BC8DB19D29813F6990DAB";
-		};
-		"BDB63F35D1A32B0901A2A387" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/PerformanceWave.swift";
-			"sourceTree" = "<group>";
-		};
-		"630C393AA4A8DDEF1D0E26DD" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "BDB63F35D1A32B0901A2A387";
-		};
-		"59D811ED7AC44BC5FDE04098" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/SettingsView.swift";
-			"sourceTree" = "<group>";
-		};
-		"53F16D2FFFF2BE4336896599" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "59D811ED7AC44BC5FDE04098";
-		};
-		"5766C4DD11A6571197534A8F" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/Theme.swift";
-			"sourceTree" = "<group>";
-		};
-		"3194699105DDE2D630B979E4" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "5766C4DD11A6571197534A8F";
-		};
-		"E66BB25412CEAA23941DBAF8" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "Manadj/USBImportView.swift";
-			"sourceTree" = "<group>";
-		};
-		"DF7F9CCF7F29825C2DE9967D" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "E66BB25412CEAA23941DBAF8";
-		};
-		"C54B76856E24381FB1A092AC" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/UbuntuMono-Bold.ttf";
-			"sourceTree" = "<group>";
-		};
-		"C7B55D1AD82227E05BE9FBB4" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "C54B76856E24381FB1A092AC";
-		};
-		"E7209099DBD5FA1101E5C035" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/UbuntuMono-Regular.ttf";
-			"sourceTree" = "<group>";
-		};
-		"99406E688526737099B1C8A4" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "E7209099DBD5FA1101E5C035";
-		};
-		"3C629BA99D49C7D7E6A6CA7E" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/UBUNTU_FONT_LICENCE.txt";
-			"sourceTree" = "<group>";
-		};
-		"FAB94BF723D28022F2A336B2" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "3C629BA99D49C7D7E6A6CA7E";
-		};
-		"8AFDE70D7D181D745BF4705B" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "folder.assetcatalog";
-			"path" = "Manadj/Resources/Assets.xcassets";
-			"sourceTree" = "<group>";
-		};
-		"DF87F90EC56CF6AE586BBD78" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "8AFDE70D7D181D745BF4705B";
-		};
-		"4DBE2B621A7EFF1CFA76DFDF" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/synthetic-A-preview.mwf";
-			"sourceTree" = "<group>";
-		};
-		"5288891F7D36AB9D721A0A45" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "4DBE2B621A7EFF1CFA76DFDF";
-		};
-		"5430D72D3A091C4899AD7DE5" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/synthetic-A.mwf";
-			"sourceTree" = "<group>";
-		};
-		"2929FCF9DC3CE69779C54DC1" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "5430D72D3A091C4899AD7DE5";
-		};
-		"DC747BD3FD41AF2923F09EA5" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/synthetic-A.wav";
-			"sourceTree" = "<group>";
-		};
-		"0519515269F00AE9ECB27502" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "DC747BD3FD41AF2923F09EA5";
-		};
-		"7B16C465127864F034A2702C" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/synthetic-B-preview.mwf";
-			"sourceTree" = "<group>";
-		};
-		"A3C15990462639D68ECB0F8C" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "7B16C465127864F034A2702C";
-		};
-		"DF33A9E143A5BF598DC02DD3" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/synthetic-B.mwf";
-			"sourceTree" = "<group>";
-		};
-		"EF4B8F9D4B04ED530AF9EE21" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "DF33A9E143A5BF598DC02DD3";
-		};
-		"73EF1B9D455F92208B07943B" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/synthetic-B.wav";
-			"sourceTree" = "<group>";
-		};
-		"32CCD4B3F56F4F2F1B76E260" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "73EF1B9D455F92208B07943B";
-		};
-		"CDA4AED43C9B6A9ED4EEF40A" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/synthetic-codec.aiff";
-			"sourceTree" = "<group>";
-		};
-		"8DC7E67ACCB348B878E9570C" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "CDA4AED43C9B6A9ED4EEF40A";
-		};
-		"D15433147512D7AA9E47CCBC" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/synthetic-codec.flac";
-			"sourceTree" = "<group>";
-		};
-		"67C23562B16836F9CAD3FE37" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "D15433147512D7AA9E47CCBC";
-		};
-		"9F86E2C4A027B35C84DF186A" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/synthetic-codec.m4a";
-			"sourceTree" = "<group>";
-		};
-		"003929D39B0264A82284AD7C" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "9F86E2C4A027B35C84DF186A";
-		};
-		"AC2B9964FFEF408073A0A766" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/synthetic-codec.mp3";
-			"sourceTree" = "<group>";
-		};
-		"82AFD16F018FED5B9EFEE3EC" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "AC2B9964FFEF408073A0A766";
-		};
-		"5CE8F4B64A57BCF49F8AEB8C" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "file";
-			"path" = "Manadj/Resources/synthetic-usb-export.pdb";
-			"sourceTree" = "<group>";
-		};
-		"D905E1358CD208205C64D69E" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "5CE8F4B64A57BCF49F8AEB8C";
-		};
-		"9CEEC13202AFBF12EE3ABB99" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "text.plist.xml";
-			"path" = "Manadj/Info.plist";
-			"sourceTree" = "<group>";
-		};
-		"84D517A464E7265BB45C44E0" = {
-			"isa" = "XCLocalSwiftPackageReference";
-			"relativePath" = "Packages/ManadjCore";
-		};
-		"BCF65F7A5452A69B10CDFFEE" = {
-			"isa" = "XCSwiftPackageProductDependency";
-			"package" = "84D517A464E7265BB45C44E0";
-			"productName" = "ManadjCore";
-		};
-		"7B3E21A8417551A0BF467FC5" = {
-			"isa" = "XCLocalSwiftPackageReference";
-			"relativePath" = "Packages/ManadjAudio";
-		};
-		"0C02F23AB90E242F016B8748" = {
-			"isa" = "XCSwiftPackageProductDependency";
-			"package" = "7B3E21A8417551A0BF467FC5";
-			"productName" = "ManadjAudio";
-		};
-		"A264946227B303A6BDC4DAA1" = {
-			"isa" = "PBXBuildFile";
-			"productRef" = "BCF65F7A5452A69B10CDFFEE";
-		};
-		"7ABB84476D66744DFE1FDC73" = {
-			"isa" = "PBXBuildFile";
-			"productRef" = "0C02F23AB90E242F016B8748";
-		};
-		"A172CEDCAE47474B615C54D5" = {
-			"isa" = "PBXFileReference";
-			"explicitFileType" = "wrapper.application";
-			"includeInIndex" = "0";
-			"path" = "manaDJ.app";
-			"sourceTree" = "BUILT_PRODUCTS_DIR";
-		};
-		"87D6626BE2AC0AB5E63AD0B9" = {
-			"isa" = "XCBuildConfiguration";
-			"buildSettings" = {
-				"PRODUCT_BUNDLE_IDENTIFIER" = "dev.manadj.ios";
-				"PRODUCT_NAME" = "manaDJ";
-				"PRODUCT_MODULE_NAME" = "Manadj";
-				"INFOPLIST_FILE" = "Manadj/Info.plist";
-				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
-				"TARGETED_DEVICE_FAMILY" = "1,2";
-				"CODE_SIGN_STYLE" = "Automatic";
-				"CURRENT_PROJECT_VERSION" = "1";
-				"MARKETING_VERSION" = "0.1.0";
-				"LD_RUNPATH_SEARCH_PATHS" = ( "$(inherited)", "@executable_path/Frameworks" );
-			};
-			"name" = "Debug";
-		};
-		"3A9669118334ABE63A2B8662" = {
-			"isa" = "XCBuildConfiguration";
-			"buildSettings" = {
-				"PRODUCT_BUNDLE_IDENTIFIER" = "dev.manadj.ios";
-				"PRODUCT_NAME" = "manaDJ";
-				"PRODUCT_MODULE_NAME" = "Manadj";
-				"INFOPLIST_FILE" = "Manadj/Info.plist";
-				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
-				"TARGETED_DEVICE_FAMILY" = "1,2";
-				"CODE_SIGN_STYLE" = "Automatic";
-				"CURRENT_PROJECT_VERSION" = "1";
-				"MARKETING_VERSION" = "0.1.0";
-				"LD_RUNPATH_SEARCH_PATHS" = ( "$(inherited)", "@executable_path/Frameworks" );
-			};
-			"name" = "Release";
-		};
-		"F001F45CA9096206067D619A" = {
-			"isa" = "XCConfigurationList";
-			"buildConfigurations" = ( "87D6626BE2AC0AB5E63AD0B9", "3A9669118334ABE63A2B8662" );
-			"defaultConfigurationIsVisible" = "0";
-			"defaultConfigurationName" = "Release";
-		};
-		"76E512711C5F577B8E6FBFD0" = {
-			"isa" = "PBXSourcesBuildPhase";
-			"buildActionMask" = "2147483647";
-			"files" = ( "0C5DDEB9FFDFEC8AEE8C87E1", "1597544FAC0E8262AF5B161F", "964681B923424E0D86EA6981", "863BDC7987C2C4A2452F176B", "CE5EE24556FE3346F2965DF4", "4DBA9C765E5D441BA3DBF1C3", "6713B7E60383489821397303", "5BECCF1ADEC5BA5FA7A563C5", "E052604597102E80EE331EBA", "40C48AB6B17CC06A65832468", "1BA049E8D4277A31E08F36B2", "4415ECB8C8FC0A8A5D2E6104", "572F7BFA4453CEB2C79A0BE7", "204E18768B90B66EE770B10A", "B6D81B424E1FC9A158F21932", "2559CAB0E88E35ED4ADA6C71", "90163E095ED8233E6DB77D95", "630C393AA4A8DDEF1D0E26DD", "53F16D2FFFF2BE4336896599", "3194699105DDE2D630B979E4", "DF7F9CCF7F29825C2DE9967D" );
-			"runOnlyForDeploymentPostprocessing" = "0";
-		};
-		"49437234D5065FDA996CF015" = {
-			"isa" = "PBXFrameworksBuildPhase";
-			"buildActionMask" = "2147483647";
-			"files" = ( "A264946227B303A6BDC4DAA1", "7ABB84476D66744DFE1FDC73" );
-			"runOnlyForDeploymentPostprocessing" = "0";
-		};
-		"1DFD5F368D483BDC3458D4EB" = {
-			"isa" = "PBXResourcesBuildPhase";
-			"buildActionMask" = "2147483647";
-			"files" = ( "C7B55D1AD82227E05BE9FBB4", "99406E688526737099B1C8A4", "FAB94BF723D28022F2A336B2", "DF87F90EC56CF6AE586BBD78", "5288891F7D36AB9D721A0A45", "2929FCF9DC3CE69779C54DC1", "0519515269F00AE9ECB27502", "A3C15990462639D68ECB0F8C", "EF4B8F9D4B04ED530AF9EE21", "32CCD4B3F56F4F2F1B76E260", "8DC7E67ACCB348B878E9570C", "67C23562B16836F9CAD3FE37", "003929D39B0264A82284AD7C", "82AFD16F018FED5B9EFEE3EC", "D905E1358CD208205C64D69E" );
-			"runOnlyForDeploymentPostprocessing" = "0";
-		};
-		"4EE3BA8A9481E98E099A273B" = {
-			"isa" = "PBXNativeTarget";
-			"buildConfigurationList" = "F001F45CA9096206067D619A";
-			"buildPhases" = ( "76E512711C5F577B8E6FBFD0", "49437234D5065FDA996CF015", "1DFD5F368D483BDC3458D4EB" );
-			"buildRules" = (  );
-			"dependencies" = (  );
-			"name" = "Manadj";
-			"packageProductDependencies" = ( "BCF65F7A5452A69B10CDFFEE", "0C02F23AB90E242F016B8748" );
-			"productName" = "manaDJ";
-			"productReference" = "A172CEDCAE47474B615C54D5";
-			"productType" = "com.apple.product-type.application";
-		};
-		"B265896C2A006DB1979E7355" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "ManadjTests/NativeAudioTests.swift";
-			"sourceTree" = "<group>";
-		};
-		"0F430B5761A1E98D19E6AD77" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "B265896C2A006DB1979E7355";
-		};
-		"ED907F635E08302FFC9F8174" = {
-			"isa" = "PBXFileReference";
-			"explicitFileType" = "wrapper.cfbundle";
-			"includeInIndex" = "0";
-			"path" = "ManadjTests.xctest";
-			"sourceTree" = "BUILT_PRODUCTS_DIR";
-		};
-		"B040F463C9350683BB86699E" = {
-			"isa" = "PBXTargetDependency";
-			"target" = "4EE3BA8A9481E98E099A273B";
-		};
-		"91B37CD184D6014845507A4A" = {
-			"isa" = "PBXBuildFile";
-			"productRef" = "BCF65F7A5452A69B10CDFFEE";
-		};
-		"AB0047DD9B33F239D8FAC5D9" = {
-			"isa" = "PBXBuildFile";
-			"productRef" = "0C02F23AB90E242F016B8748";
-		};
-		"F4A58CAC07A0001B5B1F326B" = {
-			"isa" = "XCBuildConfiguration";
-			"buildSettings" = {
-				"PRODUCT_BUNDLE_IDENTIFIER" = "dev.manadj.ios.ManadjTests";
-				"PRODUCT_NAME" = "$(TARGET_NAME)";
-				"GENERATE_INFOPLIST_FILE" = "YES";
-				"CODE_SIGN_STYLE" = "Automatic";
-				"TARGETED_DEVICE_FAMILY" = "1,2";
-				"TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/manaDJ.app/manaDJ";
-				"BUNDLE_LOADER" = "$(TEST_HOST)";
-			};
-			"name" = "Debug";
-		};
-		"FE52E47FA7B370768480D1FF" = {
-			"isa" = "XCBuildConfiguration";
-			"buildSettings" = {
-				"PRODUCT_BUNDLE_IDENTIFIER" = "dev.manadj.ios.ManadjTests";
-				"PRODUCT_NAME" = "$(TARGET_NAME)";
-				"GENERATE_INFOPLIST_FILE" = "YES";
-				"CODE_SIGN_STYLE" = "Automatic";
-				"TARGETED_DEVICE_FAMILY" = "1,2";
-				"TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/manaDJ.app/manaDJ";
-				"BUNDLE_LOADER" = "$(TEST_HOST)";
-			};
-			"name" = "Release";
-		};
-		"9C9038991B029CCE8CB79642" = {
-			"isa" = "XCConfigurationList";
-			"buildConfigurations" = ( "F4A58CAC07A0001B5B1F326B", "FE52E47FA7B370768480D1FF" );
-			"defaultConfigurationIsVisible" = "0";
-			"defaultConfigurationName" = "Release";
-		};
-		"7686E60333147F5C87EA6C01" = {
-			"isa" = "PBXSourcesBuildPhase";
-			"buildActionMask" = "2147483647";
-			"files" = ( "0F430B5761A1E98D19E6AD77" );
-			"runOnlyForDeploymentPostprocessing" = "0";
-		};
-		"BD420F766E84BAE56C1ED417" = {
-			"isa" = "PBXFrameworksBuildPhase";
-			"buildActionMask" = "2147483647";
-			"files" = ( "91B37CD184D6014845507A4A", "AB0047DD9B33F239D8FAC5D9" );
-			"runOnlyForDeploymentPostprocessing" = "0";
-		};
-		"249C519AAD39455EEE280362" = {
-			"isa" = "PBXNativeTarget";
-			"buildConfigurationList" = "9C9038991B029CCE8CB79642";
-			"buildPhases" = ( "7686E60333147F5C87EA6C01", "BD420F766E84BAE56C1ED417" );
-			"buildRules" = (  );
-			"dependencies" = ( "B040F463C9350683BB86699E" );
-			"name" = "ManadjTests";
-			"productName" = "ManadjTests";
-			"productReference" = "ED907F635E08302FFC9F8174";
-			"productType" = "com.apple.product-type.bundle.unit-test";
-			"packageProductDependencies" = ( "BCF65F7A5452A69B10CDFFEE", "0C02F23AB90E242F016B8748" );
-		};
-		"248D5FDC408CBB847F89E1A6" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "ManadjUITests/FeedbackUITests.swift";
-			"sourceTree" = "<group>";
-		};
-		"3577EF46E28FE973420D49C7" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "248D5FDC408CBB847F89E1A6";
-		};
-		"02D81B447E0043DAA97841EB" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "ManadjUITests/WorkspaceUITests.swift";
-			"sourceTree" = "<group>";
-		};
-		"C645C0ABD1786C9038A993B9" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "02D81B447E0043DAA97841EB";
-		};
-		"68DF4D83803AAE53D4B02E99" = {
-			"isa" = "PBXFileReference";
-			"explicitFileType" = "wrapper.cfbundle";
-			"includeInIndex" = "0";
-			"path" = "ManadjUITests.xctest";
-			"sourceTree" = "BUILT_PRODUCTS_DIR";
-		};
-		"199DEAEB1ED92E15CBCB600F" = {
-			"isa" = "PBXTargetDependency";
-			"target" = "4EE3BA8A9481E98E099A273B";
-		};
-		"5EB1176EB2B21ED2D9EA971C" = {
-			"isa" = "XCBuildConfiguration";
-			"buildSettings" = {
-				"PRODUCT_BUNDLE_IDENTIFIER" = "dev.manadj.ios.ManadjUITests";
-				"PRODUCT_NAME" = "$(TARGET_NAME)";
-				"GENERATE_INFOPLIST_FILE" = "YES";
-				"CODE_SIGN_STYLE" = "Automatic";
-				"TARGETED_DEVICE_FAMILY" = "1,2";
-				"TEST_TARGET_NAME" = "Manadj";
-			};
-			"name" = "Debug";
-		};
-		"9B23D0444AB96D3E16934C7F" = {
-			"isa" = "XCBuildConfiguration";
-			"buildSettings" = {
-				"PRODUCT_BUNDLE_IDENTIFIER" = "dev.manadj.ios.ManadjUITests";
-				"PRODUCT_NAME" = "$(TARGET_NAME)";
-				"GENERATE_INFOPLIST_FILE" = "YES";
-				"CODE_SIGN_STYLE" = "Automatic";
-				"TARGETED_DEVICE_FAMILY" = "1,2";
-				"TEST_TARGET_NAME" = "Manadj";
-			};
-			"name" = "Release";
-		};
-		"26C27909EF990E367C0B1CC2" = {
-			"isa" = "XCConfigurationList";
-			"buildConfigurations" = ( "5EB1176EB2B21ED2D9EA971C", "9B23D0444AB96D3E16934C7F" );
-			"defaultConfigurationIsVisible" = "0";
-			"defaultConfigurationName" = "Release";
-		};
-		"03A475A813C5FB1A6A51CEB0" = {
-			"isa" = "PBXSourcesBuildPhase";
-			"buildActionMask" = "2147483647";
-			"files" = ( "3577EF46E28FE973420D49C7", "C645C0ABD1786C9038A993B9" );
-			"runOnlyForDeploymentPostprocessing" = "0";
-		};
-		"C321653040EAD1F2CB494385" = {
-			"isa" = "PBXFrameworksBuildPhase";
-			"buildActionMask" = "2147483647";
-			"files" = (  );
-			"runOnlyForDeploymentPostprocessing" = "0";
-		};
-		"E31708A180CD66FCD7DA95F2" = {
-			"isa" = "PBXNativeTarget";
-			"buildConfigurationList" = "26C27909EF990E367C0B1CC2";
-			"buildPhases" = ( "03A475A813C5FB1A6A51CEB0", "C321653040EAD1F2CB494385" );
-			"buildRules" = (  );
-			"dependencies" = ( "199DEAEB1ED92E15CBCB600F" );
-			"name" = "ManadjUITests";
-			"productName" = "ManadjUITests";
-			"productReference" = "68DF4D83803AAE53D4B02E99";
-			"productType" = "com.apple.product-type.bundle.ui-testing";
-			"packageProductDependencies" = (  );
-		};
-		"0A3E27B8CA818264D75C8D81" = {
-			"isa" = "PBXGroup";
-			"children" = ( "A172CEDCAE47474B615C54D5", "ED907F635E08302FFC9F8174", "68DF4D83803AAE53D4B02E99" );
-			"name" = "Products";
-			"sourceTree" = "<group>";
-		};
-		"0D6E4079E36703EBD37C0072" = {
-			"isa" = "PBXGroup";
-			"children" = ( "B6CCF6DD2C669EE22189A0BE", "408495BABA2882DD79B6083D", "41595082BC68E17CED3490BA", "5BF733380053CF5E5748076D", "332FEA8B746FD7E7DAAFDC4A", "E55464A31BDA8C2F440BF3FD", "53AEEC7E675DA40F70D11BE5", "C0B9E42AE682E6F7055FC31F", "70E77657F583E42EC6A45274", "13549ABE64A39A39257DC333", "6F826538A1324194F0AC3FD6", "DB35650A4ACE8F109AD3BDEB", "E7D218D0E84EF24A370DF7DE", "FC2F07F0E421947BDC29C2E7", "29AB76729B8B5F565F57B879", "1A97C8336E1B43A3AA05D7BE", "0E5BC8DB19D29813F6990DAB", "BDB63F35D1A32B0901A2A387", "59D811ED7AC44BC5FDE04098", "5766C4DD11A6571197534A8F", "E66BB25412CEAA23941DBAF8", "C54B76856E24381FB1A092AC", "E7209099DBD5FA1101E5C035", "3C629BA99D49C7D7E6A6CA7E", "8AFDE70D7D181D745BF4705B", "4DBE2B621A7EFF1CFA76DFDF", "5430D72D3A091C4899AD7DE5", "DC747BD3FD41AF2923F09EA5", "7B16C465127864F034A2702C", "DF33A9E143A5BF598DC02DD3", "73EF1B9D455F92208B07943B", "CDA4AED43C9B6A9ED4EEF40A", "D15433147512D7AA9E47CCBC", "9F86E2C4A027B35C84DF186A", "AC2B9964FFEF408073A0A766", "5CE8F4B64A57BCF49F8AEB8C", "9CEEC13202AFBF12EE3ABB99", "B265896C2A006DB1979E7355", "248D5FDC408CBB847F89E1A6", "02D81B447E0043DAA97841EB", "0A3E27B8CA818264D75C8D81" );
-			"sourceTree" = "<group>";
-		};
-		"3D5D06619AD2FD8BA0F34D57" = {
-			"isa" = "XCBuildConfiguration";
-			"buildSettings" = {
-				"CLANG_CXX_LANGUAGE_STANDARD" = "c++17";
-				"CLANG_ENABLE_MODULES" = "YES";
-				"IPHONEOS_DEPLOYMENT_TARGET" = "17.0";
-				"SDKROOT" = "iphoneos";
-				"SWIFT_VERSION" = "6.0";
-				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
-				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
-				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
-				"DEBUG_INFORMATION_FORMAT" = "dwarf";
-				"ENABLE_TESTABILITY" = "YES";
-				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG $(inherited)";
-			};
-			"name" = "Debug";
-		};
-		"61EE91C00F7653342CB155AF" = {
-			"isa" = "XCBuildConfiguration";
-			"buildSettings" = {
-				"CLANG_CXX_LANGUAGE_STANDARD" = "c++17";
-				"CLANG_ENABLE_MODULES" = "YES";
-				"IPHONEOS_DEPLOYMENT_TARGET" = "17.0";
-				"SDKROOT" = "iphoneos";
-				"SWIFT_VERSION" = "6.0";
-				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
-				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
-				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
-				"DEBUG_INFORMATION_FORMAT" = "dwarf-with-dsym";
-				"ENABLE_TESTABILITY" = "NO";
-			};
-			"name" = "Release";
-		};
-		"325A8360FA4E996EACF70E53" = {
-			"isa" = "XCConfigurationList";
-			"buildConfigurations" = ( "3D5D06619AD2FD8BA0F34D57", "61EE91C00F7653342CB155AF" );
-			"defaultConfigurationIsVisible" = "0";
-			"defaultConfigurationName" = "Release";
-		};
-		"244210E48437B6556980A702" = {
-			"isa" = "PBXProject";
-			"attributes" = {
-				"BuildIndependentTargetsInParallel" = "YES";
-				"LastUpgradeCheck" = "1600";
-				"TargetAttributes" = {
-					"4EE3BA8A9481E98E099A273B" = {
-						"CreatedOnToolsVersion" = "16.0";
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		003929D39B0264A82284AD7C /* Manadj/Resources/synthetic-codec.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 9F86E2C4A027B35C84DF186A /* Manadj/Resources/synthetic-codec.m4a */; };
+		0519515269F00AE9ECB27502 /* Manadj/Resources/synthetic-A.wav in Resources */ = {isa = PBXBuildFile; fileRef = DC747BD3FD41AF2923F09EA5 /* Manadj/Resources/synthetic-A.wav */; };
+		0C5DDEB9FFDFEC8AEE8C87E1 /* Manadj/AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6CCF6DD2C669EE22189A0BE /* Manadj/AppModel.swift */; };
+		0F430B5761A1E98D19E6AD77 /* ManadjTests/NativeAudioTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B265896C2A006DB1979E7355 /* ManadjTests/NativeAudioTests.swift */; };
+		1597544FAC0E8262AF5B161F /* Manadj/DeckPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 408495BABA2882DD79B6083D /* Manadj/DeckPanel.swift */; };
+		1BA049E8D4277A31E08F36B2 /* Manadj/LibraryUIFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F826538A1324194F0AC3FD6 /* Manadj/LibraryUIFixture.swift */; };
+		204E18768B90B66EE770B10A /* Manadj/PairingKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC2F07F0E421947BDC29C2E7 /* Manadj/PairingKeychain.swift */; };
+		2559CAB0E88E35ED4ADA6C71 /* Manadj/PerformanceControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A97C8336E1B43A3AA05D7BE /* Manadj/PerformanceControls.swift */; };
+		2929FCF9DC3CE69779C54DC1 /* Manadj/Resources/synthetic-A.mwf in Resources */ = {isa = PBXBuildFile; fileRef = 5430D72D3A091C4899AD7DE5 /* Manadj/Resources/synthetic-A.mwf */; };
+		3194699105DDE2D630B979E4 /* Manadj/Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5766C4DD11A6571197534A8F /* Manadj/Theme.swift */; };
+		32CCD4B3F56F4F2F1B76E260 /* Manadj/Resources/synthetic-B.wav in Resources */ = {isa = PBXBuildFile; fileRef = 73EF1B9D455F92208B07943B /* Manadj/Resources/synthetic-B.wav */; };
+		3577EF46E28FE973420D49C7 /* ManadjUITests/FeedbackUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 248D5FDC408CBB847F89E1A6 /* ManadjUITests/FeedbackUITests.swift */; };
+		40C48AB6B17CC06A65832468 /* Manadj/LibraryBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13549ABE64A39A39257DC333 /* Manadj/LibraryBrowser.swift */; };
+		4415ECB8C8FC0A8A5D2E6104 /* Manadj/LocalLiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB35650A4ACE8F109AD3BDEB /* Manadj/LocalLiveView.swift */; };
+		4DBA9C765E5D441BA3DBF1C3 /* Manadj/FeedbackReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E55464A31BDA8C2F440BF3FD /* Manadj/FeedbackReporter.swift */; };
+		5288891F7D36AB9D721A0A45 /* Manadj/Resources/synthetic-A-preview.mwf in Resources */ = {isa = PBXBuildFile; fileRef = 4DBE2B621A7EFF1CFA76DFDF /* Manadj/Resources/synthetic-A-preview.mwf */; };
+		53F16D2FFFF2BE4336896599 /* Manadj/SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59D811ED7AC44BC5FDE04098 /* Manadj/SettingsView.swift */; };
+		572F7BFA4453CEB2C79A0BE7 /* Manadj/ManadjApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D218D0E84EF24A370DF7DE /* Manadj/ManadjApp.swift */; };
+		5BECCF1ADEC5BA5FA7A563C5 /* Manadj/FeedbackShake.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B9E42AE682E6F7055FC31F /* Manadj/FeedbackShake.swift */; };
+		630C393AA4A8DDEF1D0E26DD /* Manadj/PerformanceWave.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDB63F35D1A32B0901A2A387 /* Manadj/PerformanceWave.swift */; };
+		6713B7E60383489821397303 /* Manadj/FeedbackReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53AEEC7E675DA40F70D11BE5 /* Manadj/FeedbackReviewView.swift */; };
+		67C23562B16836F9CAD3FE37 /* Manadj/Resources/synthetic-codec.flac in Resources */ = {isa = PBXBuildFile; fileRef = D15433147512D7AA9E47CCBC /* Manadj/Resources/synthetic-codec.flac */; };
+		7ABB84476D66744DFE1FDC73 /* ManadjAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 0C02F23AB90E242F016B8748 /* ManadjAudio */; };
+		82AFD16F018FED5B9EFEE3EC /* Manadj/Resources/synthetic-codec.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = AC2B9964FFEF408073A0A766 /* Manadj/Resources/synthetic-codec.mp3 */; };
+		863BDC7987C2C4A2452F176B /* Manadj/FeedbackDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BF733380053CF5E5748076D /* Manadj/FeedbackDrawing.swift */; };
+		8DC7E67ACCB348B878E9570C /* Manadj/Resources/synthetic-codec.aiff in Resources */ = {isa = PBXBuildFile; fileRef = CDA4AED43C9B6A9ED4EEF40A /* Manadj/Resources/synthetic-codec.aiff */; };
+		90163E095ED8233E6DB77D95 /* Manadj/PerformanceDeckControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E5BC8DB19D29813F6990DAB /* Manadj/PerformanceDeckControls.swift */; };
+		91B37CD184D6014845507A4A /* ManadjCore in Frameworks */ = {isa = PBXBuildFile; productRef = BCF65F7A5452A69B10CDFFEE /* ManadjCore */; };
+		964681B923424E0D86EA6981 /* Manadj/FeedbackCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41595082BC68E17CED3490BA /* Manadj/FeedbackCapture.swift */; };
+		99406E688526737099B1C8A4 /* Manadj/Resources/UbuntuMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E7209099DBD5FA1101E5C035 /* Manadj/Resources/UbuntuMono-Regular.ttf */; };
+		A264946227B303A6BDC4DAA1 /* ManadjCore in Frameworks */ = {isa = PBXBuildFile; productRef = BCF65F7A5452A69B10CDFFEE /* ManadjCore */; };
+		A3C15990462639D68ECB0F8C /* Manadj/Resources/synthetic-B-preview.mwf in Resources */ = {isa = PBXBuildFile; fileRef = 7B16C465127864F034A2702C /* Manadj/Resources/synthetic-B-preview.mwf */; };
+		AB0047DD9B33F239D8FAC5D9 /* ManadjAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 0C02F23AB90E242F016B8748 /* ManadjAudio */; };
+		B6D81B424E1FC9A158F21932 /* Manadj/PerformanceBend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29AB76729B8B5F565F57B879 /* Manadj/PerformanceBend.swift */; };
+		C645C0ABD1786C9038A993B9 /* ManadjUITests/WorkspaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02D81B447E0043DAA97841EB /* ManadjUITests/WorkspaceUITests.swift */; };
+		C7B55D1AD82227E05BE9FBB4 /* Manadj/Resources/UbuntuMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = C54B76856E24381FB1A092AC /* Manadj/Resources/UbuntuMono-Bold.ttf */; };
+		CE5EE24556FE3346F2965DF4 /* Manadj/FeedbackOutboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 332FEA8B746FD7E7DAAFDC4A /* Manadj/FeedbackOutboxView.swift */; };
+		D905E1358CD208205C64D69E /* Manadj/Resources/synthetic-usb-export.pdb in Resources */ = {isa = PBXBuildFile; fileRef = 5CE8F4B64A57BCF49F8AEB8C /* Manadj/Resources/synthetic-usb-export.pdb */; };
+		DF7F9CCF7F29825C2DE9967D /* Manadj/USBImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66BB25412CEAA23941DBAF8 /* Manadj/USBImportView.swift */; };
+		DF87F90EC56CF6AE586BBD78 /* Manadj/Resources/Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8AFDE70D7D181D745BF4705B /* Manadj/Resources/Assets.xcassets */; };
+		E052604597102E80EE331EBA /* Manadj/HoldControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70E77657F583E42EC6A45274 /* Manadj/HoldControl.swift */; };
+		EF4B8F9D4B04ED530AF9EE21 /* Manadj/Resources/synthetic-B.mwf in Resources */ = {isa = PBXBuildFile; fileRef = DF33A9E143A5BF598DC02DD3 /* Manadj/Resources/synthetic-B.mwf */; };
+		FAB94BF723D28022F2A336B2 /* Manadj/Resources/UBUNTU_FONT_LICENCE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 3C629BA99D49C7D7E6A6CA7E /* Manadj/Resources/UBUNTU_FONT_LICENCE.txt */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		71BBD8C830B1625100C277D9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 244210E48437B6556980A702 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4EE3BA8A9481E98E099A273B;
+			remoteInfo = Manadj;
+		};
+		71BBD8C930B1625100C277D9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 244210E48437B6556980A702 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4EE3BA8A9481E98E099A273B;
+			remoteInfo = Manadj;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		02D81B447E0043DAA97841EB /* ManadjUITests/WorkspaceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManadjUITests/WorkspaceUITests.swift; sourceTree = "<group>"; };
+		0E5BC8DB19D29813F6990DAB /* Manadj/PerformanceDeckControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/PerformanceDeckControls.swift; sourceTree = "<group>"; };
+		13549ABE64A39A39257DC333 /* Manadj/LibraryBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/LibraryBrowser.swift; sourceTree = "<group>"; };
+		1A97C8336E1B43A3AA05D7BE /* Manadj/PerformanceControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/PerformanceControls.swift; sourceTree = "<group>"; };
+		248D5FDC408CBB847F89E1A6 /* ManadjUITests/FeedbackUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManadjUITests/FeedbackUITests.swift; sourceTree = "<group>"; };
+		29AB76729B8B5F565F57B879 /* Manadj/PerformanceBend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/PerformanceBend.swift; sourceTree = "<group>"; };
+		332FEA8B746FD7E7DAAFDC4A /* Manadj/FeedbackOutboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/FeedbackOutboxView.swift; sourceTree = "<group>"; };
+		3C629BA99D49C7D7E6A6CA7E /* Manadj/Resources/UBUNTU_FONT_LICENCE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = Manadj/Resources/UBUNTU_FONT_LICENCE.txt; sourceTree = "<group>"; };
+		408495BABA2882DD79B6083D /* Manadj/DeckPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/DeckPanel.swift; sourceTree = "<group>"; };
+		41595082BC68E17CED3490BA /* Manadj/FeedbackCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/FeedbackCapture.swift; sourceTree = "<group>"; };
+		4DBE2B621A7EFF1CFA76DFDF /* Manadj/Resources/synthetic-A-preview.mwf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manadj/Resources/synthetic-A-preview.mwf"; sourceTree = "<group>"; };
+		53AEEC7E675DA40F70D11BE5 /* Manadj/FeedbackReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/FeedbackReviewView.swift; sourceTree = "<group>"; };
+		5430D72D3A091C4899AD7DE5 /* Manadj/Resources/synthetic-A.mwf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manadj/Resources/synthetic-A.mwf"; sourceTree = "<group>"; };
+		5766C4DD11A6571197534A8F /* Manadj/Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/Theme.swift; sourceTree = "<group>"; };
+		59D811ED7AC44BC5FDE04098 /* Manadj/SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/SettingsView.swift; sourceTree = "<group>"; };
+		5BF733380053CF5E5748076D /* Manadj/FeedbackDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/FeedbackDrawing.swift; sourceTree = "<group>"; };
+		5CE8F4B64A57BCF49F8AEB8C /* Manadj/Resources/synthetic-usb-export.pdb */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manadj/Resources/synthetic-usb-export.pdb"; sourceTree = "<group>"; };
+		68DF4D83803AAE53D4B02E99 /* ManadjUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ManadjUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		6F826538A1324194F0AC3FD6 /* Manadj/LibraryUIFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/LibraryUIFixture.swift; sourceTree = "<group>"; };
+		70E77657F583E42EC6A45274 /* Manadj/HoldControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/HoldControl.swift; sourceTree = "<group>"; };
+		73EF1B9D455F92208B07943B /* Manadj/Resources/synthetic-B.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "Manadj/Resources/synthetic-B.wav"; sourceTree = "<group>"; };
+		7B16C465127864F034A2702C /* Manadj/Resources/synthetic-B-preview.mwf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manadj/Resources/synthetic-B-preview.mwf"; sourceTree = "<group>"; };
+		8AFDE70D7D181D745BF4705B /* Manadj/Resources/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Manadj/Resources/Assets.xcassets; sourceTree = "<group>"; };
+		9CEEC13202AFBF12EE3ABB99 /* Manadj/Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Manadj/Info.plist; sourceTree = "<group>"; };
+		9F86E2C4A027B35C84DF186A /* Manadj/Resources/synthetic-codec.m4a */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manadj/Resources/synthetic-codec.m4a"; sourceTree = "<group>"; };
+		A172CEDCAE47474B615C54D5 /* manaDJ.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = manaDJ.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AC2B9964FFEF408073A0A766 /* Manadj/Resources/synthetic-codec.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = "Manadj/Resources/synthetic-codec.mp3"; sourceTree = "<group>"; };
+		B265896C2A006DB1979E7355 /* ManadjTests/NativeAudioTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManadjTests/NativeAudioTests.swift; sourceTree = "<group>"; };
+		B6CCF6DD2C669EE22189A0BE /* Manadj/AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/AppModel.swift; sourceTree = "<group>"; };
+		BDB63F35D1A32B0901A2A387 /* Manadj/PerformanceWave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/PerformanceWave.swift; sourceTree = "<group>"; };
+		C0B9E42AE682E6F7055FC31F /* Manadj/FeedbackShake.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/FeedbackShake.swift; sourceTree = "<group>"; };
+		C54B76856E24381FB1A092AC /* Manadj/Resources/UbuntuMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manadj/Resources/UbuntuMono-Bold.ttf"; sourceTree = "<group>"; };
+		CDA4AED43C9B6A9ED4EEF40A /* Manadj/Resources/synthetic-codec.aiff */ = {isa = PBXFileReference; lastKnownFileType = audio.aiff; path = "Manadj/Resources/synthetic-codec.aiff"; sourceTree = "<group>"; };
+		D15433147512D7AA9E47CCBC /* Manadj/Resources/synthetic-codec.flac */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manadj/Resources/synthetic-codec.flac"; sourceTree = "<group>"; };
+		DB35650A4ACE8F109AD3BDEB /* Manadj/LocalLiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/LocalLiveView.swift; sourceTree = "<group>"; };
+		DC747BD3FD41AF2923F09EA5 /* Manadj/Resources/synthetic-A.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "Manadj/Resources/synthetic-A.wav"; sourceTree = "<group>"; };
+		DF33A9E143A5BF598DC02DD3 /* Manadj/Resources/synthetic-B.mwf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manadj/Resources/synthetic-B.mwf"; sourceTree = "<group>"; };
+		E55464A31BDA8C2F440BF3FD /* Manadj/FeedbackReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/FeedbackReporter.swift; sourceTree = "<group>"; };
+		E66BB25412CEAA23941DBAF8 /* Manadj/USBImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/USBImportView.swift; sourceTree = "<group>"; };
+		E7209099DBD5FA1101E5C035 /* Manadj/Resources/UbuntuMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manadj/Resources/UbuntuMono-Regular.ttf"; sourceTree = "<group>"; };
+		E7D218D0E84EF24A370DF7DE /* Manadj/ManadjApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/ManadjApp.swift; sourceTree = "<group>"; };
+		ED907F635E08302FFC9F8174 /* ManadjTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ManadjTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FC2F07F0E421947BDC29C2E7 /* Manadj/PairingKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Manadj/PairingKeychain.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		49437234D5065FDA996CF015 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A264946227B303A6BDC4DAA1 /* ManadjCore in Frameworks */,
+				7ABB84476D66744DFE1FDC73 /* ManadjAudio in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BD420F766E84BAE56C1ED417 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				91B37CD184D6014845507A4A /* ManadjCore in Frameworks */,
+				AB0047DD9B33F239D8FAC5D9 /* ManadjAudio in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C321653040EAD1F2CB494385 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0A3E27B8CA818264D75C8D81 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A172CEDCAE47474B615C54D5 /* manaDJ.app */,
+				ED907F635E08302FFC9F8174 /* ManadjTests.xctest */,
+				68DF4D83803AAE53D4B02E99 /* ManadjUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		0D6E4079E36703EBD37C0072 = {
+			isa = PBXGroup;
+			children = (
+				B6CCF6DD2C669EE22189A0BE /* Manadj/AppModel.swift */,
+				408495BABA2882DD79B6083D /* Manadj/DeckPanel.swift */,
+				41595082BC68E17CED3490BA /* Manadj/FeedbackCapture.swift */,
+				5BF733380053CF5E5748076D /* Manadj/FeedbackDrawing.swift */,
+				332FEA8B746FD7E7DAAFDC4A /* Manadj/FeedbackOutboxView.swift */,
+				E55464A31BDA8C2F440BF3FD /* Manadj/FeedbackReporter.swift */,
+				53AEEC7E675DA40F70D11BE5 /* Manadj/FeedbackReviewView.swift */,
+				C0B9E42AE682E6F7055FC31F /* Manadj/FeedbackShake.swift */,
+				70E77657F583E42EC6A45274 /* Manadj/HoldControl.swift */,
+				13549ABE64A39A39257DC333 /* Manadj/LibraryBrowser.swift */,
+				6F826538A1324194F0AC3FD6 /* Manadj/LibraryUIFixture.swift */,
+				DB35650A4ACE8F109AD3BDEB /* Manadj/LocalLiveView.swift */,
+				E7D218D0E84EF24A370DF7DE /* Manadj/ManadjApp.swift */,
+				FC2F07F0E421947BDC29C2E7 /* Manadj/PairingKeychain.swift */,
+				29AB76729B8B5F565F57B879 /* Manadj/PerformanceBend.swift */,
+				1A97C8336E1B43A3AA05D7BE /* Manadj/PerformanceControls.swift */,
+				0E5BC8DB19D29813F6990DAB /* Manadj/PerformanceDeckControls.swift */,
+				BDB63F35D1A32B0901A2A387 /* Manadj/PerformanceWave.swift */,
+				59D811ED7AC44BC5FDE04098 /* Manadj/SettingsView.swift */,
+				5766C4DD11A6571197534A8F /* Manadj/Theme.swift */,
+				E66BB25412CEAA23941DBAF8 /* Manadj/USBImportView.swift */,
+				C54B76856E24381FB1A092AC /* Manadj/Resources/UbuntuMono-Bold.ttf */,
+				E7209099DBD5FA1101E5C035 /* Manadj/Resources/UbuntuMono-Regular.ttf */,
+				3C629BA99D49C7D7E6A6CA7E /* Manadj/Resources/UBUNTU_FONT_LICENCE.txt */,
+				8AFDE70D7D181D745BF4705B /* Manadj/Resources/Assets.xcassets */,
+				4DBE2B621A7EFF1CFA76DFDF /* Manadj/Resources/synthetic-A-preview.mwf */,
+				5430D72D3A091C4899AD7DE5 /* Manadj/Resources/synthetic-A.mwf */,
+				DC747BD3FD41AF2923F09EA5 /* Manadj/Resources/synthetic-A.wav */,
+				7B16C465127864F034A2702C /* Manadj/Resources/synthetic-B-preview.mwf */,
+				DF33A9E143A5BF598DC02DD3 /* Manadj/Resources/synthetic-B.mwf */,
+				73EF1B9D455F92208B07943B /* Manadj/Resources/synthetic-B.wav */,
+				CDA4AED43C9B6A9ED4EEF40A /* Manadj/Resources/synthetic-codec.aiff */,
+				D15433147512D7AA9E47CCBC /* Manadj/Resources/synthetic-codec.flac */,
+				9F86E2C4A027B35C84DF186A /* Manadj/Resources/synthetic-codec.m4a */,
+				AC2B9964FFEF408073A0A766 /* Manadj/Resources/synthetic-codec.mp3 */,
+				5CE8F4B64A57BCF49F8AEB8C /* Manadj/Resources/synthetic-usb-export.pdb */,
+				9CEEC13202AFBF12EE3ABB99 /* Manadj/Info.plist */,
+				B265896C2A006DB1979E7355 /* ManadjTests/NativeAudioTests.swift */,
+				248D5FDC408CBB847F89E1A6 /* ManadjUITests/FeedbackUITests.swift */,
+				02D81B447E0043DAA97841EB /* ManadjUITests/WorkspaceUITests.swift */,
+				0A3E27B8CA818264D75C8D81 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		249C519AAD39455EEE280362 /* ManadjTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9C9038991B029CCE8CB79642 /* Build configuration list for PBXNativeTarget "ManadjTests" */;
+			buildPhases = (
+				7686E60333147F5C87EA6C01 /* Sources */,
+				BD420F766E84BAE56C1ED417 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B040F463C9350683BB86699E /* PBXTargetDependency */,
+			);
+			name = ManadjTests;
+			packageProductDependencies = (
+				BCF65F7A5452A69B10CDFFEE /* ManadjCore */,
+				0C02F23AB90E242F016B8748 /* ManadjAudio */,
+			);
+			productName = ManadjTests;
+			productReference = ED907F635E08302FFC9F8174 /* ManadjTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		4EE3BA8A9481E98E099A273B /* Manadj */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F001F45CA9096206067D619A /* Build configuration list for PBXNativeTarget "Manadj" */;
+			buildPhases = (
+				76E512711C5F577B8E6FBFD0 /* Sources */,
+				49437234D5065FDA996CF015 /* Frameworks */,
+				1DFD5F368D483BDC3458D4EB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Manadj;
+			packageProductDependencies = (
+				BCF65F7A5452A69B10CDFFEE /* ManadjCore */,
+				0C02F23AB90E242F016B8748 /* ManadjAudio */,
+			);
+			productName = manaDJ;
+			productReference = A172CEDCAE47474B615C54D5 /* manaDJ.app */;
+			productType = "com.apple.product-type.application";
+		};
+		E31708A180CD66FCD7DA95F2 /* ManadjUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 26C27909EF990E367C0B1CC2 /* Build configuration list for PBXNativeTarget "ManadjUITests" */;
+			buildPhases = (
+				03A475A813C5FB1A6A51CEB0 /* Sources */,
+				C321653040EAD1F2CB494385 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				199DEAEB1ED92E15CBCB600F /* PBXTargetDependency */,
+			);
+			name = ManadjUITests;
+			packageProductDependencies = (
+			);
+			productName = ManadjUITests;
+			productReference = 68DF4D83803AAE53D4B02E99 /* ManadjUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		244210E48437B6556980A702 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					4EE3BA8A9481E98E099A273B = {
+						CreatedOnToolsVersion = 16.0;
 					};
 				};
 			};
-			"buildConfigurationList" = "325A8360FA4E996EACF70E53";
-			"compatibilityVersion" = "Xcode 14.0";
-			"developmentRegion" = "en";
-			"hasScannedForEncodings" = "0";
-			"knownRegions" = ( "en", "Base" );
-			"mainGroup" = "0D6E4079E36703EBD37C0072";
-			"packageReferences" = ( "84D517A464E7265BB45C44E0", "7B3E21A8417551A0BF467FC5" );
-			"productRefGroup" = "0A3E27B8CA818264D75C8D81";
-			"projectDirPath" = "";
-			"projectRoot" = "";
-			"targets" = ( "4EE3BA8A9481E98E099A273B", "249C519AAD39455EEE280362", "E31708A180CD66FCD7DA95F2" );
+			buildConfigurationList = 325A8360FA4E996EACF70E53 /* Build configuration list for PBXProject "Manadj" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 0D6E4079E36703EBD37C0072;
+			packageReferences = (
+				84D517A464E7265BB45C44E0 /* XCLocalSwiftPackageReference "Packages/ManadjCore" */,
+				7B3E21A8417551A0BF467FC5 /* XCLocalSwiftPackageReference "Packages/ManadjAudio" */,
+			);
+			productRefGroup = 0A3E27B8CA818264D75C8D81 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				4EE3BA8A9481E98E099A273B /* Manadj */,
+				249C519AAD39455EEE280362 /* ManadjTests */,
+				E31708A180CD66FCD7DA95F2 /* ManadjUITests */,
+			);
 		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1DFD5F368D483BDC3458D4EB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C7B55D1AD82227E05BE9FBB4 /* Manadj/Resources/UbuntuMono-Bold.ttf in Resources */,
+				99406E688526737099B1C8A4 /* Manadj/Resources/UbuntuMono-Regular.ttf in Resources */,
+				FAB94BF723D28022F2A336B2 /* Manadj/Resources/UBUNTU_FONT_LICENCE.txt in Resources */,
+				DF87F90EC56CF6AE586BBD78 /* Manadj/Resources/Assets.xcassets in Resources */,
+				5288891F7D36AB9D721A0A45 /* Manadj/Resources/synthetic-A-preview.mwf in Resources */,
+				2929FCF9DC3CE69779C54DC1 /* Manadj/Resources/synthetic-A.mwf in Resources */,
+				0519515269F00AE9ECB27502 /* Manadj/Resources/synthetic-A.wav in Resources */,
+				A3C15990462639D68ECB0F8C /* Manadj/Resources/synthetic-B-preview.mwf in Resources */,
+				EF4B8F9D4B04ED530AF9EE21 /* Manadj/Resources/synthetic-B.mwf in Resources */,
+				32CCD4B3F56F4F2F1B76E260 /* Manadj/Resources/synthetic-B.wav in Resources */,
+				8DC7E67ACCB348B878E9570C /* Manadj/Resources/synthetic-codec.aiff in Resources */,
+				67C23562B16836F9CAD3FE37 /* Manadj/Resources/synthetic-codec.flac in Resources */,
+				003929D39B0264A82284AD7C /* Manadj/Resources/synthetic-codec.m4a in Resources */,
+				82AFD16F018FED5B9EFEE3EC /* Manadj/Resources/synthetic-codec.mp3 in Resources */,
+				D905E1358CD208205C64D69E /* Manadj/Resources/synthetic-usb-export.pdb in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		03A475A813C5FB1A6A51CEB0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3577EF46E28FE973420D49C7 /* ManadjUITests/FeedbackUITests.swift in Sources */,
+				C645C0ABD1786C9038A993B9 /* ManadjUITests/WorkspaceUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7686E60333147F5C87EA6C01 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0F430B5761A1E98D19E6AD77 /* ManadjTests/NativeAudioTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		76E512711C5F577B8E6FBFD0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C5DDEB9FFDFEC8AEE8C87E1 /* Manadj/AppModel.swift in Sources */,
+				1597544FAC0E8262AF5B161F /* Manadj/DeckPanel.swift in Sources */,
+				964681B923424E0D86EA6981 /* Manadj/FeedbackCapture.swift in Sources */,
+				863BDC7987C2C4A2452F176B /* Manadj/FeedbackDrawing.swift in Sources */,
+				CE5EE24556FE3346F2965DF4 /* Manadj/FeedbackOutboxView.swift in Sources */,
+				4DBA9C765E5D441BA3DBF1C3 /* Manadj/FeedbackReporter.swift in Sources */,
+				6713B7E60383489821397303 /* Manadj/FeedbackReviewView.swift in Sources */,
+				5BECCF1ADEC5BA5FA7A563C5 /* Manadj/FeedbackShake.swift in Sources */,
+				E052604597102E80EE331EBA /* Manadj/HoldControl.swift in Sources */,
+				40C48AB6B17CC06A65832468 /* Manadj/LibraryBrowser.swift in Sources */,
+				1BA049E8D4277A31E08F36B2 /* Manadj/LibraryUIFixture.swift in Sources */,
+				4415ECB8C8FC0A8A5D2E6104 /* Manadj/LocalLiveView.swift in Sources */,
+				572F7BFA4453CEB2C79A0BE7 /* Manadj/ManadjApp.swift in Sources */,
+				204E18768B90B66EE770B10A /* Manadj/PairingKeychain.swift in Sources */,
+				B6D81B424E1FC9A158F21932 /* Manadj/PerformanceBend.swift in Sources */,
+				2559CAB0E88E35ED4ADA6C71 /* Manadj/PerformanceControls.swift in Sources */,
+				90163E095ED8233E6DB77D95 /* Manadj/PerformanceDeckControls.swift in Sources */,
+				630C393AA4A8DDEF1D0E26DD /* Manadj/PerformanceWave.swift in Sources */,
+				53F16D2FFFF2BE4336896599 /* Manadj/SettingsView.swift in Sources */,
+				3194699105DDE2D630B979E4 /* Manadj/Theme.swift in Sources */,
+				DF7F9CCF7F29825C2DE9967D /* Manadj/USBImportView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		199DEAEB1ED92E15CBCB600F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4EE3BA8A9481E98E099A273B /* Manadj */;
+			targetProxy = 71BBD8C930B1625100C277D9 /* PBXContainerItemProxy */;
+		};
+		B040F463C9350683BB86699E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4EE3BA8A9481E98E099A273B /* Manadj */;
+			targetProxy = 71BBD8C830B1625100C277D9 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		3A9669118334ABE63A2B8662 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KLCM56Q37P;
+				INFOPLIST_FILE = Manadj/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = earth.murtaza.manadj.ios;
+				PRODUCT_MODULE_NAME = Manadj;
+				PRODUCT_NAME = manaDJ;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		3D5D06619AD2FD8BA0F34D57 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_ENABLE_MODULES = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		5EB1176EB2B21ED2D9EA971C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.manadj.ios.ManadjUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Manadj;
+			};
+			name = Debug;
+		};
+		61EE91C00F7653342CB155AF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_ENABLE_MODULES = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_TESTABILITY = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		87D6626BE2AC0AB5E63AD0B9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KLCM56Q37P;
+				INFOPLIST_FILE = Manadj/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = earth.murtaza.manadj.ios;
+				PRODUCT_MODULE_NAME = Manadj;
+				PRODUCT_NAME = manaDJ;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		9B23D0444AB96D3E16934C7F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.manadj.ios.ManadjUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Manadj;
+			};
+			name = Release;
+		};
+		F4A58CAC07A0001B5B1F326B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.manadj.ios.ManadjTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/manaDJ.app/manaDJ";
+			};
+			name = Debug;
+		};
+		FE52E47FA7B370768480D1FF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.manadj.ios.ManadjTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/manaDJ.app/manaDJ";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		26C27909EF990E367C0B1CC2 /* Build configuration list for PBXNativeTarget "ManadjUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5EB1176EB2B21ED2D9EA971C /* Debug */,
+				9B23D0444AB96D3E16934C7F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		325A8360FA4E996EACF70E53 /* Build configuration list for PBXProject "Manadj" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3D5D06619AD2FD8BA0F34D57 /* Debug */,
+				61EE91C00F7653342CB155AF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9C9038991B029CCE8CB79642 /* Build configuration list for PBXNativeTarget "ManadjTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F4A58CAC07A0001B5B1F326B /* Debug */,
+				FE52E47FA7B370768480D1FF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F001F45CA9096206067D619A /* Build configuration list for PBXNativeTarget "Manadj" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				87D6626BE2AC0AB5E63AD0B9 /* Debug */,
+				3A9669118334ABE63A2B8662 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		7B3E21A8417551A0BF467FC5 /* XCLocalSwiftPackageReference "Packages/ManadjAudio" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ManadjAudio;
+		};
+		84D517A464E7265BB45C44E0 /* XCLocalSwiftPackageReference "Packages/ManadjCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ManadjCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0C02F23AB90E242F016B8748 /* ManadjAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7B3E21A8417551A0BF467FC5 /* XCLocalSwiftPackageReference "Packages/ManadjAudio" */;
+			productName = ManadjAudio;
+		};
+		BCF65F7A5452A69B10CDFFEE /* ManadjCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 84D517A464E7265BB45C44E0 /* XCLocalSwiftPackageReference "Packages/ManadjCore" */;
+			productName = ManadjCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
-	"rootObject" = "244210E48437B6556980A702";
+	rootObject = 244210E48437B6556980A702 /* Project object */;
 }
