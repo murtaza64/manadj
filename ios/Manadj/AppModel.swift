@@ -387,7 +387,7 @@ struct DeckViewState {
         if let last = feedbackActions.last, last["action"] as? String == action, last["deck"] as? Int == deck,
            let at = last["at"] as? Double, now - at < 0.1 { feedbackActions.removeLast() }
         feedbackActions.append(event)
-        feedbackActions = Array(feedbackActions.filter { now - ($0["at"] as? Double ?? 0) <= 90 }.suffix(160))
+        feedbackActions = Array(feedbackActions.filter { now - ($0["at"] as? Double ?? 0) <= 180 }.suffix(512))
     }
     var feedbackQueueRoot: URL { root.appendingPathComponent("feedback-queue", isDirectory: true) }
     func forgetDesktop() {

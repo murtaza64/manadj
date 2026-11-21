@@ -92,9 +92,9 @@ struct FeedbackCapture {
         if let error = model.error { snapshot["errors"] = [error] }
 
         var sections = [
+            FeedbackSection(key: "session", title: "RECENT ACTIONS & SESSION"),
             FeedbackSection(key: "decks", title: "DECKS"),
             FeedbackSection(key: "mixer", title: "MIXER"),
-            FeedbackSection(key: "session", title: "SESSION"),
             FeedbackSection(key: "user_agent", title: "APP & DEVICE"),
         ]
         if model.error != nil {

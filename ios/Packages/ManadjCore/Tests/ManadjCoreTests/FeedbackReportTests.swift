@@ -203,4 +203,75 @@ final class FeedbackReportTests: XCTestCase {
         guard case .rejected = outcome else { return XCTFail("invalid draft must be rejected, got \(outcome)") }
         XCTAssertEqual(FeedbackQueue(directory: directory).pending().count, 0)
     }
+
+    private func tinyVoice(format: String = "mp3", transcript: String? = "narrating the broken flow") -> FeedbackVoice {
+        let blob: [UInt8]
+        let prefix = FeedbackLimits.voicePrefixes[format]!
+        switch format {
+        case "m4a": blob = [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70] + Array(repeating: 0, count: 32)
+        case "caf": blob = [0x63, 0x61, 0x66, 0x66] + Array(repeating: 0, count: 32)
+        default: blob = [0x49, 0x44, 0x33, 0x04, 0, 0, 0, 0, 0, 0x10, 0xFF, 0xFB] + Array(repeating: 0, count: 32)
+        }
+        return FeedbackVoice(
+            format: format,
+            dataURL: prefix + Data(blob).base64EncodedString(),
+            durationMs: 3000,
+            startedAt: Date(timeIntervalSince1970: 1_800_000_000),
+            endedAt: Date(timeIntervalSince1970: 1_800_000_003),
+            transcript: transcript)
+    }
+
+    func testVoicePayloadMirrorsTheDesktopContract() throws {
+        var draft = draft()
+        draft.voice = tinyVoice()
+        let payload = try XCTUnwrap(try draft.validatedPayload()["voice"] as? [String: Any])
+        XCTAssertEqual(payload["format"] as? String, "mp3")
+        XCTAssertEqual(payload["duration_ms"] as? Int, 3000)
+        XCTAssertTrue((payload["data_url"] as? String ?? "").hasPrefix("data:audio/mpeg;base64,"))
+        XCTAssertNotNil(payload["started_at"] as? String)
+        XCTAssertNotNil(payload["ended_at"] as? String)
+        XCTAssertEqual(payload["transcript"] as? String, "narrating the broken flow")
+    }
+
+    func testVoiceIsOptionalAndOmittedForOlderDesktop() throws {
+        let payload = try draft().validatedPayload()
+        XCTAssertNil(payload["voice"])
+    }
+
+    func testVoiceFormatsAccepted() throws {
+        for format in ["m4a", "caf", "mp3"] {
+            var draft = draft()
+            draft.voice = tinyVoice(format: format, transcript: nil)
+            let payload = try XCTUnwrap(try draft.validatedPayload()["voice"] as? [String: Any])
+            XCTAssertEqual(payload["format"] as? String, format)
+            XCTAssertTrue(payload["transcript"] is NSNull)
+        }
+    }
+
+    func testVoiceRejectsBadContainerOversizeAndWindow() {
+        var draft = draft()
+        // Declared mp3 but M4A bytes behind an mp3 prefix.
+        let m4a = [UInt8]([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70] + Array(repeating: 0, count: 32))
+        draft.voice = tinyVoice()
+        draft.voice?.dataURL = "data:audio/mpeg;base64," + Data(m4a).base64EncodedString()
+        XCTAssertThrowsError(try draft.validatedPayload())
+        draft.voice = tinyVoice()
+        draft.voice?.durationMs = FeedbackLimits.voiceDurationMs + 1
+        XCTAssertThrowsError(try draft.validatedPayload())
+        draft.voice = tinyVoice()
+        let start = draft.voice!.startedAt
+        draft.voice?.endedAt = start
+        XCTAssertThrowsError(try draft.validatedPayload())
+        draft.voice = tinyVoice(transcript: String(repeating: "x", count: FeedbackLimits.voiceTranscript + 1))
+        XCTAssertThrowsError(try draft.validatedPayload())
+    }
+
+    func testVoiceTranscriptIsScrubbedIntoThePayload() throws {
+        var draft = draft()
+        draft.voice = tinyVoice(transcript: "my password: hunter2 is in this clip")
+        let payload = try XCTUnwrap(try draft.validatedPayload()["voice"] as? [String: Any])
+        let transcript = try XCTUnwrap(payload["transcript"] as? String)
+        XCTAssertFalse(transcript.contains("hunter2"))
+        XCTAssertTrue(transcript.contains("[REDACTED]"))
+    }
 }

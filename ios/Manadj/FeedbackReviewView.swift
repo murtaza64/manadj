@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import ManadjCore
 
 /// Shake → capture → this sheet: annotate, describe, see the exact scrubbed
@@ -14,6 +15,10 @@ struct FeedbackReviewView: View {
 
     let onClose: () -> Void
     @State private var confirming = false
+    @State private var includeVoice = true
+    @State private var player: AVAudioPlayer?
+    let voice: FeedbackVoice?
+    let voiceURL: URL?
     @State private var kind = FeedbackKind.bug
     @State private var title = ""
     @State private var details = ""
@@ -33,12 +38,15 @@ struct FeedbackReviewView: View {
         onSubmit: @escaping @MainActor (FeedbackDraft) async -> FeedbackOutcome,
         queueDirectory: URL? = nil,
         queueConnection: DesktopConnection? = nil,
+        voice: FeedbackVoice? = nil,
+        voiceURL: URL? = nil,
         initialComment: String = "",
         initialStrokes: [FeedbackStroke] = [],
         initialPoint: CGPoint? = nil,
         initialTarget: String? = nil,
         onClose: @escaping () -> Void = {}
     ) {
+        self.voice = voice; self.voiceURL = voiceURL
         self.capture = capture
         self.targets = targets
         self.onSubmit = onSubmit
@@ -94,7 +102,7 @@ struct FeedbackReviewView: View {
         }
         return FeedbackDraft(
             kind: kind, title: title, description: details + targetDescription,
-            snapshot: snapshot, screenshot: screenshot, captureWarnings: warnings)
+            snapshot: snapshot, screenshot: screenshot, captureWarnings: warnings, voice: includeVoice ? voice : nil)
     }
 
     private var targetDescription: String {
@@ -149,6 +157,16 @@ struct FeedbackReviewView: View {
                                     Spacer(); Button("CLEAR TARGET") { selectedPoint = nil; selectedTarget = nil }.font(Ink.font(9))
                                 }
                             }
+                            if let voice, includeVoice {
+                                HStack {
+                                    Button("▶ VOICE · \(voice.durationMs / 1000)s") {
+                                        guard let voiceURL else { return }
+                                        do { player = try AVAudioPlayer(contentsOf: voiceURL); player?.play() } catch { }
+                                    }.font(Ink.font(10)).accessibilityIdentifier("feedback-play-voice")
+                                    Spacer()
+                                    Button("REMOVE") { player?.stop(); includeVoice = false }.font(Ink.font(9)).accessibilityIdentifier("feedback-remove-voice")
+                                }
+                            }
                             TextField("What would make this better?", text: comment, axis: .vertical)
                                 .font(Ink.font(13)).lineLimit(2...3).padding(8).background(Ink.crust, in: RoundedRectangle(cornerRadius: 8))
                                 .accessibilityIdentifier("feedback-title").focused($editing)
@@ -200,7 +218,7 @@ struct FeedbackReviewView: View {
             Button(queueConnection == nil ? "SAVE REVIEWED FEEDBACK ON IPHONE" : "SEND REVIEWED FEEDBACK TO " + destination) { submit() }.accessibilityIdentifier("feedback-confirm-send")
             Button("KEEP EDITING", role: .cancel) {}
         } message: {
-            Text("To: " + destination + ". " + (includeScreenshot ? "Includes the marked screen and " : "No screenshot. Includes ") + sections.filter(\.included).map(\.title).joined(separator: ", ") + ". Only text and a report link go to GitHub. Screen and context stay in the desktop feedback store. No automatic retry from this iPhone.")
+            Text("To: " + destination + ". " + (includeScreenshot ? "Includes the marked screen and " : "No screenshot. Includes ") + sections.filter(\.included).map(\.title).joined(separator: ", ") + ". " + (includeVoice && voice != nil ? "Includes your reviewed voice recording. " : "") + "Only text and a report link go to GitHub. Screen, voice and context stay in the desktop feedback store. No automatic retry from this iPhone.")
         }
         .sheet(isPresented: $showOutbox) { if let queueDirectory { FeedbackOutboxView(directory: queueDirectory, connection: queueConnection) } }
         .accessibilityElement(children: .contain).accessibilityIdentifier("feedback-review")
