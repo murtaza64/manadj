@@ -76,6 +76,40 @@ final class NativeAudioTests: XCTestCase {
         let shot = XCTAttachment(image: UIImage(cgImage: image)); shot.name = "Metal synthetic body actual GPU readback without cue overlay"; shot.lifetime = .keepAlways; add(shot)
     }
 
+    @MainActor func testDetailRasterTilesWarmColdParityAndBoundedCache() throws {
+        let resource = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "mwf"))
+        let wave = try PreviewWaveform.parse(Data(contentsOf: resource))
+        var state = MDJDeck(); state.ready = true
+        state.hotCues = (-1,-1,-1,-1,-1,-1,-1,-1)
+        for vertical in [false, true] {
+            let size = vertical ? CGSize(width: 60, height: 390) : CGSize(width: 390, height: 60)
+            let view = PerformanceWaveView(frame: CGRect(origin: .zero, size: size))
+            view.wave = wave; view.duration = wave.durationSecs; view.state = { state }
+            view.vertical = vertical; view.contentScaleFactor = 3
+            let format = UIGraphicsImageRendererFormat(); format.scale = 3
+            let renderer = UIGraphicsImageRenderer(size: size, format: format)
+            for span in [0.75, 12.0, 48.0] {
+                view.spanSeconds = span
+                for position in [0.0, 0.73, 8.0, 15.2, 23.9] {
+                    state.position = position
+                    let cold = renderer.image { _ in view.draw(view.bounds) }
+                    XCTAssertGreaterThan(view.cachedDetailTileCount, 0)
+                    let warm = renderer.image { _ in view.draw(view.bounds) }
+                    XCTAssertEqual(cold.pngData(), warm.pngData(), "Warm raster must exactly match a cold draw")
+                    view.invalidateDetailTiles()
+                    let rebuilt = renderer.image { _ in view.draw(view.bounds) }
+                    XCTAssertEqual(cold.pngData(), rebuilt.pngData(), "Clearing tiles cannot alter the waveform")
+                }
+            }
+            view.spanSeconds = 0.75
+            for position in stride(from: 0.0, through: 24.0, by: 0.25) {
+                state.position = position
+                _ = renderer.image { _ in view.draw(view.bounds) }
+                XCTAssertLessThanOrEqual(view.cachedDetailTileCount, 96)
+            }
+        }
+    }
+
     @MainActor func testRendererBeforeAfterFrozenBaselineSynthetic() throws {
         let resource = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "mwf"))
         let wave = try PreviewWaveform.parse(Data(contentsOf: resource))
