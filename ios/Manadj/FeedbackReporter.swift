@@ -21,8 +21,9 @@ struct FeedbackReporter: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .sheet(isPresented: $reviewing) {
-                if let capture {
+            .accessibilityHidden(reviewing)
+            .overlay {
+                if reviewing, let capture {
                     FeedbackReviewView(
                         capture: capture,
                         targets: capturedTargets,
@@ -32,7 +33,8 @@ struct FeedbackReporter: ViewModifier {
                             return await submitter.submit(draft, via: model.syncConnection)
                         },
                         queueDirectory: model.feedbackQueueRoot,
-                        queueConnection: model.syncConnection)
+                        queueConnection: model.syncConnection,
+                        onClose: { reviewing = false; self.capture = nil })
                 }
             }
             .onChange(of: requested) { _, value in
