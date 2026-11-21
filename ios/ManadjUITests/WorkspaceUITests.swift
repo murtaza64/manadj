@@ -19,6 +19,38 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
+    @MainActor func testBrowserOpenResponsivenessSyntheticFixture() {
+        let options = XCTMeasureOptions(); options.iterationCount = 3
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        XCTAssertTrue(app.buttons["BROWSE"].waitForExistence(timeout: 10))
+        measure(metrics: [XCTClockMetric()], options: options) {
+            app.buttons["BROWSE"].tap()
+            XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
+            let list = app.descendants(matching: .any)["library-track-list"].firstMatch
+            let timing = NSPredicate(format: "value BEGINSWITH %@", "nativeTapToRowAppearMs=")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: timing, object: list)], timeout: 5), .completed)
+            print("SYNTHETIC_BROWSER_NATIVE \(list.value ?? "missing") excludesAutomationTapOverhead=true rowAppearNotPixels=true")
+            app.buttons["BROWSE"].firstMatch.tap()
+        }
+    }
+
+    @MainActor func testTempoSyncButtonJoinsAndLeavesGroup() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        let play = app.buttons["A play pause"]
+        XCTAssertTrue(play.waitForExistence(timeout: 20)); waitForReadyTransport(play, app: app)
+        app.buttons["A PITCH panel"].tap()
+        let sync = app.buttons["A tempo sync"]
+        XCTAssertTrue(sync.waitForExistence(timeout: 5)); XCTAssertTrue(sync.isEnabled)
+        sync.tap()
+        let joined = NSPredicate(format: "value == %@", "synced")
+        expectation(for: joined, evaluatedWith: sync); waitForExpectations(timeout: 5)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Synthetic Android-group tempo sync joined - not hardware proof"; shot.lifetime = .keepAlways; add(shot)
+        sync.tap()
+        let left = NSPredicate(format: "value == %@", "off")
+        expectation(for: left, evaluatedWith: sync); waitForExpectations(timeout: 5)
+    }
+
     @MainActor func testStandardWorkspaceSettingsAndPitch() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
@@ -254,6 +286,61 @@ final class WorkspaceUITests: XCTestCase {
         accepted.name = "Synthetic library - accepted load returns to Perform"
         accepted.lifetime = .keepAlways; add(accepted)
     }
+    @MainActor func testLibraryRowPreviewsRender() {
+        defer { captureFailure() }
+        let app = XCUIApplication()
+        app.launchArguments = ["--library-ui-fixture"]
+        app.launch()
+        app.buttons["BROWSE"].tap()
+        let search = app.textFields["Search title, artist, file"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        // Fixture tracks carry saved preview blobs; their rows must show the
+        // preview strip (user report: row previews missing in the browser).
+        let first = app.descendants(matching: .any)["library-row-preview-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10), "cached track row must render its preview waveform")
+        let second = app.descendants(matching: .any)["library-row-preview-2"]
+        XCTAssertTrue(second.waitForExistence(timeout: 5), "offline track row must still render its preview waveform")
+        let previews = XCTAttachment(screenshot: app.screenshot())
+        previews.name = "Library rows with preview waveforms"; previews.lifetime = .keepAlways; add(previews)
+    }
+
+    @MainActor func testLibraryQuickSwipeLoadsWithoutFullSwipe() {
+        defer { captureFailure() }
+        let app = XCUIApplication()
+        app.launchArguments = ["--library-ui-fixture"]
+        app.launch()
+        app.buttons["BROWSE"].tap()
+        let search = app.textFields["Search title, artist, file"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap()
+        let keyboardContinue = app.buttons["Continue"]
+        if keyboardContinue.waitForExistence(timeout: 2) { keyboardContinue.tap() }
+        search.typeText("Cached")
+        let row = app.staticTexts["Cached Test Tone"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        // User-requested short flick keeps Android left=A direction.
+        let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        let to = from.withOffset(CGVector(dx: -45, dy: 0))
+        from.press(forDuration: 0.01, thenDragTo: to, withVelocity: .fast, thenHoldForDuration: 0)
+        let deck = app.buttons["deck-0-info"]
+        let loaded = NSPredicate(format: "value CONTAINS %@", "Cached Test Tone")
+        expectation(for: loaded, evaluatedWith: deck); waitForExpectations(timeout: 8)
+        XCTAssertFalse(search.exists, "Accepted swipe closes browser")
+    }
+
+    @MainActor func testLibraryRightShortSwipeLoadsBNotA() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
+        app.buttons["BROWSE"].tap()
+        let row = app.staticTexts["Cached Test Tone"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
+        from.press(forDuration: 0.01, thenDragTo: from.withOffset(CGVector(dx: 45, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+        let loaded = NSPredicate(format: "value CONTAINS %@", "Cached Test Tone")
+        expectation(for: loaded, evaluatedWith: app.buttons["deck-1-info"]); waitForExpectations(timeout: 8)
+        XCTAssertFalse((app.buttons["deck-0-info"].value as? String ?? "").contains("Cached Test Tone"))
+    }
+
     @MainActor func testLocalLiveSyntheticPairedHostMonitor() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--local-live-ui-fixture"]; app.launch()
@@ -265,7 +352,8 @@ final class WorkspaceUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Local live monitor - synthetic paired host, not device proof"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["STOP"].tap()
-        XCTAssertTrue(status.label.hasPrefix("Stopped"))
+        let stopped = NSPredicate(format: "label BEGINSWITH %@", "Stopped")
+        expectation(for: stopped, evaluatedWith: status); waitForExpectations(timeout: 5)
     }
 
 }

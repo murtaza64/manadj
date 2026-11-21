@@ -13,6 +13,11 @@ void mdj_destroy(MDJEngine e) { delete E(e); }
 void mdj_set_rate(MDJEngine e, int r) { E(e)->setOutputRate(r); }
 void mdj_render(MDJEngine e, float *out, int n, int channels) { E(e)->render(out, n, channels); }
 uint64_t mdj_frames(MDJEngine e) { return E(e)->outputFrames(); }
+uint64_t mdj_starved_frames(MDJEngine e) { return E(e)->starvedFrames(); }
+uint64_t mdj_phase_align(MDJEngine e, int d, int peer, double ratio) {
+    return valid(d) && valid(peer) && d != peer && std::isfinite(ratio) && ratio > 0 ? E(e)->submit(Op::PhaseAlign, d, ratio, 0, peer) : 0;
+}
+uint64_t mdj_sync_members(MDJEngine e, int members, int synced) { return E(e)->submit(Op::SetSyncMembers, 0, members & 15, 0, synced & members & 15); }
 uint64_t mdj_prepare(MDJEngine e, int d, uint64_t load) { return valid(d) ? E(e)->submit(Op::Prepare, d, 0, load) : 0; }
 uint64_t mdj_submit(MDJEngine e, MDJOp op, int d, double value, int slot) {
     static const Op ops[] = {Op::Play, Op::Pause, Op::CueDown, Op::CueUp, Op::HotCueDown, Op::HotCueUp,

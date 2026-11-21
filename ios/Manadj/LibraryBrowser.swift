@@ -22,6 +22,7 @@ struct LibraryBrowser: View {
     @State private var rows: [LibraryTrack] = []
     @State private var followLabels: [Int: String] = [:]
     @State private var filtering = false
+    @State private var firstRowTiming = "awaiting first row"
     private var taskId: String {
         "\(model.libraryVersion)|\(model.downloaded.count)|\(search)|\(source.key)|\(sort.rawValue)|\(downloadedOnly)|\(tags.sorted())|\(bpmCenter ?? -1)|\(energy)|\(followReference ?? -1)"
     }
@@ -137,208 +138,230 @@ struct LibraryBrowser: View {
                 ContentUnavailableView.search(text: search)
             } else {
                 List(rows) { track in
-                    HStack(spacing: 2) {
-                        Button {
-                            selectedTrack = selectedTrack == track.id ? nil : track.id
-                        } label: {
-                            Image(systemName: selectedTrack == track.id ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(selectedTrack == track.id ? Ink.accent : Ink.muted)
-                                .frame(width: 44, height: 44)
-                        }.buttonStyle(.plain)
-                            .accessibilityLabel("Select " + track.title)
-                            .accessibilityValue(selectedTrack == track.id ? "Selected" : "Not selected")
-                        Button {
-                            let wasSearching = searchFocused
-                            if onLoad(track) { searchFocused = false }
-                            else { restoreSearchAfterError = wasSearching || !search.isEmpty }
-                        } label: {
-                            LibraryRow(track: track, downloaded: model.downloaded.contains(track.id), evidence: followLabels[track.id]).environmentObject(model)
+                    // Android Library.kt SwipeToLoad: drag left → A, right → B,
+                    // short travel or intentional flick commits on release, no full swipe.
+                    SwipeToLoad(
+                        loadA: { model.loadTarget = 0; if onLoad(track) { searchFocused = false } },
+                        loadB: { model.loadTarget = 1; if onLoad(track) { searchFocused = false } },
+                        background: selectedTrack == track.id ? Ink.accent.opacity(0.08) : Ink.base
+                    ) {
+                        HStack(spacing: 2) {
+                            Button {
+                                selectedTrack = selectedTrack == track.id ? nil : track.id
+                            } label: {
+                                Image(systemName: selectedTrack == track.id ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(selectedTrack == track.id ? Ink.accent : Ink.muted)
+                                    .frame(width: 44, height: 44)
+                            }.buttonStyle(.plain)
+                                .accessibilityLabel("Select " + track.title)
+                                .accessibilityValue(selectedTrack == track.id ? "Selected" : "Not selected")
+                            Button {
+                                let wasSearching = searchFocused
+                                if onLoad(track) { searchFocused = false }
+                                else { restoreSearchAfterError = wasSearching || !search.isEmpty }
+                            } label: {
+                                LibraryRow(track: track, downloaded: model.downloaded.contains(track.id), evidence: followLabels[track.id]).environmentObject(model)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                    }
+                    .onAppear {
+                        #if DEBUG
+                        if let began = model.browserOpenStarted {
+                            firstRowTiming = String(format: "nativeTapToRowAppearMs=%.3f rows=%d", (ProcessInfo.processInfo.systemUptime - began) * 1000, rows.count)
+                            model.browserOpenStarted = nil
+                        }
+                        #endif
                     }
                     .listRowBackground(selectedTrack == track.id ? Ink.accent.opacity(0.08) : Ink.base)
-                    .swipeActions(edge: .leading, allowsFullSwipe: true) { Button("LOAD A") { model.loadTarget = 0; if onLoad(track) { searchFocused = false } }.tint(Ink.decks[0]) }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) { Button("LOAD B") { model.loadTarget = 1; if onLoad(track) { searchFocused = false } }.tint(Ink.decks[1]) }
                     .listRowInsets(EdgeInsets(top: 0, leading: 2, bottom: 0, trailing: 8))
                     .listRowSeparatorTint(Ink.edge)
                     .contextMenu { if let bpm = track.bpm { Button("Match BPM ±6") { bpmCenter = bpm; filtersOpen = true } }; Button("Follow this track") { followReference = track.id }; ForEach(0..<4) { index in Button("Load deck \(Ink.deckName(index))") { if model.load(track, deck: index) { searchFocused = false } } } }
                 }.listStyle(.plain).scrollContentBackground(.hidden)
-            }
-        }
-        .background(Ink.base)
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardOpen = true }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardOpen = false }
-        .task(id: taskId) { await filter() }
-        .onChange(of: model.error) { _, error in
-            if error == nil && restoreSearchAfterError {
-                restoreSearchAfterError = false
-                // SwiftUI dismisses the alert asynchronously. A focus write while it is
-                // still the first responder is dropped on regular iPhone16/iOS18.5.
-                searchFocused = false
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(350))
-                    guard model.error == nil else { return }
-                    searchFocused = true
+                    .accessibilityIdentifier("library-track-list")
+                    .accessibilityValue(firstRowTiming)
                 }
             }
-        }
-    }
-    private var path: [BrowserSource] {
-        var nodes = [source]
-        while let first = nodes.first, first != .root { nodes.insert(parent(of: first), at: 0) }
-        return nodes
-    }
-    private func parent(of node: BrowserSource) -> BrowserSource {
-        switch node {
-        case .root, .collection, .playlists, .tags: return .root
-        case .playlist: return .playlists
-        case .category: return .tags
-        case let .tag(id):
-            return model.snapshot?.tags.first { $0.id == id }.map { .category($0.categoryId) } ?? .tags
-        }
-    }
-    private func title(_ node: BrowserSource) -> String {
-        switch node {
-        case .root: return "Browse"
-        case .collection: return "Collection"
-        case .playlists: return "Playlists"
-        case .tags: return "Tags"
-        case let .playlist(id): return model.snapshot?.playlists.first { $0.id == id }?.name ?? "Playlist"
-        case let .category(id): return model.snapshot?.categories.first { $0.id == id }?.name ?? "Uncategorised"
-        case let .tag(id): return model.snapshot?.tags.first { $0.id == id }?.name ?? "Tag"
-        }
-    }
-    private func navigate(_ node: BrowserSource) {
-        source = node
-        selectedTrack = nil
-        searchFocused = false
-        if case .playlist = node { sort = .playOrder }
-        else if sort == .playOrder { sort = .dateAdded }
-    }
-    @ViewBuilder private var sourceList: some View {
-        List {
-            switch source {
-            case .root:
-                sourceEntry(.collection, count: rows.count)
-                sourceEntry(.playlists, count: nil)
-                sourceEntry(.tags, count: nil)
-            case .playlists:
-                ForEach((model.snapshot?.playlists ?? []).sorted { $0.displayOrder < $1.displayOrder }) { playlist in
-                    sourceEntry(.playlist(playlist.id), count: rows.filter { playlist.trackIds.contains($0.id) }.count)
-                }
-                if model.snapshot?.playlists.isEmpty == true { Text("No playlists in this snapshot").foregroundStyle(Ink.muted) }
-            case .tags:
-                ForEach(model.snapshot?.categories ?? [], id: \.id) { category in
-                    let ids = Set((model.snapshot?.tags ?? []).filter { $0.categoryId == category.id }.map(\.id))
-                    sourceEntry(.category(category.id), count: rows.filter { !ids.isDisjoint(with: $0.tagIds) }.count)
-                }
-                if model.snapshot?.categories.isEmpty == true { Text("No tags in this snapshot").foregroundStyle(Ink.muted) }
-            case let .category(id):
-                ForEach((model.snapshot?.tags ?? []).filter { $0.categoryId == id }, id: \.id) { tag in
-                    sourceEntry(.tag(tag.id), count: rows.filter { $0.tagIds.contains(tag.id) }.count)
-                }
-            default: EmptyView()
-            }
-        }.listStyle(.plain).scrollContentBackground(.hidden)
-    }
-    private func sourceEntry(_ node: BrowserSource, count: Int?) -> some View {
-        Button { navigate(node) } label: {
-            HStack {
-                Text(title(node)).font(Ink.font(14, bold: true))
-                Spacer()
-                if let count { Text("\(count)").font(Ink.font(12)).foregroundStyle(Ink.muted) }
-                Image(systemName: "chevron.right").foregroundStyle(Ink.accent)
-            }.frame(minHeight: 44).contentShape(Rectangle())
-        }.buttonStyle(.plain).listRowBackground(Ink.base)
-            .accessibilityIdentifier("source-" + node.key)
-            .accessibilityValue(count.map { "\($0) tracks" } ?? "Folder")
-    }
-    private func filter() async {
-        guard let snapshot = model.snapshot else { rows = []; return }
-        filtering = true
-        var q = LibraryQuery()
-        q.search = search; q.playlistId = playlist; q.sort = sort; q.descending = sort == .dateAdded
-        q.downloadedOnly = downloadedOnly; q.tagIds = tags
-        q.bpmCenter = bpmCenter; q.bpmTolerance = 6
-        q.energy = energy > 0 ? energy...energy : nil
-        let query = q, offline = model.downloaded, reference = followReference
-        let scope = source
-        let sourceTag: Int? = { if case let .tag(id) = scope { return id }; return nil }()
-        let result = await Task.detached(priority: .userInitiated) { () -> ([LibraryTrack], [Int: String]) in
-            let library = Library(snapshot, downloaded: { offline.contains($0.id) })
-            if let reference, !scope.isContainer {
-                let ranked = library.follow([reference], within: query)
-                return (ranked.map(\.track).filter { track in sourceTag.map { track.tagIds.contains($0) } ?? true }, Dictionary(uniqueKeysWithValues: ranked.map { ($0.id, $0.label) }))
-            }
-            return (library.query(query).filter { track in sourceTag.map { track.tagIds.contains($0) } ?? true }, [:])
-        }.value
-        guard !Task.isCancelled else { return }
-        rows = result.0; followLabels = result.1; filtering = false
-    }
-}
-
-private struct LibraryChipStyle: ButtonStyle {
-    var active = false
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(Ink.font(10, bold: true)).lineLimit(1).padding(.horizontal, 8).frame(height: 28)
-            .foregroundStyle(active ? Ink.accent : Ink.muted)
-            .background(active || configuration.isPressed ? Ink.accent.opacity(0.13) : Ink.crust, in: Capsule())
-            .overlay(Capsule().stroke(active ? Ink.accent : Ink.muted.opacity(0.65), lineWidth: 1))
-            .frame(minHeight: 44).contentShape(Rectangle())
-    }
-}
-
-private struct LibraryRow: View {
-    @EnvironmentObject var model: AppModel
-    let track: LibraryTrack
-    let downloaded: Bool
-    let evidence: String?
-    @State private var waveform: PreviewWaveform?
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(spacing: 2) {
-                    Text(track.bpm.map { String(format: "%.1f", $0) } ?? "--").foregroundStyle(Ink.decks[1])
-                    Text(track.keyOpenKey ?? "--").foregroundStyle(Ink.play)
-                }.font(Ink.font(12, bold: true)).frame(width: 48)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(track.title).font(Ink.font(13, bold: true)).foregroundStyle(Ink.text).lineLimit(1)
-                    Text(track.artist ?? track.fileName).font(Ink.font(11)).foregroundStyle(Ink.muted).lineLimit(1)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: downloaded ? "checkmark.circle.fill" : "icloud.and.arrow.down").font(.system(size: 11)).foregroundStyle(downloaded ? Ink.play : Ink.muted).accessibilityLabel(downloaded ? "Downloaded" : "Download required")
-            }
-            HStack(spacing: 6) {
-                if let waveform, !waveform.peaks.isEmpty {
-                    WaveformView(waveform: waveform, color: Ink.accent, background: .clear).frame(width: 102, height: 16)
-                }
-                ForEach(track.tagIds.prefix(3), id: \.self) { id in
-                    if let tag = model.snapshot?.tags.first(where: { $0.id == id }) {
-                        Text(tag.name).font(Ink.font(9)).foregroundStyle(Ink.accent).padding(.horizontal, 3).background(Ink.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+            .background(Ink.base)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardOpen = true }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardOpen = false }
+            .task(id: taskId) { await filter() }
+            .onChange(of: model.error) { _, error in
+                if error == nil && restoreSearchAfterError {
+                    restoreSearchAfterError = false
+                    // SwiftUI dismisses the alert asynchronously. A focus write while it is
+                    // still the first responder is dropped on regular iPhone16/iOS18.5.
+                    searchFocused = false
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(350))
+                        guard model.error == nil else { return }
+                        searchFocused = true
                     }
                 }
-                Spacer(minLength: 0)
-                Text(track.durationSecs.map(Ink.clock) ?? "--:--").font(Ink.font(9)).foregroundStyle(Ink.muted)
             }
-            if let evidence { Text(evidence).font(Ink.font(10)).foregroundStyle(Ink.accent) }
-        }.padding(.vertical, 2).frame(minHeight: 44)
-        .task(id: track.previewRev) { waveform = await model.preview(track) }
-    }
-}
-
-private enum BrowserSource: Equatable, Sendable {
-    case root, collection, playlists, playlist(Int), tags, category(Int), tag(Int)
-    var isContainer: Bool {
-        switch self { case .root, .playlists, .tags, .category: return true; default: return false }
-    }
-    var key: String {
-        switch self {
-        case .root: return "root"
-        case .collection: return "collection"
-        case .playlists: return "playlists"
-        case let .playlist(id): return "playlist-\(id)"
-        case .tags: return "tags"
-        case let .category(id): return "category-\(id)"
-        case let .tag(id): return "tag-\(id)"
+        }
+        private var path: [BrowserSource] {
+            var nodes = [source]
+            while let first = nodes.first, first != .root { nodes.insert(parent(of: first), at: 0) }
+            return nodes
+        }
+        private func parent(of node: BrowserSource) -> BrowserSource {
+            switch node {
+            case .root, .collection, .playlists, .tags: return .root
+            case .playlist: return .playlists
+            case .category: return .tags
+            case let .tag(id):
+                return model.snapshot?.tags.first { $0.id == id }.map { .category($0.categoryId) } ?? .tags
+            }
+        }
+        private func title(_ node: BrowserSource) -> String {
+            switch node {
+            case .root: return "Browse"
+            case .collection: return "Collection"
+            case .playlists: return "Playlists"
+            case .tags: return "Tags"
+            case let .playlist(id): return model.snapshot?.playlists.first { $0.id == id }?.name ?? "Playlist"
+            case let .category(id): return model.snapshot?.categories.first { $0.id == id }?.name ?? "Uncategorised"
+            case let .tag(id): return model.snapshot?.tags.first { $0.id == id }?.name ?? "Tag"
+            }
+        }
+        private func navigate(_ node: BrowserSource) {
+            source = node
+            selectedTrack = nil
+            searchFocused = false
+            if case .playlist = node { sort = .playOrder }
+            else if sort == .playOrder { sort = .dateAdded }
+        }
+        @ViewBuilder private var sourceList: some View {
+            List {
+                switch source {
+                case .root:
+                    sourceEntry(.collection, count: rows.count)
+                    sourceEntry(.playlists, count: nil)
+                    sourceEntry(.tags, count: nil)
+                case .playlists:
+                    ForEach((model.snapshot?.playlists ?? []).sorted { $0.displayOrder < $1.displayOrder }) { playlist in
+                        sourceEntry(.playlist(playlist.id), count: rows.filter { playlist.trackIds.contains($0.id) }.count)
+                    }
+                    if model.snapshot?.playlists.isEmpty == true { Text("No playlists in this snapshot").foregroundStyle(Ink.muted) }
+                case .tags:
+                    ForEach(model.snapshot?.categories ?? [], id: \.id) { category in
+                        let ids = Set((model.snapshot?.tags ?? []).filter { $0.categoryId == category.id }.map(\.id))
+                        sourceEntry(.category(category.id), count: rows.filter { !ids.isDisjoint(with: $0.tagIds) }.count)
+                    }
+                    if model.snapshot?.categories.isEmpty == true { Text("No tags in this snapshot").foregroundStyle(Ink.muted) }
+                case let .category(id):
+                    ForEach((model.snapshot?.tags ?? []).filter { $0.categoryId == id }, id: \.id) { tag in
+                        sourceEntry(.tag(tag.id), count: rows.filter { $0.tagIds.contains(tag.id) }.count)
+                    }
+                default: EmptyView()
+                }
+            }.listStyle(.plain).scrollContentBackground(.hidden)
+        }
+        private func sourceEntry(_ node: BrowserSource, count: Int?) -> some View {
+            Button { navigate(node) } label: {
+                HStack {
+                    Text(title(node)).font(Ink.font(14, bold: true))
+                    Spacer()
+                    if let count { Text("\(count)").font(Ink.font(12)).foregroundStyle(Ink.muted) }
+                    Image(systemName: "chevron.right").foregroundStyle(Ink.accent)
+                }.frame(minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).listRowBackground(Ink.base)
+                .accessibilityIdentifier("source-" + node.key)
+                .accessibilityValue(count.map { "\($0) tracks" } ?? "Folder")
+        }
+        private func filter() async {
+            guard let snapshot = model.snapshot else { rows = []; return }
+            filtering = true
+            var q = LibraryQuery()
+            q.search = search; q.playlistId = playlist; q.sort = sort; q.descending = sort == .dateAdded
+            q.downloadedOnly = downloadedOnly; q.tagIds = tags
+            q.bpmCenter = bpmCenter; q.bpmTolerance = 6
+            q.energy = energy > 0 ? energy...energy : nil
+            let query = q, offline = model.downloaded, reference = followReference
+            let scope = source
+            let sourceTag: Int? = { if case let .tag(id) = scope { return id }; return nil }()
+            let result = await Task.detached(priority: .userInitiated) { () -> ([LibraryTrack], [Int: String]) in
+                let library = Library(snapshot, downloaded: { offline.contains($0.id) })
+                if let reference, !scope.isContainer {
+                    let ranked = library.follow([reference], within: query)
+                    return (ranked.map(\.track).filter { track in sourceTag.map { track.tagIds.contains($0) } ?? true }, Dictionary(uniqueKeysWithValues: ranked.map { ($0.id, $0.label) }))
+                }
+                return (library.query(query).filter { track in sourceTag.map { track.tagIds.contains($0) } ?? true }, [:])
+            }.value
+            guard !Task.isCancelled else { return }
+            rows = result.0; followLabels = result.1; filtering = false
         }
     }
-}
+
+    private struct LibraryChipStyle: ButtonStyle {
+        var active = false
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label.font(Ink.font(10, bold: true)).lineLimit(1).padding(.horizontal, 8).frame(height: 28)
+                .foregroundStyle(active ? Ink.accent : Ink.muted)
+                .background(active || configuration.isPressed ? Ink.accent.opacity(0.13) : Ink.crust, in: Capsule())
+                .overlay(Capsule().stroke(active ? Ink.accent : Ink.muted.opacity(0.65), lineWidth: 1))
+                .frame(minHeight: 44).contentShape(Rectangle())
+        }
+    }
+
+    private struct LibraryRow: View {
+        @EnvironmentObject var model: AppModel
+        let track: LibraryTrack
+        let downloaded: Bool
+        let evidence: String?
+        @State private var waveform: PreviewWaveform?
+        @State private var previewChecked = false
+        var body: some View {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(spacing: 2) {
+                        Text(track.bpm.map { String(format: "%.1f", $0) } ?? "--").foregroundStyle(Ink.decks[1])
+                        Text(track.keyOpenKey ?? "--").foregroundStyle(Ink.play)
+                    }.font(Ink.font(12, bold: true)).frame(width: 48)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(track.title).font(Ink.font(13, bold: true)).foregroundStyle(Ink.text).lineLimit(1)
+                        Text(track.artist ?? track.fileName).font(Ink.font(11)).foregroundStyle(Ink.muted).lineLimit(1)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: downloaded ? "checkmark.circle.fill" : "icloud.and.arrow.down").font(.system(size: 11)).foregroundStyle(downloaded ? Ink.play : Ink.muted).accessibilityLabel(downloaded ? "Downloaded" : "Download required")
+                }
+                HStack(spacing: 6) {
+                    if let waveform, !waveform.peaks.isEmpty {
+                        WaveformView(waveform: waveform, color: Ink.accent, background: .clear).frame(width: 102, height: 16)
+                            .accessibilityIdentifier("library-row-preview-\(track.id)")
+                    } else {
+                        Text(track.previewRev == nil ? "No preview on desktop" : (previewChecked ? "Preview unavailable locally" : "Loading preview…"))
+                            .font(Ink.font(8)).foregroundStyle(Ink.muted)
+                            .accessibilityIdentifier("library-row-preview-status-\(track.id)")
+                    }
+                    ForEach(track.tagIds.prefix(3), id: \.self) { id in
+                        if let tag = model.snapshot?.tags.first(where: { $0.id == id }) {
+                            Text(tag.name).font(Ink.font(9)).foregroundStyle(Ink.accent).padding(.horizontal, 3).background(Ink.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    Text(track.durationSecs.map(Ink.clock) ?? "--:--").font(Ink.font(9)).foregroundStyle(Ink.muted)
+                }
+                if let evidence { Text(evidence).font(Ink.font(10)).foregroundStyle(Ink.accent) }
+            }.padding(.vertical, 2).frame(minHeight: 44)
+            .task(id: "\(track.id)-\(track.previewRev ?? "none")-\(model.libraryVersion)") { previewChecked = false; waveform = await model.preview(track); previewChecked = true }
+        }
+    }
+
+    private enum BrowserSource: Equatable, Sendable {
+        case root, collection, playlists, playlist(Int), tags, category(Int), tag(Int)
+        var isContainer: Bool {
+            switch self { case .root, .playlists, .tags, .category: return true; default: return false }
+        }
+        var key: String {
+            switch self {
+            case .root: return "root"
+            case .collection: return "collection"
+            case .playlists: return "playlists"
+            case let .playlist(id): return "playlist-\(id)"
+            case .tags: return "tags"
+            case let .category(id): return "category-\(id)"
+            case let .tag(id): return "tag-\(id)"
+            }
+        }
+    }

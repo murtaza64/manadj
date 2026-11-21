@@ -143,7 +143,12 @@ struct WorkspaceView: View {
     }
 
     private var browseKey: some View {
-        Button("BROWSE") { withAnimation { settings = false; browsing.toggle() } }.buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing))
+        Button("BROWSE") {
+            #if DEBUG
+            if !browsing { model.browserOpenStarted = ProcessInfo.processInfo.systemUptime }
+            #endif
+            withAnimation { settings = false; browsing.toggle() }
+        }.buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing))
     }
     private var library: some View {
         LibraryBrowser(onClose: { withAnimation { browsing = false } }, onLoad: { track in
@@ -162,7 +167,7 @@ struct WorkspaceView: View {
                     Button("XF") { xf.toggle(); if !xf { model.crossfade = 0; model.set(MDJCrossfade, 0, 0) } }.buttonStyle(PerformanceKeyStyle(active: xf))
                 }.frame(height: 36)
                 HStack(spacing: 2) {
-                    Button("SESSIONS") { notice = "Session replay is not implemented on iOS yet" }.buttonStyle(PerformanceKeyStyle(color: Ink.muted))
+                    Button("SESSIONS · WIP") { notice = "Session replay is not implemented on iOS yet" }.buttonStyle(PerformanceKeyStyle(color: Ink.muted))
                     Button { withAnimation { browsing = false; settings.toggle() } } label: { Image(systemName: "gearshape") }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).accessibilityLabel("Settings")
                 }.frame(height: 36)
                 recordingBar.frame(height: 44)

@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 import UIKit
 import AVFoundation
 import ManadjAudio
@@ -7,6 +8,81 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    @MainActor func testRendererBeforeAfterFrozenBaselineSynthetic() throws {
+        let resource = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "mwf"))
+        let wave = try PreviewWaveform.parse(Data(contentsOf: resource))
+        var state = MDJDeck(); state.ready = true; state.bpm = 128; state.position = 8
+        state.hotCues = (-1,-1,-1,-1,-1,-1,-1,-1)
+        for overview in [false, true] {
+            let size = CGSize(width: overview ? 150 : 390, height: overview ? 36 : 60)
+            let old = BaselinePerformanceWaveView(frame: CGRect(origin: .zero, size: size))
+            let now = PerformanceWaveView(frame: CGRect(origin: .zero, size: size))
+            old.wave = wave; old.duration = wave.durationSecs; old.state = { state }; old.overview = overview
+            now.wave = wave; now.duration = wave.durationSecs; now.state = { state }; now.overview = overview
+            old.contentScaleFactor = 3; now.contentScaleFactor = 3
+            let format = UIGraphicsImageRendererFormat(); format.scale = 3
+            let renderer = UIGraphicsImageRenderer(size: size, format: format)
+            func run(_ draw: () -> Void) -> Double {
+                let begin = ProcessInfo.processInfo.systemUptime
+                for i in 0..<90 { state.position = 8 + Double(i) / 60; autoreleasepool { _ = renderer.image { _ in draw() } } }
+                return (ProcessInfo.processInfo.systemUptime - begin) * 1000 / 90
+            }
+            _ = run { old.draw(old.bounds) }; _ = run { now.draw(now.bounds) }
+            let baseline = run { old.draw(old.bounds) }, revised = run { now.draw(now.bounds) }
+            print("SYNTHETIC_WAVE_DRAW overview=\(overview) baselineMsPerFrame=\(baseline) revisedMsPerFrame=\(revised) scale=3 frames=90 mode=Debug simulatorNotDevice=true")
+            state.position = 8
+            for (name, draw) in [("Frozen baseline", { old.draw(old.bounds) }), ("Revised Android columns", { now.draw(now.bounds) })] {
+                let image = renderer.image { _ in draw() }; let shot = XCTAttachment(image: image)
+                shot.name = "\(name) synthetic wave overview=\(overview)"; shot.lifetime = .keepAlways; add(shot)
+            }
+        }
+    }
+
+    @MainActor func testIdleControlPollingDoesNotPublishUnchangedDecks() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(storageRoot: root)
+        try await Task.sleep(for: .milliseconds(250))
+        model.poll()
+        var changes = 0
+        let sink = model.objectWillChange.sink { changes += 1 }
+        for _ in 0..<100 { model.poll() }
+        XCTAssertEqual(changes, 0, "Idle engine snapshots must not invalidate the whole SwiftUI tree")
+        withExtendedLifetime(sink) {}
+    }
+
+    @MainActor func testNativeOutputClockAndSourceRateAgainstRenderedFrames() async throws {
+        for rate in [44_100.0, 48_000.0] {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+            defer { try? FileManager.default.removeItem(at: url) }
+            let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2))
+            do {
+                let file = try AVAudioFile(forWriting: url, settings: format.settings)
+                let pcm = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(rate * 6)))
+                pcm.frameLength = pcm.frameCapacity
+                let channels = try XCTUnwrap(pcm.floatChannelData)
+                for i in 0..<Int(pcm.frameLength) { let v = Float(sin(Double(i) * .pi * 2 * 440 / rate)) * 0.05; channels[0][i] = v; channels[1][i] = v }
+                try file.write(from: pcm)
+            }
+            let audio = try NativeAudio()
+            _ = try await audio.load(url, deck: 0)
+            XCTAssertTrue(audio.send(MDJPlay))
+            try await Task.sleep(for: .milliseconds(100))
+            let startFrames = audio.renderedFrames, startPosition = audio.state(0).position
+            let begin = ProcessInfo.processInfo.systemUptime
+            try await Task.sleep(for: .seconds(2))
+            let wall = ProcessInfo.processInfo.systemUptime - begin
+            let rendered = Double(audio.renderedFrames - startFrames) / 48_000
+            let moved = audio.state(0).position - startPosition
+            print("SYNTHETIC_AUDIO_TIMING source=\(rate) wall=\(wall) outputSeconds=\(rendered) playheadSeconds=\(moved) starvedFrames=\(audio.starvedFrames)")
+            XCTAssertEqual(moved, rendered, accuracy: 0.05, "Source-rate conversion must follow output frames")
+            XCTAssertGreaterThan(rendered, wall * 0.70, "Simulator output clock is unexpectedly stalled; not a phone benchmark")
+            XCTAssertLessThan(rendered, wall * 1.30)
+            XCTAssertEqual(audio.starvedFrames, 0)
+            audio.send(MDJPause)
+        }
+    }
+
     @MainActor func testCueFlagGeometryKeepsEdgesVisibleAndMinimapsCompact() {
         let lane = CGRect(x: 0, y: 0, width: 300, height: 48)
         for vertical in [false, true] {

@@ -46,8 +46,14 @@ extension AppModel {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("library-ui-" + UUID().uuidString)
         do {
             let store = try LibraryStore(root: root.appendingPathComponent("library"))
-            let json = #"{"version":1,"tag_categories":[{"id":1,"name":"Style"}],"tags":[{"id":1,"name":"Rolling","category_id":1},{"id":2,"name":"Liquid","category_id":1}],"settings":{},"playlists":[{"id":10,"name":"Fixture set","display_order":0,"track_ids":[1,2]},{"id":11,"name":"Empty set","display_order":1,"track_ids":[]}],"tracks":[{"id":1,"file_name":"cached.wav","title":"Cached Test Tone","bpm":128,"tag_ids":[1],"artist":"Synthetic fixture","audio_rev":"fixture"},{"id":2,"file_name":"offline.wav","title":"Offline Test Tone","bpm":174,"tag_ids":[2],"artist":"Synthetic fixture","audio_rev":"missing"}]}"#
+            let json = #"{"version":1,"tag_categories":[{"id":1,"name":"Style"}],"tags":[{"id":1,"name":"Rolling","category_id":1},{"id":2,"name":"Liquid","category_id":1}],"settings":{},"playlists":[{"id":10,"name":"Fixture set","display_order":0,"track_ids":[1,2]},{"id":11,"name":"Empty set","display_order":1,"track_ids":[]}],"tracks":[{"id":1,"file_name":"cached.wav","title":"Cached Test Tone","bpm":128,"tag_ids":[1],"artist":"Synthetic fixture","audio_rev":"fixture","preview_rev":"fixture"},{"id":2,"file_name":"offline.wav","title":"Offline Test Tone","bpm":174,"tag_ids":[2],"artist":"Synthetic fixture","audio_rev":"missing","preview_rev":"fixture"}]}"#
             try store.saveSnapshot(json)
+            // Row preview coverage: both tracks carry a preview blob, so the
+            // browser UI tests see the same waveform path as a synced phone.
+            for (track, name) in zip(try SnapshotJson.parse(json).tracks, ["synthetic-A", "synthetic-B"]) {
+                guard let wave = Bundle.main.url(forResource: name, withExtension: "mwf") else { return nil }
+                try store.savePreview(Data(contentsOf: wave), track: track)
+            }
             let track = try SnapshotJson.parse(json).tracks[0]
             guard let url = store.audioFile(track), let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2),
                   let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44100) else { return nil }
