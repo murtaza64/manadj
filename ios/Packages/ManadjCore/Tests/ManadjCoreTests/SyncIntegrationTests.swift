@@ -65,6 +65,30 @@ final class SyncIntegrationTests: XCTestCase, @unchecked Sendable {
         do { _ = try await fixture.client(token: "wrong").snapshotText(); XCTFail("Expected authorization failure") }
         catch let error as SyncError { XCTAssertEqual(error.status, 401) }
     }
+    func testDetailUsesFullEndpointAndIndependentRevisionKeyedCache() async throws {
+        let fixture = try Fixture()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = try LibraryRepository(root: root)
+        let connection = try DesktopConnection(url: fixture.url, deviceToken: "fixture-not-a-real-token")
+        let snapshot = try await repository.sync(connection)
+        let track = snapshot.tracks[0]
+        let preview = await repository.preview(track)
+        XCTAssertEqual(preview?.bandFrames, 256)
+        let full = try await repository.detail(track, connection: connection)
+        XCTAssertEqual(full?.bandFrames, 2048)
+        let reopened = try LibraryRepository(root: root)
+        let offline = try await reopened.detail(track, connection: nil)
+        XCTAssertEqual(offline?.bandFrames, 2048)
+        let store = await repository.store
+        XCTAssertNotEqual(store.detailFile(track), store.previewFile(track))
+        let originalText = try await fixture.client().snapshotText()
+        let changedText = originalText.replacingOccurrences(of: "detail-revision", with: "new-revision")
+        let changed = try SnapshotJson.parse(changedText).tracks[0]
+        XCTAssertNil(store.detail(changed))
+        do { _ = try await repository.detail(changed, connection: connection); XCTFail("Must reject stale full wave revision") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("revision changed")) }
+    }
     func testRepositoryBulkSyncSkipsUnavailableTracksAndPreservesOfflineAudio() async throws {
         let fixture = try Fixture()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
