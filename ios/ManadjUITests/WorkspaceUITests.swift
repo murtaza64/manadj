@@ -373,6 +373,38 @@ final class WorkspaceUITests: XCTestCase {
         app.buttons["browser-open"].tap(); XCTAssertTrue(handle.waitForExistence(timeout: 5))
     }
 
+    @MainActor func testBrowserTopEdgeDragHandsOffToDrawer() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture", "--browser-scroll-fixture"]; app.launch()
+        app.buttons["browser-open"].tap()
+        let list = app.scrollViews["library-track-list"]
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        let origin = list.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.15))
+        origin.press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: 240)), withVelocity: .slow, thenHoldForDuration: 0.3)
+        let closed = NSPredicate(format: "exists == false")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: closed, object: list)], timeout: 5), .completed, "At the list top, downward overscroll must move and close the drawer rather than bounce rows independently")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "Drawer drag must not load a track")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Top-of-list downward drag settled drawer"; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    @MainActor func testLandscapeBrowserControlsAndRowsStayReachable() {
+        defer { XCUIDevice.shared.orientation = .portrait; captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let rotated = NSPredicate { _, _ in app.frame.width > app.frame.height }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: rotated, object: app)], timeout: 10), .completed)
+        app.buttons["browser-open"].firstMatch.tap()
+        let search = app.textFields["Search title, artist, file"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); XCTAssertTrue(search.isHittable)
+        let row = app.staticTexts["Cached Test Tone"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10)); XCTAssertTrue(row.isHittable, "Landscape header must leave visible rows")
+        let close = app.buttons["browser-close"]
+        XCTAssertTrue(close.isHittable)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Landscape browser real controls and rows"; shot.lifetime = .keepAlways; add(shot)
+        close.tap()
+        XCTAssertFalse(search.exists)
+    }
+
     @MainActor func testLibraryQuickSwipeLoadsWithoutFullSwipe() {
         defer { captureFailure() }
         let app = XCUIApplication()
