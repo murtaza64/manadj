@@ -34,7 +34,7 @@ struct PerformanceDeckControls: View {
                                 let slot = r * 4 + c
                                 HoldControl(title: "\(slot + 1)\n\(cue(slot) < 0 ? "SET" : Ink.clock(cue(slot)))", color: Ink.cues[slot], active: state.preview && state.previewSlot == slot, enabled: state.ready, marked: cue(slot) >= 0, down: {
                                     model.set(shift ? MDJHotCueClear : cue(slot) < 0 ? MDJHotCueSet : MDJHotCueDown, index, 0, slot: slot)
-                                }, up: { model.set(MDJHotCueUp, index, 0, slot: slot) }).padding(3).accessibilityLabel("\(Ink.deckName(index)) hotcue \(slot + 1)")
+                                }, up: { model.set(MDJHotCueUp, index, 0, slot: slot) }).padding(3).accessibilityLabel("\(Ink.deckName(index)) hotcue \(slot + 1)").feedbackTarget("Deck \(Ink.deckName(index)) hotcue \(slot + 1)")
                             }
                         }
                     }
@@ -68,7 +68,7 @@ struct PerformanceDeckControls: View {
                         }.padding(.horizontal, 7).frame(maxHeight: .infinity)
                     }.background(Ink.panel).clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
                         .overlay(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12).stroke(color.opacity(0.6), lineWidth: 1.5)).padding(2)
-                }.buttonStyle(.plain).frame(height: row).accessibilityLabel("\(Ink.deckName(index)) PITCH panel")
+                }.buttonStyle(.plain).frame(height: row).accessibilityLabel("\(Ink.deckName(index)) PITCH panel").feedbackTarget("Deck \(Ink.deckName(index)) pitch panel")
 
             }
             .overlay {

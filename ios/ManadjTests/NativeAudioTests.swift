@@ -7,6 +7,26 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    func testFeedbackTargetMatchesSmallestRegisteredControlAndNeverGuesses() {
+        let targets = [FeedbackTarget(label: "Deck A", frame: CGRect(x: 0, y: 0, width: 200, height: 400)),
+                       FeedbackTarget(label: "Deck A cue", frame: CGRect(x: 20, y: 200, width: 60, height: 44))]
+        let viewport = CGSize(width: 400, height: 800)
+        XCTAssertEqual(FeedbackTarget.label(at: CGPoint(x: 0.1, y: 0.275), viewport: viewport, in: targets), "Deck A cue")
+        XCTAssertNil(FeedbackTarget.label(at: CGPoint(x: 0.8, y: 0.8), viewport: viewport, in: targets))
+        XCTAssertNil(FeedbackTarget.label(at: CGPoint(x: -0.1, y: 0.1), viewport: viewport, in: targets))
+        XCTAssertNil(FeedbackTarget.label(at: .zero, viewport: .zero, in: targets))
+    }
+
+    @MainActor func testFeedbackTargetMarkerIsFlattenedIntoReviewedImage() throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 200, height: 400)).image { context in
+            UIColor.black.setFill(); context.fill(CGRect(x: 0, y: 0, width: 200, height: 400))
+        }
+        let plain = FeedbackCanvasView.flatten(image, strokes: [])
+        let marked = FeedbackCanvasView.flatten(image, strokes: [], selection: CGPoint(x: 0.5, y: 0.5))
+        XCTAssertNotEqual(plain.pngData(), marked.pngData())
+        XCTAssertEqual(marked.size, image.size)
+    }
+
     @MainActor func testLoadedDeckReadsOfflineFullWaveformCache() async throws {
         let root = try XCTUnwrap(AppModel.makePerformanceUIFixture())
         defer { try? FileManager.default.removeItem(at: root) }
