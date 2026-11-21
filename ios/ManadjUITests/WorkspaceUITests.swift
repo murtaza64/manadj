@@ -107,6 +107,9 @@ final class WorkspaceUITests: XCTestCase {
         let pitchButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PITCH")).firstMatch
         XCTAssertLessThanOrEqual(pitchButton.frame.maxY, app.frame.maxY - 16, "Pitch control must stay above bottom safe area")
         XCTAssertTrue(pitchButton.isHittable)
+        XCTAssertGreaterThanOrEqual(pitchButton.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(play.frame.height, 44)
+        print("STANDARD_TARGETS pitch=\(pitchButton.frame) play=\(play.frame) app=\(app.frame)")
         pitchButton.tap()
         XCTAssertTrue(app.buttons["Close pitch panel"].waitForExistence(timeout: 5))
         Thread.sleep(forTimeInterval: 0.6)

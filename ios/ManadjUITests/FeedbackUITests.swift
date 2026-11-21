@@ -1,123 +1,112 @@
 import XCTest
 
-/// The simulator has no accelerometer, so --feedback-ui-fixture presents the
-/// review sheet directly; shake itself is device-only coverage.
 final class FeedbackUITests: XCTestCase {
+    @MainActor private func capture(_ name: String, app: XCUIApplication) {
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
+    }
+    @MainActor private func field(_ app: XCUIApplication) -> XCUIElement { app.descendants(matching: .any).matching(identifier: "feedback-title").firstMatch }
     @MainActor func testExplicitButtonPicksTargetDrawsAndCancelsWithoutFiling() {
-        defer { captureFailure() }
-        let app = XCUIApplication()
-        app.launchArguments = ["--performance-ui-fixture"]
-        app.launch()
-        let open = app.buttons["feedback-open"]
-        XCTAssertTrue(open.waitForExistence(timeout: 15))
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        let open = app.buttons["feedback-open"]; XCTAssertTrue(open.waitForExistence(timeout: 15))
         let deck = app.descendants(matching: .any).matching(identifier: "deck-0-info").firstMatch.frame
         let screen = app.frame
-        let point = CGVector(dx: deck.midX / screen.width, dy: deck.midY / screen.height)
-        let workspace = XCTAttachment(screenshot: app.screenshot())
-        workspace.name = "Workspace explicit feedback button"; workspace.lifetime = .keepAlways; add(workspace)
+        capture("Before inline feedback, current workspace", app: app)
         open.tap()
-        XCTAssertTrue(app.otherElements["feedback-review"].waitForExistence(timeout: 10))
-        let pick = app.buttons["feedback-pick-element"]
-        for _ in 0..<5 { if pick.isHittable { break }; app.swipeUp() }
-        XCTAssertTrue(pick.isHittable)
-        pick.tap()
-        let picker = app.otherElements["feedback-target-picker"]
-        XCTAssertTrue(picker.waitForExistence(timeout: 5))
-        let pickerCanvas = picker.descendants(matching: .any).matching(identifier: "feedback-canvas").firstMatch
-        XCTAssertTrue(pickerCanvas.exists)
-        let pickShot = XCTAttachment(screenshot: app.screenshot())
-        pickShot.name = "Full screen frozen screenshot target picker"; pickShot.lifetime = .keepAlways; add(pickShot)
-        pickerCanvas.coordinate(withNormalizedOffset: point).tap()
-        let canvas = app.otherElements["feedback-review"].descendants(matching: .any).matching(identifier: "feedback-canvas").firstMatch
+        let toolbar = app.otherElements["feedback-live-toolbar"]
+        XCTAssertTrue(toolbar.waitForExistence(timeout: 10))
+        capture("Live feedback toolbar in center FX slot, mixing controls stay active", app: app)
+        XCTAssertFalse(app.otherElements["feedback-review"].exists)
+        app.buttons["BROWSE"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
+        XCTAssertTrue(toolbar.exists)
+        app.buttons["BROWSE"].firstMatch.tap()
+        app.buttons["feedback-review-open"].tap()
+        let review = app.otherElements["feedback-review"]; XCTAssertTrue(review.waitForExistence(timeout: 10))
+        let card = app.otherElements["feedback-comment-card"]; XCTAssertTrue(card.exists)
+        XCTAssertLessThan(card.frame.height, screen.height * 0.5, "Initial feedback must be a small card, not a new screen")
+        capture("Inline feedback small comment card over captured workspace", app: app)
+        app.buttons["feedback-pick-element"].tap()
+        // Frozen full-screen pointing never presses the real deck control.
+        app.coordinate(withNormalizedOffset: CGVector(dx: deck.midX / screen.width, dy: deck.midY / screen.height)).tap()
         let target = app.staticTexts["feedback-selected-target"]
-        XCTAssertTrue(target.waitForExistence(timeout: 5))
-        XCTAssertTrue(target.label.contains("Deck A track info"), target.label)
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2))
-            .press(forDuration: 0.05, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.7)))
+        XCTAssertTrue(target.waitForExistence(timeout: 5)); XCTAssertTrue(target.label.contains("Deck A track info"), target.label)
+        let canvas = app.descendants(matching: .any).matching(identifier: "feedback-canvas").firstMatch
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.25)).press(forDuration: 0.05, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.4)))
         XCTAssertTrue(app.buttons["UNDO"].isEnabled)
-        let marked = XCTAttachment(screenshot: app.screenshot())
-        marked.name = "Feedback named target and freehand drawing"; marked.lifetime = .keepAlways; add(marked)
-        app.buttons["CLEAR TARGET"].tap()
-        XCTAssertFalse(target.exists)
-        app.buttons["CANCEL"].tap()
-        XCTAssertTrue(open.waitForExistence(timeout: 5))
-        open.tap()
-        XCTAssertTrue(app.otherElements["feedback-review"].waitForExistence(timeout: 10))
-        app.buttons["feedback-open-outbox"].tap()
-        XCTAssertTrue(app.staticTexts["No saved reports."].waitForExistence(timeout: 5), "Picking/drawing/cancelling must not queue or send")
+        capture("Point and draw in place, same compact feedback card", app: app)
+        app.buttons["Move feedback card"].tap(); capture("Feedback card moved to reveal lower controls", app: app)
+        app.buttons["CLEAR TARGET"].tap(); XCTAssertFalse(target.exists)
+        app.buttons["CANCEL"].tap(); XCTAssertTrue(open.waitForExistence(timeout: 5))
+        open.tap(); app.buttons["feedback-review-open"].tap(); app.buttons["feedback-open-outbox"].tap()
+        XCTAssertTrue(app.staticTexts["No saved reports."].waitForExistence(timeout: 5))
     }
-
-    @MainActor private func captureFailure() {
-        if testRun?.hasSucceeded == false {
-            let app = XCUIApplication()
-            let hierarchy = XCTAttachment(string: app.debugDescription)
-            hierarchy.name = "Failure accessibility hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
-            let shot = XCTAttachment(screenshot: app.screenshot())
-            shot.name = "Failure screen"; shot.lifetime = .keepAlways; add(shot)
-        }
-    }
-
     @MainActor func testReviewSheetListsContextAndQueuesWithoutPairing() {
-        defer { captureFailure() }
-        let app = XCUIApplication()
-        app.launchArguments = ["--performance-ui-fixture", "--feedback-ui-fixture"]
-        app.launch()
-        let sheet = app.otherElements["feedback-review"]
-        XCTAssertTrue(sheet.waitForExistence(timeout: 15), "shake review sheet must present")
-
-        // The captured context is visible before anything can be filed.
-        XCTAssertTrue(app.buttons["feedback-open-outbox"].exists)
-        XCTAssertTrue(app.buttons["REMOVE IMAGE"].exists || app.otherElements["feedback-canvas"].exists,
-                      "screenshot review must be present")
-
-        let canvas = XCTAttachment(screenshot: app.screenshot())
-        canvas.name = "Feedback review sheet with context sections"; canvas.lifetime = .keepAlways; add(canvas)
-
-        let title = app.textFields["feedback-title"]
-        XCTAssertTrue(title.waitForExistence(timeout: 5))
-        title.tap(); title.typeText("Deck A froze")
-        let hideKeyboard = app.buttons["feedback-hide-keyboard"]
-        XCTAssertTrue(hideKeyboard.waitForExistence(timeout: 5))
-        hideKeyboard.tap()
-        // The fixture is unpaired: filing must queue on-device, never fail open.
-        let submit = app.buttons["feedback-submit"]
-        // Drag the edge of the form, never the screenshot drawing surface.
-        let scroll = app.scrollViews.firstMatch
-        for _ in 0..<16 {
-            if submit.isHittable { break }
-            scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.985, dy: 0.85))
-                .press(forDuration: 0.05, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.985, dy: 0.2)))
-        }
-        guard submit.isHittable else { XCTFail("reviewed submit must be reachable"); return }
-        submit.tap()
-        let outcome = app.otherElements["feedback-outcome"]
-        guard outcome.waitForExistence(timeout: 15) else { XCTFail("an explicit outcome must be shown"); return }
-        XCTAssertFalse(app.keyboards.firstMatch.exists, "keyboard must not cover the saved outcome")
-        XCTAssertTrue(app.staticTexts["SAVED ON THIS IPHONE"].waitForExistence(timeout: 5),
-                      "unpaired filing must be queued locally, got: \(outcome.debugDescription)")
-
-        let filed = XCTAttachment(screenshot: app.screenshot())
-        filed.name = "Feedback queued outcome"; filed.lifetime = .keepAlways; add(filed)
-        let reviewSaved = app.buttons["feedback-open-outbox"]
-        for _ in 0..<12 { if reviewSaved.isHittable { break }; app.swipeDown() }
-        reviewSaved.tap()
-        XCTAssertTrue(app.staticTexts["No saved reports."].exists == false)
-        XCTAssertFalse(app.buttons["REVIEWED · SEND TO THIS DESKTOP"].exists,
-                       "unpaired saved report must not have a send destination")
-        XCTAssertTrue(app.buttons["DISCARD THIS SAVED REPORT"].waitForExistence(timeout: 5))
-        let held = XCTAttachment(screenshot: app.screenshot())
-        held.name = "Saved report held for explicit destination review"; held.lifetime = .keepAlways; add(held)
-
-    }
-
-    @MainActor func testBlankTitleCannotSubmit() {
-        defer { captureFailure() }
-        let app = XCUIApplication()
-        app.launchArguments = ["--performance-ui-fixture", "--feedback-ui-fixture"]
-        app.launch()
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture", "--feedback-ui-fixture"]; app.launch()
         XCTAssertTrue(app.otherElements["feedback-review"].waitForExistence(timeout: 15))
-        let submit = app.buttons["feedback-submit"]
-        for _ in 0..<12 { if submit.exists { break }; app.swipeUp() }
-        XCTAssertFalse(submit.isEnabled, "a blank title must not file")
+        let comment = field(app); XCTAssertTrue(comment.exists); comment.tap(); comment.typeText("Deck A froze")
+        let hide = app.buttons["feedback-hide-keyboard"]; XCTAssertTrue(hide.waitForExistence(timeout: 5)); hide.tap()
+        app.buttons["feedback-show-details"].tap(); capture("Optional exact context review in compact feedback surface", app: app)
+        app.buttons["feedback-show-details"].tap()
+        app.buttons["feedback-submit"].tap()
+        XCTAssertTrue(app.buttons["SAVE REVIEWED FEEDBACK ON IPHONE"].waitForExistence(timeout: 5))
+        capture("Explicit reviewed save confirmation, no paired desktop", app: app)
+        app.buttons["SAVE REVIEWED FEEDBACK ON IPHONE"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["SAVED ON THIS IPHONE"].waitForExistence(timeout: 15))
+        capture("Saved locally without an automatic later send", app: app)
+        app.buttons["feedback-open-outbox"].tap()
+        XCTAssertFalse(app.buttons["REVIEWED · SEND TO THIS DESKTOP"].exists)
+        XCTAssertTrue(app.buttons["DISCARD THIS SAVED REPORT"].waitForExistence(timeout: 5))
     }
+    @MainActor func testBlankTitleCannotSubmit() {
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture", "--feedback-ui-fixture"]; app.launch()
+        XCTAssertTrue(app.otherElements["feedback-review"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["feedback-submit"].isEnabled)
+        app.buttons["CANCEL"].tap()
+        XCTAssertTrue(app.buttons["feedback-open"].waitForExistence(timeout: 5))
+    }
+    @MainActor func testExplicitNarrationKeepsBrowserLiveAndReviewsRawVoice() {
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        let open = app.buttons["feedback-open"]; XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        let rec = app.buttons["feedback-rec"]; XCTAssertEqual(rec.label, "REC", "Opening feedback must not record")
+        let play = app.buttons["A play pause"]
+        let ready = expectation(for: NSPredicate(format: "enabled == true AND hittable == true"), evaluatedWith: play)
+        wait(for: [ready], timeout: 20)
+        app.buttons["deck-0-loop-toggle"].tap(); play.tap()
+        let wave = app.otherElements["deck-0-detail-wave"]
+        let playing = expectation(for: NSPredicate(format: "value BEGINSWITH 'playing'"), evaluatedWith: wave)
+        wait(for: [playing], timeout: 5)
+        rec.tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let permission = springboard.alerts.firstMatch
+        if permission.waitForExistence(timeout: 3) {
+            if permission.buttons["Allow"].exists { permission.buttons["Allow"].tap() }
+            else if permission.buttons["OK"].exists { permission.buttons["OK"].tap() }
+        }
+        let stopped = expectation(for: NSPredicate(format: "label == 'STOP'"), evaluatedWith: rec)
+        wait(for: [stopped], timeout: 10)
+        XCTAssertGreaterThanOrEqual(rec.frame.height, 44, "Stop must retain an effective44point target")
+        XCTAssertGreaterThanOrEqual(app.buttons["feedback-review-open"].frame.height, 44)
+        XCTAssertTrue(rec.isHittable)
+        XCTAssertTrue((wave.value as? String ?? "").hasPrefix("playing"), "Explicit narration must not force a playing deck to pause")
+        capture("Explicit Rec active with Stop reachable", app: app)
+        app.buttons["BROWSE"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
+        XCTAssertTrue(rec.exists); XCTAssertEqual(rec.label, "STOP")
+        capture("Narrating while the real browser is interactive", app: app)
+        rec.tap()
+        if permission.waitForExistence(timeout: 3) {
+            if permission.buttons["Allow"].exists { permission.buttons["Allow"].tap() }
+            else if permission.buttons["OK"].exists { permission.buttons["OK"].tap() }
+        }
+        XCTAssertTrue((wave.value as? String ?? "").hasPrefix("playing"), "Stop narration must leave the looping deck playing")
+        app.buttons["feedback-review-open"].tap()
+        let playback = app.buttons["feedback-play-voice"]; XCTAssertTrue(playback.waitForExistence(timeout: 10))
+        capture("Stopped local raw voice is included in review before any send", app: app)
+        playback.tap()
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Voice could not play:'")).firstMatch.exists)
+        app.buttons["feedback-remove-voice"].tap()
+        XCTAssertFalse(playback.exists)
+        app.buttons["CANCEL"].tap()
+    }
+
 }

@@ -22,7 +22,7 @@ struct PerformanceWave: UIViewRepresentable {
         if view.source != deck.engine.load {
             view.source = deck.engine.load; view.columns.removeAll(); view.preparedColumns.removeAll(); view.waveReady = false
             view.fillGain = deck.waveform?.displayFillGain ?? 1
-            view.body = nil
+            view.body = nil; view.seekHold = nil
         }
         if !view.waveReady, let wave = deck.waveform { view.fillGain = wave.displayFillGain; view.columns.removeAll(); view.preparedColumns.removeAll(); view.waveReady = true }
         view.wave = deck.waveform
@@ -71,6 +71,24 @@ struct PerformanceWave: UIViewRepresentable {
     var cachedDetailTileCount: Int { detailTiles.count }
     func invalidateDetailTiles() { detailTiles.removeAll(); detailTileKey = "" }
     private var clock = WaveClock()
+    /// Android Minimap seek hold (WaveView.kt:333-339): after the finger lifts, keep
+    /// rendering the drop point until the engine reports the seek. Without this the
+    /// clock falls back to the pre-gesture engine position for a few frames, so the
+    /// wave visibly jumps back, then snaps forward again.
+    fileprivate var seekHold: (target: Double, until: CFTimeInterval, transport: UInt64)?
+    func beginSeekHold(_ target: Double) {
+        seekHold = (target, CACurrentMediaTime() + 0.4, state?().transport ?? 0)
+        // Paused decks get no display-link redraws; repaint once after the deadline.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in self?.setNeedsDisplay() }
+    }
+    private func heldPosition(raw: Double, transport: UInt64) -> Double? {
+        guard let hold = seekHold else { return nil }
+        if transport != hold.transport || abs(raw - hold.target) <= 0.15 || CACurrentMediaTime() > hold.until {
+            seekHold = nil
+            return nil
+        }
+        return hold.target
+    }
     #if DEBUG
     private let measureBody = ProcessInfo.processInfo.arguments.contains("--wave-body-metrics")
     private var bodySamples: [Double] = []
@@ -139,7 +157,8 @@ struct PerformanceWave: UIViewRepresentable {
     }
     @objc private func tap(_ gesture: UITapGestureRecognizer) {
         guard overview, duration > 0 else { return }
-        seek?(min(duration, max(0, location(gesture.location(in: self)) * duration)))
+        let target = min(duration, max(0, location(gesture.location(in: self)) * duration))
+        beginSeekHold(target); seek?(target)
         tickHaptic.selectionChanged(); setNeedsDisplay()
     }
     @objc private func pan(_ gesture: UIPanGestureRecognizer) {
@@ -153,10 +172,10 @@ struct PerformanceWave: UIViewRepresentable {
         // Android window: one lane of travel scrubs one visible window, pitch-independent.
         let time = overview ? location(gesture.location(in: self)) * duration : panPosition - amount * spanSeconds
         let target = min(duration, max(0, time))
-        if overview { seek?(target) } else { previewPosition = target }
+        if overview { beginSeekHold(target); seek?(target); previewPosition = target } else { previewPosition = target }
         if gesture.state == .ended || gesture.state == .cancelled {
             if !overview {
-                if gesture.state == .ended { seek?(target) }
+                if gesture.state == .ended { beginSeekHold(target); seek?(target) }
                 if resume { playback?(true) }
             }
             scrubbing = false; previewPosition = nil; tickHaptic.selectionChanged()
@@ -341,7 +360,8 @@ struct PerformanceWave: UIViewRepresentable {
         guard duration > 0, let state = state?() else { return }
         let rate = (1 + Double(state.pitch) / 100) * (1 + Double(state.bend) / 100)
         let moving = (state.playing || state.preview) && !scrubbing
-        let position = previewPosition ?? clock.at(CACurrentMediaTime(), raw: state.position, moving: moving, rate: rate)
+        let position = previewPosition ?? heldPosition(raw: state.position, transport: state.transport)
+            ?? clock.at(CACurrentMediaTime(), raw: state.position, moving: moving, rate: rate, transport: state.transport)
         let scale = deviceScale
         let along = vertical ? bounds.height : bounds.width
         let across = vertical ? bounds.width : bounds.height

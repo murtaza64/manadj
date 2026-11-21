@@ -54,7 +54,7 @@ struct SettingsView: View {
                 Button("REKORDBOX USB IMPORT") { usb = true }.buttonStyle(FlatButtonStyle())
                 Divider().overlay(Ink.edge)
                 SectionLabel(title: "AUDIO OUTPUT")
-                Toggle("Split mono: left master / right cue", isOn: $model.splitOutput).onChange(of: model.splitOutput) { _, on in model.audio?.splitOutput(on) }
+                Toggle("Split mono: left master / right cue", isOn: $model.splitOutput).onChange(of: model.splitOutput) { _, on in model.noteFeedbackAction("split-mono", value: on ? 1 : 0); model.audio?.splitOutput(on) }
                 Text("Stereo is master only. Split mono requires a DJ splitter cable. Separate four-channel USB routing is not implemented in this slice.").font(Ink.font(11)).foregroundStyle(Ink.muted)
                 HStack {
                     Text("CUE").font(Ink.font(11))

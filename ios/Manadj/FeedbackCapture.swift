@@ -80,6 +80,10 @@ struct FeedbackCapture {
                 "recordings": model.recordings.count,
                 "paired_desktop": model.pairedOrigin ?? NSNull(),
                 "status": model.status,
+                "recent_operations": model.feedbackActions,
+                "operations_window_seconds": 180,
+                "operations_limit": 1024,
+                "operations_may_be_truncated": model.feedbackActions.count >= 1024,
             ],
         ]
         if let window {
@@ -91,9 +95,9 @@ struct FeedbackCapture {
         if let error = model.error { snapshot["errors"] = [error] }
 
         var sections = [
+            FeedbackSection(key: "session", title: "RECENT ACTIONS & SESSION"),
             FeedbackSection(key: "decks", title: "DECKS"),
             FeedbackSection(key: "mixer", title: "MIXER"),
-            FeedbackSection(key: "session", title: "SESSION"),
             FeedbackSection(key: "user_agent", title: "APP & DEVICE"),
         ]
         if model.error != nil {

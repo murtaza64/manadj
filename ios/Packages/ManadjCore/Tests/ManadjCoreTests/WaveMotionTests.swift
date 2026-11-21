@@ -10,6 +10,23 @@ final class WaveMotionTests: XCTestCase {
         XCTAssertEqual(clock.at(1.048, raw: 2, moving: true, rate: 1), 2, accuracy: 0.000001)
         XCTAssertEqual(clock.at(1.064, raw: 2, moving: false, rate: 1), 2)
     }
+    func testTransportChangeSnapsImmediately() {
+        var clock = WaveClock()
+        _ = clock.at(1, raw: 10, moving: true, rate: 1, transport: 7)
+        _ = clock.at(1.016, raw: 10.014, moving: true, rate: 1, transport: 7)
+        // A relocation smaller than the 0.25 s distance threshold still snaps when
+        // the engine's relocation counter advances: no ease-across on cue/seek.
+        XCTAssertEqual(clock.at(1.032, raw: 10.1, moving: true, rate: 1, transport: 8), 10.1, accuracy: 0.000001)
+        // Same counter, small correction: eases as before.
+        let eased = clock.at(1.048, raw: 10.12, moving: true, rate: 1, transport: 8)
+        XCTAssertNotEqual(eased, 10.12, accuracy: 0.000001)
+    }
+    func testTransportRelocationToSameRawResetsPredictionAge() {
+        var clock = WaveClock()
+        _ = clock.at(1, raw: 10, moving: true, rate: 1, transport: 7)
+        _ = clock.at(1.08, raw: 10, moving: true, rate: 1, transport: 7)
+        XCTAssertEqual(clock.at(1.1, raw: 10, moving: true, rate: 1, transport: 8), 10, accuracy: 0.000001)
+    }
     func testPlaybackRateAndMonotonicCorrection() {
         var clock = WaveClock()
         _ = clock.at(1, raw: 4, moving: true, rate: 1.08)
