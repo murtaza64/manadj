@@ -83,7 +83,7 @@ struct WorkspaceView: View {
             let gap: CGFloat = compact ? 3 : 8
             let infoHeight: CGFloat = compact ? 36 : 44
             let deckHeight: CGFloat = compact ? 316 : 360
-            let mixerFloor: CGFloat = feedback.active ? 302 : 284
+            let mixerFloor: CGFloat = 344
             // Budget real row heights rather than letting the deck's minimum
             // overflow the viewport. Only waveform height yields on standard phones.
             let waveHeight: CGFloat = compact ? max(36, min(83, geometry.size.height - infoHeight - deckHeight - 36 - gap * 5 - mixerFloor)) : 135
@@ -278,15 +278,24 @@ HStack(spacing: 0) {
                 recordingBar.frame(height: 44)
                 Spacer(minLength: 0)
                 centerModePicker
-                if feedback.contextual == "FEEDBACK" { LiveFeedbackToolbar(session: feedback, model: model) }
-                else if feedback.contextual == "SYNC" { SettingsView(syncOnly: true).frame(height: 160).accessibilityIdentifier("center-sync-panel") }
-                else if feedback.contextual == "OUTPUT" { outputContext }
-                else if feedback.contextual == "HEARD" { heardContext }
-                else { fxCard }
+                contextPanel.frame(height: 96, alignment: .top).clipped()
                 if xf { PerformanceFader(value: Binding(get: { (model.crossfade + 1) / 2 }, set: { model.crossfade = $0 * 2 - 1; model.set(MDJCrossfade, 0, model.crossfade) }), color: Ink.accent, vertical: false, label: "Crossfader").frame(height: 40).feedbackTarget("Crossfader") }
             }.padding(.horizontal, 3)
             channel(1).frame(width: 42)
             knobColumn(1).frame(width: 48)
+        }
+    }
+    @ViewBuilder private var contextPanel: some View {
+        if feedback.contextual == "SYNC" {
+            SettingsView(syncOnly: true).accessibilityIdentifier("center-sync-panel")
+        } else if feedback.contextual == "FX" {
+            fxCard
+        } else {
+            ScrollView {
+                if feedback.contextual == "FEEDBACK" { LiveFeedbackToolbar(session: feedback, model: model) }
+                else if feedback.contextual == "OUTPUT" { outputContext }
+                else if feedback.contextual == "HEARD" { heardContext }
+            }
         }
     }
     private func knobColumn(_ index: Int) -> some View {

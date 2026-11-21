@@ -126,12 +126,18 @@ final class WorkspaceUITests: XCTestCase {
             let tab = app.buttons[id]; XCTAssertTrue(tab.isHittable); XCTAssertGreaterThanOrEqual(tab.frame.height, 44)
         }
         var shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Actual compact center tabs standard phone FX"; shot.lifetime = .keepAlways; add(shot)
+        let beforeTransport = app.buttons["A play pause"].frame
+        let beforePitch = app.buttons["A PITCH panel"].frame
         app.buttons["center-tab-sync"].tap()
         XCTAssertTrue(app.otherElements["center-sync-panel"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["A play pause"].frame.minY, beforeTransport.minY, accuracy: 2, "Panel changes must not move transport")
+        XCTAssertEqual(app.buttons["A PITCH panel"].frame.minY, beforePitch.minY, accuracy: 2, "Panel changes must not move pitch")
+        XCTAssertTrue(app.buttons["A play pause"].isHittable)
+        XCTAssertTrue(app.buttons["A PITCH panel"].isHittable)
         let address = app.textFields["Desktop address"]
         XCTAssertTrue(address.exists)
         let panel = app.otherElements["center-sync-panel"]
-        for _ in 0..<5 where !address.isHittable { panel.swipeUp() }
+        for _ in 0..<5 where !address.isHittable { panel.swipeUp(velocity: .slow) }
         XCTAssertTrue(address.isHittable, "Actual pairing address must be reachable inside Sync")
         shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Actual Sync tab reuses desktop pairing and library sync"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["center-tab-fx"].tap()
