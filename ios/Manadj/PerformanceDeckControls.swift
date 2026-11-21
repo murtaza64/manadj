@@ -29,7 +29,7 @@ struct PerformanceDeckControls: View {
             up: { model.set(MDJHotCueUp, index, 0, slot: slot) },
             canLatch: { canLatchHotCue(slot) }, latch: { model.set(MDJPlay, index, 0) }
         ).accessibilityIdentifier("deck-\(index)-hotcue-\(slot)")
-            .padding(3).accessibilityLabel("\(Ink.deckName(index)) hotcue \(slot + 1)")
+            .padding(3).accessibilityLabel("\(Ink.deckName(index)) hotcue \(slot + 1)").feedbackTarget("Deck \(Ink.deckName(index)) hotcue \(slot + 1)")
     }
     var body: some View {
         GeometryReader { geometry in
