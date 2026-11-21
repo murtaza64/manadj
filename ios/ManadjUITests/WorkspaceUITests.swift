@@ -205,6 +205,10 @@ final class WorkspaceUITests: XCTestCase {
         }
         let portrait = XCTAttachment(screenshot: app.screenshot()); portrait.name = "Android-structure iOS portrait WIP"; portrait.lifetime = .keepAlways; add(portrait)
         let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); screen.name = "Whole device portrait transport and pitch"; screen.lifetime = .keepAlways; add(screen)
+        // Preserve both immediate and settled pixels, accessibility readiness
+        // does not prove that the simulator compositor finished every layer.
+        Thread.sleep(forTimeInterval: 2)
+        let settled = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); settled.name = "Settled whole device portrait fixed controls and pitch"; settled.lifetime = .keepAlways; add(settled)
 
         let pitchButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PITCH")).firstMatch
         XCTAssertLessThanOrEqual(pitchButton.frame.maxY, app.frame.maxY - 16, "Pitch control must stay above bottom safe area")
