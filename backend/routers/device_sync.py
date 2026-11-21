@@ -73,16 +73,21 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat()
 
 
-def audio_rev(filename: str) -> str | None:
-    """Identity of the audio bytes the device would cache, or None when the
-    file is missing. Path + size + mtime: cheap, and any replacement of the
-    file changes it (content hashing a whole Library is not)."""
+def _audio_identity(filename: str) -> tuple[str | None, int | None]:
+    """Revision and byte length must describe the same live file stat.
+
+    Imported DB metadata can be stale after tags or audio bytes change.
+    """
     try:
         st = Path(filename).stat()
     except OSError:
-        return None
+        return None, None
     raw = f"{filename}\0{st.st_size}\0{st.st_mtime_ns}".encode()
-    return hashlib.sha1(raw).hexdigest()[:16]
+    return hashlib.sha1(raw).hexdigest()[:16], st.st_size
+
+
+def audio_rev(filename: str) -> str | None:
+    return _audio_identity(filename)[0]
 
 
 def preview_rev(blob: bytes) -> str:
@@ -184,6 +189,7 @@ def build_snapshot(db: Session) -> dict:
 
     track_rows = []
     for t in tracks:
+        live_audio_rev, live_audio_size = _audio_identity(t.filename)
         grid = None
         bg: Beatgrid | None = t.beatgrid
         if bg is not None and bg.origin != "generated":
@@ -208,8 +214,8 @@ def build_snapshot(db: Session) -> dict:
                 "date_added": _iso(t.created_at),
                 "main_cue": t.cue_point_time,
                 "codec": t.codec,
-                "filesize_bytes": t.filesize_bytes,
-                "audio_rev": audio_rev(t.filename),
+                "filesize_bytes": live_audio_size,
+                "audio_rev": live_audio_rev,
                 "preview_rev": previews.get(t.id),
                 "waveform_rev": waveforms.get(t.id),
                 "stems_rev": stems_rev(t.id, t.filename),

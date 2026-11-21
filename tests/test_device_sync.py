@@ -315,3 +315,23 @@ def test_silent_phone_session_is_dropped_on_end(client, db):
     r = client.post("/api/device-sync/sessions/p-2", json=body)
     assert r.status_code == 200 and r.json()["deleted"] is True
     assert db.query(SessionRow).filter(SessionRow.uuid == "p-2").first() is None
+
+
+def test_snapshot_audio_size_matches_served_bytes_not_stale_import_metadata(client, db, make_track, tmp_path):
+    audio = tmp_path / "retagged.mp3"
+    audio.write_bytes(b"current original bytes")
+    track = make_track(filename=str(audio), filesize_bytes=999)
+    db.commit()
+    [row] = client.get("/api/device-sync/snapshot").json()["tracks"]
+    response = client.get(f"/api/device-sync/tracks/{track.id}/audio")
+    assert row["filesize_bytes"] == len(response.content) == audio.stat().st_size
+    assert row["audio_rev"] == response.headers["X-Audio-Rev"]
+    assert track.filesize_bytes == 999, "Read-only snapshot must not change the database"
+    old_rev = row["audio_rev"]
+    audio.write_bytes(b"a longer changed original audio file")
+    [updated] = client.get("/api/device-sync/snapshot").json()["tracks"]
+    assert updated["filesize_bytes"] == audio.stat().st_size
+    assert updated["audio_rev"] != old_rev
+    audio.unlink()
+    [missing] = client.get("/api/device-sync/snapshot").json()["tracks"]
+    assert missing["filesize_bytes"] is None and missing["audio_rev"] is None
