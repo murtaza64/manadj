@@ -26,6 +26,7 @@ void mdj_destroy(MDJEngine engine);
 void mdj_set_rate(MDJEngine engine, int rate); // output stopped only
 void mdj_render(MDJEngine engine, float *interleaved, int frames, int channels);
 uint64_t mdj_frames(MDJEngine engine);
+uint64_t mdj_starved_frames(MDJEngine engine);
 uint64_t mdj_prepare(MDJEngine engine, int deck, uint64_t load);
 uint64_t mdj_submit(MDJEngine engine, MDJOp op, int deck, double value, int slot);
 uint64_t mdj_grid(MDJEngine engine, int deck, double bpm, double anchor);
