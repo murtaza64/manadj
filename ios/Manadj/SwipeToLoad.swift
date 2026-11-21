@@ -187,11 +187,13 @@ struct BrowserTopPull: UIViewRepresentable {
 struct BrowserHandlePan: UIViewRepresentable {
     var changed: (CGFloat) -> Void
     var ended: (CGFloat, CGFloat) -> Void
+    var diagnostic: (String) -> Void = { _ in }
     func makeUIView(context: Context) -> Surface { Surface() }
-    func updateUIView(_ view: Surface, context: Context) { view.changed = changed; view.ended = ended }
+    func updateUIView(_ view: Surface, context: Context) { view.changed = changed; view.ended = ended; view.diagnostic = diagnostic }
     final class Surface: UIView, UIGestureRecognizerDelegate {
         var changed: (CGFloat) -> Void = { _ in }
         var ended: (CGFloat, CGFloat) -> Void = { _, _ in }
+        var diagnostic: (String) -> Void = { _ in }
         override init(frame: CGRect) {
             super.init(frame: frame)
             let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
@@ -205,9 +207,14 @@ struct BrowserHandlePan: UIViewRepresentable {
         }
         @objc private func handlePan(_ pan: UIPanGestureRecognizer) {
             let distance = max(0, pan.translation(in: window).y)
+            let velocity = pan.velocity(in: window).y
+            #if DEBUG
+            let sample = "handle state=\(pan.state.rawValue) distance=\(distance) velocity=\(velocity) time=\(ProcessInfo.processInfo.systemUptime)"
+            DispatchQueue.main.async { [weak self] in self?.diagnostic(sample) }
+            #endif
             switch pan.state {
             case .began, .changed: changed(distance)
-            case .ended: ended(distance, pan.velocity(in: window).y)
+            case .ended: ended(distance, velocity)
             case .cancelled, .failed: ended(0, 0)
             default: break
             }

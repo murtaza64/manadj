@@ -32,6 +32,7 @@ struct WorkspaceView: View {
     @State private var outputRoute = AVAudioSession.sharedInstance().currentRoute
     @State private var browsing = false
     @State private var browserDrag: CGFloat = 0
+    @State private var browserHandleDiagnostic = "not started"
     @State private var feedbackRequested = false
     @State private var feedbackTargets: [FeedbackTarget] = []
     @State private var keyboardOpen = false
@@ -107,8 +108,9 @@ struct WorkspaceView: View {
                                     }, ended: { distance, velocity in
                                         let close = shouldCloseBrowser(distance: distance, velocity: velocity)
                                         withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { browsing = !close; browserDrag = 0 }
-                                    })
+                                    }, diagnostic: { browserHandleDiagnostic = $0 })
                                 }
+                                .accessibilityValue(browserHandleDiagnostic)
                                 .accessibilityIdentifier("browser-drag-handle")
                                 .accessibilityLabel("Close browser drag handle") }
                             if feedback.active { LiveFeedbackToolbar(session: feedback, model: model).frame(maxWidth: 300) }

@@ -391,7 +391,7 @@ final class WorkspaceUITests: XCTestCase {
     @MainActor func testBrowserModerateFlingSettlesLikeHandle() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture", "--browser-scroll-fixture"]; app.launch()
-        for fromList in [false, true] {
+        for fromList in [false, true, false, true, false, true] {
             if app.buttons["browser-close"].exists { app.buttons["browser-close"].tap() }
             app.buttons["browser-open"].tap()
             let list = app.scrollViews["library-track-list"]
@@ -399,6 +399,7 @@ final class WorkspaceUITests: XCTestCase {
             let target = fromList ? list : app.otherElements["browser-drag-handle"]
             let start = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: fromList ? 0.15 : 0.5))
             start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 110)), withVelocity: 900, thenHoldForDuration: 0)
+            if list.exists { print("MODERATE_FLING_DIAGNOSTIC fromList=\(fromList) handle=\(app.otherElements["browser-drag-handle"].value ?? "missing") list=\(list.value ?? "missing")") }
             let closed = NSPredicate(format: "exists == false")
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: closed, object: list)], timeout: 5), .completed, "Moderate downward fling should settle closed from both handle and top row")
             XCTAssertFalse(app.alerts.firstMatch.exists)
