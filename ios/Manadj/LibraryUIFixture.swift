@@ -36,7 +36,8 @@ extension AppModel {
                 guard let source = Bundle.main.url(forResource: name, withExtension: "wav"), let wave = Bundle.main.url(forResource: name, withExtension: "mwf"), let target = store.audioFile(track) else { return nil }
                 try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try FileManager.default.copyItem(at: source, to: target)
-                try store.savePreview(Data(contentsOf: wave), track: track)
+                guard let preview = Bundle.main.url(forResource: name + "-preview", withExtension: "mwf") else { return nil }
+                try store.savePreview(Data(contentsOf: preview), track: track)
                 try store.saveDetail(Data(contentsOf: wave), track: track)
             }
             return root
