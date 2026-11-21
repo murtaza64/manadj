@@ -185,7 +185,7 @@ final class WorkspaceUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "LOOP")).firstMatch.tap()
         let cue = app.buttons["A hotcue 1"]
         XCTAssertTrue(cue.exists); cue.press(forDuration: 0.4)
-        let eq = app.otherElements["HI control"].firstMatch
+        let eq = app.otherElements["knob-Deck A HI"].firstMatch
         XCTAssertTrue(eq.exists); eq.doubleTap()
         expectation(for: NSPredicate(format: "value == %@", "0.00"), evaluatedWith: eq); waitForExpectations(timeout: 5)
         eq.doubleTap()
