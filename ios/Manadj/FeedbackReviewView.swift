@@ -3,9 +3,10 @@ import ManadjCore
 
 /// Shake → capture → this sheet: annotate, describe, see the exact scrubbed
 /// fields that ship, then File explicitly. Nothing is sent on shake alone.
+@MainActor
 struct FeedbackReviewView: View {
     let capture: FeedbackCapture
-    let onSubmit: (FeedbackDraft) async -> FeedbackOutcome
+    let onSubmit: @MainActor (FeedbackDraft) async -> FeedbackOutcome
     let queueDirectory: URL?
     let queueConnection: DesktopConnection?
     @State private var showOutbox = false
@@ -23,7 +24,7 @@ struct FeedbackReviewView: View {
 
     init(
         capture: FeedbackCapture,
-        onSubmit: @escaping (FeedbackDraft) async -> FeedbackOutcome,
+        onSubmit: @escaping @MainActor (FeedbackDraft) async -> FeedbackOutcome,
         queueDirectory: URL? = nil,
         queueConnection: DesktopConnection? = nil
     ) {
@@ -248,7 +249,7 @@ struct FeedbackReviewView: View {
         editing = false
         submitting = true
         let report = makeDraft()
-        Task {
+        Task { @MainActor in
             let result = await onSubmit(report)
             outcome = result
             submitting = false
