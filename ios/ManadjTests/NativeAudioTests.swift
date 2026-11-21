@@ -7,12 +7,27 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    @MainActor func testLoadedDeckReadsOfflineFullWaveformCache() async throws {
+        let root = try XCTUnwrap(AppModel.makePerformanceUIFixture())
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(root: root.appendingPathComponent("library"))
+        let track = try XCTUnwrap(store.readSnapshot()?.tracks.first)
+        let model = AppModel(storageRoot: root)
+        for _ in 0..<100 { if model.snapshot != nil && model.audio != nil { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(model.load(track, deck: 0))
+        for _ in 0..<200 { if !model.decks[0].loading { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertGreaterThan(model.decks[0].waveform?.bandFrames ?? 0, 256)
+        XCTAssertNil(model.decks[0].waveformNotice)
+    }
+
     @MainActor func testLoadedDeckUsesDecodedDurationAndDoesNotMagnifyPreviewAsDetail() async throws {
         let root = try XCTUnwrap(AppModel.makePerformanceUIFixture())
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try LibraryStore(root: root.appendingPathComponent("library"))
         // Deliberately stale catalog duration. Preview exists but no full-wave revision.
-        let stale = try String(contentsOf: store.root.appendingPathComponent("snapshot.json"), encoding: .utf8).replacingOccurrences(of: "\"duration_secs\":24", with: "\"duration_secs\":240")
+        let stale = try String(contentsOf: store.root.appendingPathComponent("snapshot.json"), encoding: .utf8)
+            .replacingOccurrences(of: "\"duration_secs\":24", with: "\"duration_secs\":240")
+            .replacingOccurrences(of: ",\"waveform_rev\":\"detail-fixture\"", with: "")
         try store.saveSnapshot(stale)
         let track = try SnapshotJson.parse(stale).tracks[0]
         let model = AppModel(storageRoot: root)
