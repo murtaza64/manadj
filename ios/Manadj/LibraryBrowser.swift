@@ -324,7 +324,7 @@ struct LibraryBrowser: View {
                 }
                 HStack(spacing: 6) {
                     if let waveform, !waveform.peaks.isEmpty {
-                        WaveformView(waveform: waveform, color: Ink.accent, background: .clear).frame(width: 102, height: 16)
+                        LibraryPreviewWave(waveform: waveform, track: track, styleJSON: model.snapshot?.settings["manadj.waveformStyles"]?.json, revision: model.libraryVersion)
                             .accessibilityIdentifier("library-row-preview-\(track.id)")
                     } else {
                         Text(track.previewRev == nil ? "No preview on desktop" : (previewChecked ? "Preview unavailable locally" : "Loading preview…"))

@@ -10,6 +10,18 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    @MainActor func testBrowserSpectralRasterUsesMinimapStyleAndRetinaColumns() throws {
+        let wave = try syntheticMultibandWave()
+        let plain = BrowserPreviewRaster.shared.image(key: "test-default", wave: wave, json: nil, scale: 3)
+        let alternate = BrowserPreviewRaster.shared.image(key: "test-layered", wave: wave,
+            json: #"{"version":1,"minimap":{"styleId":"layered-opaque"}}"#, scale: 3)
+        XCTAssertEqual(plain.cgImage?.width, 330)
+        XCTAssertEqual(plain.cgImage?.height, 57)
+        XCTAssertNotEqual(plain.pngData(), alternate.pngData(), "Synced minimap slot must change real browser pixels")
+        for (name, image) in [("Default spectral browser preview synthetic", plain), ("Layered minimap slot browser preview synthetic", alternate)] {
+            let shot = XCTAttachment(image: image); shot.name = name; shot.lifetime = .keepAlways; add(shot)
+        }
+    }
     func testReportAvailableSystemAudioEncoders() throws {
         var size: UInt32 = 0
         XCTAssertEqual(AudioFormatGetPropertyInfo(kAudioFormatProperty_EncodeFormatIDs, 0, nil, &size), noErr)
