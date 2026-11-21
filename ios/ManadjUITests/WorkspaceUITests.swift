@@ -46,6 +46,77 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
+    /// Native callbacks/draw submissions, not presented frames or touch-to-photon.
+    /// UI automation overhead is excluded from the interval probes, but the
+    /// simulator host still affects scheduling. Never call these phone FPS.
+    @MainActor func testScopedPositionObservationPacingABBA() {
+        defer { captureFailure() }
+        // ABBA holds plain icons, dual-deck loop, wave size and automation idle
+        // fixed. It tests a cause, not a user-facing optimization or phone FPS.
+        for (iteration, wholeTree) in [true, false, false, true].enumerated() {
+            let app = XCUIApplication()
+            app.launchArguments = ["--performance-ui-fixture", "--wave-pacing-metrics", "--wave-body-metrics", "--plain-center-tabs"]
+                + (wholeTree ? ["--probe-whole-position-publication"] : [])
+            app.launch()
+            let playA = app.buttons["A play pause"], playB = app.buttons["B play pause"]
+            XCTAssertTrue(playA.waitForExistence(timeout: 20)); waitForReadyTransport(playA, app: app)
+            let ready = NSPredicate(format: "enabled == true AND hittable == true")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: playB)], timeout: 15), .completed)
+            app.buttons["deck-0-loop-toggle"].tap(); app.buttons["deck-1-loop-toggle"].tap()
+            playA.tap(); playB.tap()
+            Thread.sleep(forTimeInterval: 14)
+            for index in 0..<2 {
+                let wave = app.otherElements["deck-\(index)-detail-wave"]
+                let value = wave.value as? String ?? "missing"
+                XCTAssertTrue(value.hasPrefix("playing"), value)
+                XCTAssertTrue(value.contains("callbackSamples="), value)
+                print("SCOPED_POSITION_OBSERVATION iteration=\(iteration) wholeTree=\(wholeTree) deck=\(index) \(value) simulatorNotPhone=true automationIdle14s=true")
+            }
+            if iteration < 3 { app.terminate() }
+        }
+    }
+
+    @MainActor func testContinuousPlaybackDrawerAndGlassPacing() {
+        defer { captureFailure() }
+        for plain in [true, false] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--performance-ui-fixture", "--wave-pacing-metrics"] + (plain ? ["--plain-center-tabs"] : [])
+            app.launch()
+            let playA = app.buttons["A play pause"], playB = app.buttons["B play pause"]
+            XCTAssertTrue(playA.waitForExistence(timeout: 20)); waitForReadyTransport(playA, app: app)
+            let ready = NSPredicate(format: "enabled == true AND hittable == true")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: playB)], timeout: 15), .completed)
+            app.buttons["deck-0-loop-toggle"].tap(); app.buttons["deck-1-loop-toggle"].tap()
+            playA.tap(); playB.tap()
+            let wave = app.otherElements["deck-0-detail-wave"]
+            Thread.sleep(forTimeInterval: 4)
+            print("SYNTHETIC_PACING_IDLE plain=\(plain) \(wave.value ?? "missing") simulatorNotPhone=true")
+            for _ in 0..<6 {
+                app.buttons["browser-open"].tap()
+                let search = app.textFields["Search title, artist, file"]
+                XCTAssertTrue(search.waitForExistence(timeout: 5))
+                let list = app.descendants(matching: .any)["library-track-list"].firstMatch
+                if list.exists { list.swipeUp(velocity: .fast); list.swipeDown(velocity: .fast) }
+                let close = app.buttons["browser-close"]
+                XCTAssertTrue(close.isHittable); close.tap()
+                let audio = app.buttons["center-tab-audio"]
+                let audioTab = audio.exists ? audio : app.segmentedControls.buttons["Audio"]
+                if audioTab.exists { audioTab.tap() }
+                let fx = app.buttons["center-tab-fx"]
+                let fxTab = fx.exists ? fx : app.segmentedControls.buttons["Fx"]
+                if fxTab.exists { fxTab.tap() }
+            }
+            let aValue = wave.value as? String ?? "missing"
+            let bValue = app.otherElements["deck-1-detail-wave"].value as? String ?? "missing"
+            XCTAssertTrue(aValue.hasPrefix("playing"), aValue); XCTAssertTrue(bValue.hasPrefix("playing"), bValue)
+            XCTAssertTrue(aValue.contains("callbackSamples="), aValue)
+            print("SYNTHETIC_PACING_STRESS plain=\(plain) A=\(aValue) B=\(bValue) simulatorNotPhone=true rollingWindowMayOverlapIdle=true")
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = plain ? "Plain icons after continuous playback and drawer stress" : "Native segmented icons after continuous playback and drawer stress"
+            shot.lifetime = .keepAlways; add(shot)
+        }
+    }
+
     @MainActor func testBrowserOpenResponsivenessSyntheticFixture() {
         let options = XCTMeasureOptions(); options.iterationCount = 3
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
@@ -74,6 +145,62 @@ final class WorkspaceUITests: XCTestCase {
         shot.name = "Synthetic full-audio file progress - not device transfer proof"; shot.lifetime = .keepAlways; add(shot)
     }
 
+    @MainActor func testCenterTabsExposeRealPairingAndKeepControlsReachable() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        XCTAssertTrue(app.buttons["center-tab-sync"].waitForExistence(timeout: 15))
+        for id in ["center-tab-fx", "feedback-open", "center-tab-audio", "center-tab-sync"] {
+            let tab = app.buttons[id]; XCTAssertTrue(tab.isHittable); XCTAssertGreaterThanOrEqual(tab.frame.height, 44)
+        }
+        var shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Actual compact center tabs standard phone FX"; shot.lifetime = .keepAlways; add(shot)
+        let beforeTransport = app.buttons["A play pause"].frame
+        let beforePitch = app.buttons["A PITCH panel"].frame
+        app.buttons["center-tab-sync"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["center-sync-panel"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["A play pause"].frame.minY, beforeTransport.minY, accuracy: 2, "Panel changes must not move transport")
+        XCTAssertEqual(app.buttons["A PITCH panel"].frame.minY, beforePitch.minY, accuracy: 2, "Panel changes must not move pitch")
+        XCTAssertTrue(app.buttons["A play pause"].isHittable)
+        XCTAssertTrue(app.buttons["A PITCH panel"].isHittable)
+        let address = app.textFields["Desktop address"]
+        XCTAssertTrue(address.exists)
+        let panel = app.descendants(matching: .any)["center-sync-panel"].firstMatch
+        for _ in 0..<5 where !address.isHittable { panel.swipeUp(velocity: .slow) }
+        XCTAssertTrue(address.isHittable, "Actual pairing address must be reachable inside Sync")
+        let pair = app.buttons["PAIR IPHONE"]
+        for _ in 0..<8 where !pair.isHittable { panel.swipeUp(velocity: .slow) }
+        XCTAssertTrue(pair.isHittable, "Pair action must remain reachable inside bounded Sync scroll")
+        XCTAssertGreaterThanOrEqual(pair.frame.height, 44)
+        XCTAssertLessThanOrEqual(pair.frame.maxY, panel.frame.maxY + 1, "Whole Pair target must fit, not merely its center")
+        XCTAssertEqual(app.buttons["A play pause"].frame.minY, beforeTransport.minY, accuracy: 2)
+        print("PORTRAIT_GEOMETRY app=\(app.frame) window=\(app.windows.firstMatch.frame) panel=\(panel.frame) pair=\(pair.frame) pitch=\(app.buttons["A PITCH panel"].frame)")
+        // A second frame after a no-input runloop interval distinguishes a
+        // transient capture from persistent missing drawing on older runtimes.
+        Thread.sleep(forTimeInterval: 0.5)
+        shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "Whole device portrait Sync"; shot.lifetime = .keepAlways; add(shot)
+        shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Actual Sync tab reuses desktop pairing and library sync"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["center-tab-fx"].tap()
+        XCTAssertFalse(panel.exists)
+    }
+    @MainActor func testPlayingWaveTouchLockPreservesTransportAndPausedSeek() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        let play = app.buttons["A play pause"]; XCTAssertTrue(play.waitForExistence(timeout: 20)); waitForReadyTransport(play, app: app)
+        let lock = app.buttons["wave-touch-lock"]; XCTAssertTrue(lock.exists); lock.tap()
+        XCTAssertEqual(lock.value as? String, "Locked while playing")
+        play.tap()
+        let wave = app.otherElements["deck-0-detail-wave"]
+        let playing = NSPredicate(format: "value BEGINSWITH 'playing'")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: wave)], timeout: 5), .completed)
+        let from = wave.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5))
+        from.press(forDuration: 0.1, thenDragTo: from.withOffset(CGVector(dx: -90, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.2)
+        XCTAssertTrue((wave.value as? String ?? "").hasPrefix("playing"), "Locked playing drag must not pause transport")
+        play.tap()
+        let before = wave.value as? String ?? ""
+        from.press(forDuration: 0.1, thenDragTo: from.withOffset(CGVector(dx: -90, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let changed = NSPredicate(format: "value != %@", before)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: changed, object: wave)], timeout: 5), .completed, "Paused drag stays available")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Compact labeled center controls with playing-only waveform lock"; shot.lifetime = .keepAlways; add(shot)
+    }
     @MainActor func testStandardWorkspaceSettingsAndPitch() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
@@ -104,6 +231,12 @@ final class WorkspaceUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(control.frame.height, 38)
         }
         let portrait = XCTAttachment(screenshot: app.screenshot()); portrait.name = "Android-structure iOS portrait WIP"; portrait.lifetime = .keepAlways; add(portrait)
+        let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); screen.name = "Whole device portrait transport and pitch"; screen.lifetime = .keepAlways; add(screen)
+        // Preserve both immediate and settled pixels, accessibility readiness
+        // does not prove that the simulator compositor finished every layer.
+        Thread.sleep(forTimeInterval: 2)
+        let settled = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); settled.name = "Settled whole device portrait fixed controls and pitch"; settled.lifetime = .keepAlways; add(settled)
+
         let pitchButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PITCH")).firstMatch
         XCTAssertLessThanOrEqual(pitchButton.frame.maxY, app.frame.maxY - 16, "Pitch control must stay above bottom safe area")
         XCTAssertTrue(pitchButton.isHittable)

@@ -10,7 +10,7 @@ struct LocalLiveView: View {
             ForEach(0..<4, id: \.self) { index in
                 VStack(alignment: .leading, spacing: 5) {
                     HStack { Text(Ink.deckName(index)).foregroundStyle(Ink.decks[index]); Text(model.decks[index].title).lineLimit(1); Spacer(); Image(systemName: model.decks[index].engine.playing ? "play.fill" : "pause.fill") }
-                    Text(String(format: "%.2fs", model.decks[index].engine.position)).foregroundStyle(Ink.muted)
+                    DeckTimeReadout(clock: model.positionReadouts[index], duration: model.decks[index].duration, playing: model.decks[index].engine.playing, precise: true)
                     if model.decks[index].waveform != nil { PerformanceWave(index: index, overview: true).frame(height: 36) }
                 }.font(Ink.font(14)).padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Ink.panel).overlay(Rectangle().stroke(Ink.edge))
             }

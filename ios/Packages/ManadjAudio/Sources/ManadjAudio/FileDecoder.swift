@@ -13,11 +13,11 @@ enum FileDecoder {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let d = Int32(deck)
         let deadline = Date().addingTimeInterval(3)
-        while mdj_deck(engine.raw, d).load != load {
-            guard !engine.isCancelled, mdj_deck(engine.raw, d).load < load else { throw AudioFailure("Load was replaced") }
-            guard Date() < deadline else { throw AudioFailure("Audio output did not acknowledge the load") }
-            Thread.sleep(forTimeInterval: 0.002)
-        }
+        try LoadAcknowledgement.wait(expected: load,
+            current: { mdj_deck(engine.raw, d).load },
+            cancelled: { engine.isCancelled },
+            expired: { Date() >= deadline },
+            pause: { Thread.sleep(forTimeInterval: 0.002) })
         let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
         let format = file.processingFormat
         guard (1...2).contains(format.channelCount), format.sampleRate >= 8_000, format.sampleRate <= 192_000,

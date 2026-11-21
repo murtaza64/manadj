@@ -30,6 +30,7 @@ struct PerformanceWave: UIViewRepresentable {
         view.vertical = vertical
         view.overview = overview
         view.index = index
+        view.lockWhilePlaying = model.waveTouchLock
         view.spanSeconds = model.waveSeconds
         view.zoom = { [weak model] seconds in model?.waveSeconds = seconds }
         view.playback = { [weak model] playing in model?.set(playing ? MDJPlay : MDJPause, index, 0) }
@@ -94,6 +95,27 @@ struct PerformanceWave: UIViewRepresentable {
     private var bodySamples: [Double] = []
     private var bodyWarmup = 0
     private var bodyMetrics = ""
+    private let measurePacing = ProcessInfo.processInfo.arguments.contains("--wave-pacing-metrics")
+    private var callbackIntervals: [Double] = []
+    private var drawIntervals: [Double] = []
+    private var callbackCursor = 0, drawCursor = 0
+    private var lastCallbackArrival = 0.0, lastDrawArrival = 0.0
+    private var expectedInterval = 1.0 / 60
+    private func recordInterval(_ samples: inout [Double], cursor: inout Int, value: Double) {
+        guard value > 0 else { return }
+        if samples.count < 600 { samples.append(value * 1000) }
+        else { samples[cursor] = value * 1000; cursor = (cursor + 1) % 600 }
+    }
+    private func pacingSummary(_ samples: [Double], kind: String) -> String {
+        guard !samples.isEmpty else { return " " + kind + "Samples=0" }
+        let sorted = samples.sorted(), count = sorted.count
+        let late = samples.filter { $0 > expectedInterval * 1500 }.count
+        return String(format: " %@Samples=%d meanMS=%.2f p95MS=%.2f p99MS=%.2f maxMS=%.2f latePct=%.1f", kind, count, samples.reduce(0,+) / Double(count), sorted[min(count-1, Int(Double(count)*0.95))], sorted[min(count-1, Int(Double(count)*0.99))], sorted[count-1], Double(late)*100/Double(count))
+    }
+    private var pacingMetrics: String {
+        guard measurePacing else { return "" }
+        return String(format: " expectedIntervalMS=%.2f", expectedInterval*1000) + pacingSummary(callbackIntervals, kind: "callback") + pacingSummary(drawIntervals, kind: "draw") + " presentationNotMeasured=true rollingWindowMax=600"
+    }
     #endif
     private var metalBody: MetalWaveBody?
     private var metalOverlay: MetalWaveOverlay?
@@ -105,6 +127,8 @@ struct PerformanceWave: UIViewRepresentable {
     }
     private var link: CADisplayLink?
     private var proxy: DisplayProxy?
+    var lockWhilePlaying = false
+    private var blockedPan = false
     var spanSeconds = 12.0
     private var pinchWindow = 12.0
     private var panPosition = 0.0
@@ -139,6 +163,14 @@ struct PerformanceWave: UIViewRepresentable {
         }
     }
     fileprivate func frame(_ link: CADisplayLink) {
+        #if DEBUG
+        if measurePacing && !overview, let state = state?(), state.playing || state.preview {
+            let now = CACurrentMediaTime()
+            expectedInterval = max(0.001, link.targetTimestamp - link.timestamp)
+            if lastCallbackArrival > 0 { recordInterval(&callbackIntervals, cursor: &callbackCursor, value: now - lastCallbackArrival) }
+            lastCallbackArrival = now
+        } else { lastCallbackArrival = 0; lastDrawArrival = 0 }
+        #endif
         if lastFrame > 0 && link.timestamp - lastFrame > link.duration * 1.8 { missedFrames += 1 }
         lastFrame = link.timestamp; observedFrames += 1
         if let state = state?(), state.playing || state.preview { setNeedsDisplay() }
@@ -163,6 +195,13 @@ struct PerformanceWave: UIViewRepresentable {
     }
     @objc private func pan(_ gesture: UIPanGestureRecognizer) {
         guard duration > 0 else { return }
+        if gesture.state == .began {
+            blockedPan = !overview && lockWhilePlaying && state?().playing == true
+        }
+        if blockedPan {
+            if gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed { blockedPan = false }
+            return
+        }
         if gesture.state == .began {
             panPosition = state?().position ?? 0; scrubbing = true; tickHaptic.prepare()
             resume = state?().playing == true
@@ -189,7 +228,7 @@ struct PerformanceWave: UIViewRepresentable {
             guard duration > 0, let state = state?() else { return "not loaded" }
             let transport = String(format: "%@ %.2f seconds", state.playing ? "playing" : "paused", state.position)
             #if DEBUG
-            return transport + bodyMetrics
+            return transport + bodyMetrics + pacingMetrics
             #else
             return transport
             #endif
@@ -339,6 +378,11 @@ struct PerformanceWave: UIViewRepresentable {
     }
     fileprivate func drawContent(_ rect: CGRect, cpuWave: Bool) {
         #if DEBUG
+        if measurePacing && !overview, let state = state?(), state.playing || state.preview {
+            let now = CACurrentMediaTime()
+            if lastDrawArrival > 0 { recordInterval(&drawIntervals, cursor: &drawCursor, value: now - lastDrawArrival) }
+            lastDrawArrival = now
+        }
         let began = measureBody ? ProcessInfo.processInfo.systemUptime : 0
         defer {
             if measureBody && !overview && wave != nil {

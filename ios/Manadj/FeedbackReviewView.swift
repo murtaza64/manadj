@@ -14,7 +14,6 @@ struct FeedbackReviewView: View {
     @State private var showOutbox = false
 
     let onClose: () -> Void
-    @State private var confirming = false
     @State private var includeVoice = true
     @State private var player: AVAudioPlayer?
     @State private var voicePlaybackError: String?
@@ -201,11 +200,12 @@ struct FeedbackReviewView: View {
                             if queueDirectory != nil { Button("SAVED") { editing = false; showOutbox = true }.font(Ink.font(10)).accessibilityIdentifier("feedback-open-outbox") }
                             Spacer()
                             if outcome == nil {
-                                Button(submitting ? "SENDING…" : "REVIEW & SEND") { editing = false; confirming = true }
+                                Button(submitting ? "SENDING…" : queueConnection == nil ? "SAVE ON IPHONE" : "SEND") { submit() }
                                     .font(Ink.font(12, bold: true)).foregroundStyle(Ink.play).disabled(trimmedTitle.isEmpty || submitting).accessibilityIdentifier("feedback-submit")
                             }
                         }
-                        Text(destination).font(Ink.font(8)).foregroundStyle(Ink.muted).lineLimit(1)
+                        Text("TO: " + destination).font(Ink.font(9, bold: true)).foregroundStyle(Ink.accent).lineLimit(2)
+                        if outcome == nil { Text("Includes: " + (includeScreenshot ? "marked screen, " : "") + (includeVoice && voice != nil ? "voice, " : "") + sections.filter(\.included).map(\.title).joined(separator: ", ")).font(Ink.font(8)).foregroundStyle(Ink.muted).lineLimit(3) }
                     }
                 }
                 .padding(12).frame(maxWidth: min(420, geometry.size.width - 20))
@@ -215,12 +215,6 @@ struct FeedbackReviewView: View {
                 .padding(.vertical, 10)
                 .accessibilityElement(children: .contain).accessibilityIdentifier("feedback-comment-card")
             }
-        }
-        .confirmationDialog("Send this feedback?", isPresented: $confirming, titleVisibility: .visible) {
-            Button(queueConnection == nil ? "SAVE REVIEWED FEEDBACK ON IPHONE" : "SEND REVIEWED FEEDBACK TO " + destination) { submit() }.accessibilityIdentifier("feedback-confirm-send")
-            Button("KEEP EDITING", role: .cancel) {}
-        } message: {
-            Text("To: " + destination + ". " + (includeScreenshot ? "Includes the marked screen and " : "No screenshot. Includes ") + sections.filter(\.included).map(\.title).joined(separator: ", ") + ". " + (includeVoice && voice != nil ? "Includes your reviewed voice recording. " : "") + "Only text and a report link go to GitHub. Screen, voice and context stay in the desktop feedback store. No automatic retry from this iPhone.")
         }
         .sheet(isPresented: $showOutbox) { if let queueDirectory { FeedbackOutboxView(directory: queueDirectory, connection: queueConnection) } }
         .accessibilityElement(children: .contain).accessibilityIdentifier("feedback-review")

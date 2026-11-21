@@ -14,11 +14,25 @@ struct DeckViewState {
     var loading = false
 }
 
+@MainActor final class DeckPositionReadout: ObservableObject {
+    @Published private(set) var position = 0.0
+    func update(_ value: Double) {
+        if Int(position * 10) != Int(value * 10) { position = value }
+    }
+}
+
 @MainActor final class AppModel: ObservableObject {
     #if DEBUG
     var browserOpenStarted: Double?
     #endif
-    @Published var decks = (0..<4).map { _ in DeckViewState() }
+    private var deckSnapshots = (0..<4).map { _ in DeckViewState() }
+    // User edits/load changes still invalidate controls. Engine polling updates
+    // storage directly, publishing controls only for non-position changes.
+    var decks: [DeckViewState] {
+        get { deckSnapshots }
+        set { objectWillChange.send(); deckSnapshots = newValue }
+    }
+    let positionReadouts = (0..<4).map { _ in DeckPositionReadout() }
     @Published var libraryVersion = 0
     @Published var snapshot: Snapshot? { didSet { libraryVersion += 1 } }
     @Published var downloaded: Set<Int> = []
@@ -34,6 +48,7 @@ struct DeckViewState {
     @Published var loadTarget = 0
     @Published var crossfade = 0.0
     @Published var quantize = false
+    @Published var waveTouchLock = false
     @Published var waveSeconds = 12.0
     @Published var splitOutput = false
     @Published var cueMix = 0.0
@@ -137,16 +152,31 @@ struct DeckViewState {
         }
         // Wave views read the engine on their own display clock. Publish the
         // slower control snapshot only when visible values actually changed.
-        if zip(decks, updated).contains(where: { !Self.sameControlState($0.engine, $1.engine) }) { decks = updated }
+        applyEngineSnapshots(updated)
         if recording && audio.recordingState != 1 {
             recording = false
             if audio.recordingState == 4 { error = "Recording stopped with error \(audio.recordingError). The partial file was not marked saved." }
             refreshRecordings()
         }
     }
+    func applyEngineSnapshots(_ updated: [DeckViewState]) {
+        precondition(updated.count == deckSnapshots.count)
+        var controlsChanged = zip(deckSnapshots, updated).contains { !Self.sameControlState($0.engine, $1.engine) }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture"),
+           ProcessInfo.processInfo.arguments.contains("--probe-whole-position-publication") {
+            controlsChanged = controlsChanged || zip(deckSnapshots, updated).contains { Int($0.engine.position * 10) != Int($1.engine.position * 10) }
+        }
+        #endif
+        if controlsChanged { objectWillChange.send() }
+        // Snapshot consumers (feedback, actions and later redraws) always read
+        // current positions. Only observation is scoped, never engine data.
+        deckSnapshots = updated
+        for index in updated.indices { positionReadouts[index].update(updated[index].engine.position) }
+    }
     private static func sameControlState(_ a: MDJDeck, _ b: MDJDeck) -> Bool {
         guard a.load == b.load, a.transport == b.transport, a.status == b.status,
-              Int(a.position * 10) == Int(b.position * 10), a.target == b.target, a.cue == b.cue,
+              a.target == b.target, a.cue == b.cue,
               a.bpm == b.bpm, a.anchor == b.anchor, a.loopStart == b.loopStart, a.loopEnd == b.loopEnd,
               a.loopBeats == b.loopBeats, Int(a.decodedSeconds) == Int(b.decodedSeconds),
               a.fader == b.fader, a.trim == b.trim, a.pitch == b.pitch, a.bend == b.bend, a.filter == b.filter,

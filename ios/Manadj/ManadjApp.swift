@@ -80,14 +80,19 @@ struct WorkspaceView: View {
     }
     private var portraitBody: some View {
         GeometryReader { geometry in
-            let compact = geometry.size.height < 860
+            // Keep a real bottom gutter even on runtimes that let a bottom
+            // button's background extend through the home-indicator safe area.
+            let availableHeight = geometry.size.height - 24
+            let compact = availableHeight < 860
             let gap: CGFloat = compact ? 3 : 8
             let infoHeight: CGFloat = compact ? 36 : 44
-            let deckHeight: CGFloat = compact ? 316 : 360
-            let mixerFloor: CGFloat = feedback.active ? 302 : 284
+            let mixerFloor: CGFloat = 344
+            // Reserve the full mixer, overview and safe-area-contained transport
+            // before allocating flexible loop/jump spacing on shorter phones.
+            let deckHeight: CGFloat = compact ? min(316, max(284, availableHeight - infoHeight - 36 - gap * 5 - mixerFloor - 36)) : 360
             // Budget real row heights rather than letting the deck's minimum
             // overflow the viewport. Only waveform height yields on standard phones.
-            let waveHeight: CGFloat = compact ? max(36, min(83, geometry.size.height - infoHeight - deckHeight - 36 - gap * 5 - mixerFloor)) : 135
+            let waveHeight: CGFloat = compact ? max(36, min(83, availableHeight - infoHeight - deckHeight - 36 - gap * 5 - mixerFloor)) : 135
             VStack(spacing: gap) {
                 HStack(spacing: 10) { deckInfo(0); deckInfo(1) }.frame(height: browsing && keyboardOpen ? 36 : infoHeight)
                 if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: waveHeight) }
@@ -126,8 +131,8 @@ struct WorkspaceView: View {
                             SettingsView()
                         }.background(Ink.base).transition(.move(edge: .bottom))
                     }
-                }.clipped()
-            }.frame(height: geometry.size.height, alignment: .top).padding(.horizontal, 8)
+                }.clipShape(Rectangle().inset(by: browsing || settings ? 0 : -1000))
+            }.frame(height: availableHeight, alignment: .top).padding(.horizontal, 8).padding(.bottom, 24)
             .animation(.spring(response: 0.3, dampingFraction: 0.9), value: browsing)
             .onChange(of: browsing) { _, _ in browserDrag = 0 }
             .animation(.easeOut(duration: 0.24), value: settings)
@@ -172,7 +177,7 @@ struct WorkspaceView: View {
                 HStack(spacing: 2) {
                     Text(deck.duration > 0 ? deck.artist : "local file").lineLimit(1)
                     Spacer(minLength: 0)
-                    Text("\(Ink.clock(deck.engine.position)) -\(Ink.clock(max(0, deck.duration - deck.engine.position)))").foregroundStyle(deck.engine.playing ? Ink.play : Ink.text).lineLimit(1)
+                    DeckTimeReadout(clock: model.positionReadouts[index], duration: deck.duration, playing: deck.engine.playing)
                 }.font(Ink.font(10)).foregroundStyle(Ink.muted)
             }
         }.contentShape(Rectangle()).onTapGesture { selected = index; model.loadTarget = index }
@@ -216,34 +221,92 @@ struct WorkspaceView: View {
             return accepted
         })
     }
+    @ViewBuilder private var centerModePicker: some View {
+        if ProcessInfo.processInfo.arguments.contains("--plain-center-tabs") { plainCenterTabs }
+        else { nativeCenterModePicker }
+    }
+    private var plainCenterTabs: some View {
+HStack(spacing: 0) {
+                    ForEach(["FX", "FEEDBACK", "AUDIO", "SYNC"], id: \.self) { tab in
+                        Button {
+                            if tab == "FEEDBACK" { feedback.open() }
+                            else { feedback.contextual = tab == "AUDIO" ? "OUTPUT" : tab }
+                        } label: {
+                            Image(systemName: tab == "FX" ? "sparkles" : tab == "FEEDBACK" ? "bubble.left.and.text.bubble.right" : tab == "AUDIO" ? outputSymbol : "desktopcomputer").font(.system(size: 14)).frame(maxWidth: .infinity, minHeight: 44)
+                                .background((feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")) ? Ink.accent.opacity(0.15) : .clear)
+                                .overlay(alignment: .bottom) { Rectangle().fill((feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")) ? Ink.accent : Ink.edge).frame(height: 2) }
+                        }.buttonStyle(.plain).frame(height: 44).contentShape(Rectangle())
+                            .accessibilityLabel(tab == "FEEDBACK" ? "Feedback" : tab.capitalized).accessibilityIdentifier(tab == "FEEDBACK" ? "feedback-open" : "center-tab-" + tab.lowercased())
+                    }
+                }.foregroundStyle(Ink.accent)
+    }
+    @ViewBuilder private var nativeCenterModePicker: some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 0) { centerGlassButtons }
+        } else { plainCenterTabs }
+        #else
+        plainCenterTabs
+        #endif
+    }
+    private var centerGlassButtons: some View {
+        HStack(spacing: 0) {
+            ForEach(["FX", "FEEDBACK", "AUDIO", "SYNC"], id: \.self) { tab in
+                let selected = feedback.contextual == tab || (tab == "AUDIO" && feedback.contextual == "OUTPUT")
+                Button {
+                    if tab == "FEEDBACK" { feedback.open() }
+                    else { feedback.contextual = tab == "AUDIO" ? "OUTPUT" : tab }
+                } label: {
+                    Image(systemName: tab == "FX" ? "sparkles" : tab == "FEEDBACK" ? "bubble.left.and.text.bubble.right" : tab == "AUDIO" ? outputSymbol : "desktopcomputer")
+                        .font(.system(size: 15)).frame(maxWidth: .infinity, minHeight: 44)
+                        .modifier(CenterSelectionGlass(selected: selected))
+                }.buttonStyle(.plain).contentShape(Capsule())
+                    .foregroundStyle(selected ? Ink.accent : Ink.text)
+                    .accessibilityLabel(tab == "FEEDBACK" ? "Feedback" : tab.capitalized)
+                    .accessibilityIdentifier(tab == "FEEDBACK" ? "feedback-open" : "center-tab-" + tab.lowercased())
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }.padding(3).background(Ink.panel, in: Capsule())
+    }
     private var mixer: some View {
         HStack(spacing: 0) {
             knobColumn(0).frame(width: 48)
             channel(0).frame(width: 42)
             VStack(spacing: 4) {
-                HStack(spacing: 2) {
-                    Button("QUANT") { model.quantize.toggle(); model.set(MDJQuantize, 0, model.quantize ? 1 : 0) }.buttonStyle(PerformanceKeyStyle(active: model.quantize)).feedbackTarget("Quantize")
-                    Button { feedback.contextual = feedback.contextual == "HEARD" ? "FX" : "HEARD" } label: { Image(systemName: "slider.horizontal.3").font(.system(size: 10)) }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 24).disabled(feedback.active).accessibilityLabel("Heard quantization settings")
-                    Button("XF") { xf.toggle(); if !xf { model.crossfade = 0; model.set(MDJCrossfade, 0, 0) } }.buttonStyle(PerformanceKeyStyle(active: xf))
-                }.frame(height: 36)
-                HStack(spacing: 2) {
+                HStack(spacing: 5) {
+                    HStack(spacing: 0) {
+                        Button("QUANT") { model.quantize.toggle(); model.set(MDJQuantize, 0, model.quantize ? 1 : 0) }.buttonStyle(PerformanceKeyStyle(active: model.quantize)).feedbackTarget("Quantize")
+                        Button { feedback.contextual = feedback.contextual == "HEARD" ? "FX" : "HEARD" } label: { Image(systemName: "slider.horizontal.3").font(.system(size: 10)) }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 44).disabled(feedback.active).accessibilityLabel("Heard quantization settings")
+                    }.overlay(Capsule().stroke(Ink.edge, lineWidth: 1))
+                    Button("XF") { xf.toggle(); if !xf { model.crossfade = 0; model.set(MDJCrossfade, 0, 0) } }.buttonStyle(PerformanceKeyStyle(active: xf)).frame(width: 44)
+                    Button { model.waveTouchLock.toggle() } label: { Image(systemName: model.waveTouchLock ? "lock.fill" : "lock.open") }.buttonStyle(PerformanceKeyStyle(active: model.waveTouchLock)).frame(width: 44)
+                        .accessibilityLabel("Lock playing waveform touch").accessibilityIdentifier("wave-touch-lock").accessibilityValue(model.waveTouchLock ? "Locked while playing" : "Unlocked")
+                }.frame(height: 44)
+                HStack(spacing: 4) {
                     Button("SESSIONS") { notice = "Session replay is not implemented on iOS yet" }.buttonStyle(PerformanceKeyStyle(color: Ink.muted))
-                    Button { withAnimation { browsing = false; settings.toggle() } } label: { Image(systemName: "gearshape") }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).accessibilityLabel("Settings").feedbackTarget("Settings")
-                }.frame(height: 36)
+                    Button { withAnimation { browsing = false; settings.toggle() } } label: { Image(systemName: "gearshape") }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 44).accessibilityLabel("Settings").feedbackTarget("Settings")
+                }.frame(height: 44)
                 recordingBar.frame(height: 44)
                 Spacer(minLength: 0)
-                if feedback.contextual == "FEEDBACK" { LiveFeedbackToolbar(session: feedback, model: model) }
-                else if feedback.contextual == "OUTPUT" { outputContext }
-                else if feedback.contextual == "HEARD" { heardContext }
-                else { fxCard }
-                HStack(spacing: 2) {
-                    feedbackButton
-                    Button { feedback.contextual = feedback.contextual == "OUTPUT" ? "FX" : "OUTPUT" } label: { Image(systemName: outputSymbol).frame(width: 30, height: 28) }.buttonStyle(.plain).foregroundStyle(Ink.accent).disabled(feedback.active).accessibilityLabel("Audio output: " + outputDescription)
-                }.frame(height: 28)
+                centerModePicker
+                contextPanel.frame(height: 96, alignment: .top).clipped()
                 if xf { PerformanceFader(value: Binding(get: { (model.crossfade + 1) / 2 }, set: { model.crossfade = $0 * 2 - 1; model.set(MDJCrossfade, 0, model.crossfade) }), color: Ink.accent, vertical: false, label: "Crossfader").frame(height: 40).feedbackTarget("Crossfader") }
             }.padding(.horizontal, 3)
             channel(1).frame(width: 42)
             knobColumn(1).frame(width: 48)
+        }
+    }
+    @ViewBuilder private var contextPanel: some View {
+        if feedback.contextual == "SYNC" {
+            SettingsView(syncOnly: true).accessibilityIdentifier("center-sync-panel")
+        } else if feedback.contextual == "FX" {
+            fxCard
+        } else {
+            ScrollView {
+                if feedback.contextual == "FEEDBACK" { LiveFeedbackToolbar(session: feedback, model: model) }
+                else if feedback.contextual == "OUTPUT" { outputContext }
+                else if feedback.contextual == "HEARD" { heardContext }
+            }
         }
     }
     private func knobColumn(_ index: Int) -> some View {
@@ -264,18 +327,20 @@ struct WorkspaceView: View {
     }
     /// Recording belongs in the shared center panel, between channel faders.
     private var recordingBar: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
+            Spacer(minLength: 0)
             Button { model.toggleRecording() } label: {
                 HStack(spacing: 4) {
                     Image(systemName: model.recording ? "stop.fill" : "record.circle")
-                    Text(model.recording ? "STOP" : "REC · WAV")
+                    Text(model.recording ? "STOP" : "REC")
                 }
-            }.buttonStyle(PerformanceKeyStyle(color: model.recording ? Ink.danger : Ink.text, active: model.recording))
+            }.buttonStyle(PerformanceKeyStyle(color: model.recording ? Ink.danger : Ink.text, active: model.recording)).frame(width: 70)
                 .accessibilityLabel(model.recording ? "Stop master recording" : "Record master")
             Button { saved = true } label: {
                 HStack(spacing: 3) { Image(systemName: "waveform.path"); Text("\(model.recordings.count)") }
             }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 52)
                 .accessibilityLabel("Saved recordings")
+            Spacer(minLength: 0)
         }
     }
     private var outputDescription: String { outputRoute.outputs.map(\.portName).joined(separator: ", ") }
@@ -335,4 +400,31 @@ struct WorkspaceView: View {
 private struct NativeRoutePicker: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView { let view = AVRoutePickerView(); view.tintColor = .white; return view }
     func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+}
+
+/// Real native material, never simulated blur. Legacy SDKs retain the plain strip.
+private struct CenterSelectionGlass: ViewModifier {
+    let selected: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *), selected {
+            content.glassEffect(.regular.tint(Ink.accent.opacity(0.2)).interactive(), in: Capsule())
+        } else { content }
+        #else
+        content
+        #endif
+    }
+}
+
+/// Only this small text observes the 10Hz position clock, not the mixer tree.
+struct DeckTimeReadout: View {
+    @ObservedObject var clock: DeckPositionReadout
+    var duration: Double
+    var playing: Bool
+    var precise = false
+    var body: some View {
+        Text(precise ? String(format: "%.2fs", clock.position)
+             : "\(Ink.clock(clock.position)) -\(Ink.clock(max(0, duration - clock.position)))")
+            .foregroundStyle(playing ? Ink.play : Ink.text).lineLimit(1)
+    }
 }
