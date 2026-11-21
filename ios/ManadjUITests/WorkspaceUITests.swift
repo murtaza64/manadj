@@ -20,11 +20,25 @@ final class WorkspaceUITests: XCTestCase {
     }
 
     @MainActor func testMetalPrototypeWorkspacePixelsAndFallbackStatus() {
-        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture", "--metal-waveform-prototype"]; app.launch()
-        let wave = app.otherElements["deck-0-detail-wave"]
-        XCTAssertTrue(wave.waitForExistence(timeout: 15))
-        // The native readback test proves shader initialization and actual GPU output.
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Metal opt-in full workspace synthetic"; shot.lifetime = .keepAlways; add(shot)
+        defer { captureFailure() }
+        for metal in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--performance-ui-fixture", "--wave-body-metrics"] + (metal ? ["--metal-waveform-prototype"] : [])
+            app.launch()
+            let a = app.buttons["A play pause"], b = app.buttons["B play pause"]
+            XCTAssertTrue(a.waitForExistence(timeout: 20)); waitForReadyTransport(a, app: app)
+            a.tap(); b.tap()
+            let wave = app.otherElements["deck-0-detail-wave"]
+            let measured = NSPredicate(format: "value CONTAINS %@", "waveBodySamples=120")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: measured, object: wave)], timeout: 20), .completed)
+            let value = wave.value as? String ?? ""
+            XCTAssertTrue(value.contains(metal ? "renderer=metal" : "renderer=coregraphics"), value)
+            print("SYNTHETIC_WORKSPACE_" + value + " simulatorNotPhone=true")
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = metal ? "Metal opt-in full workspace two playing decks" : "Core Graphics full workspace two playing decks"
+            shot.lifetime = .keepAlways; add(shot)
+            app.terminate()
+        }
     }
 
     @MainActor func testBrowserOpenResponsivenessSyntheticFixture() {

@@ -63,6 +63,12 @@ struct PerformanceWave: UIViewRepresentable {
     private var bodyKey = ""
     private var cachedStep = 0.0
     private var clock = WaveClock()
+    #if DEBUG
+    private let measureBody = ProcessInfo.processInfo.arguments.contains("--wave-body-metrics")
+    private var bodySamples: [Double] = []
+    private var bodyWarmup = 0
+    private var bodyMetrics = ""
+    #endif
     private var metalBody: MetalWaveBody?
     private var metalOverlay: MetalWaveOverlay?
     private var triedMetal = false
@@ -154,7 +160,12 @@ struct PerformanceWave: UIViewRepresentable {
     override var accessibilityValue: String? {
         get {
             guard duration > 0, let state = state?() else { return "not loaded" }
-            return String(format: "%@ %.2f seconds", state.playing ? "playing" : "paused", state.position)
+            let transport = String(format: "%@ %.2f seconds", state.playing ? "playing" : "paused", state.position)
+            #if DEBUG
+            return transport + bodyMetrics
+            #else
+            return transport
+            #endif
         }
         set { }
     }
@@ -239,6 +250,22 @@ struct PerformanceWave: UIViewRepresentable {
         drawContent(rect, cpuWave: true)
     }
     fileprivate func drawContent(_ rect: CGRect, cpuWave: Bool) {
+        #if DEBUG
+        let began = measureBody ? ProcessInfo.processInfo.systemUptime : 0
+        defer {
+            if measureBody && !overview && wave != nil {
+                bodyWarmup += 1
+                if bodyWarmup > 30 && bodySamples.count < 120 {
+                    bodySamples.append((ProcessInfo.processInfo.systemUptime - began) * 1000)
+                    if bodySamples.count == 120 {
+                        let sorted = bodySamples.sorted(), mean = bodySamples.reduce(0, +) / 120
+                        bodyMetrics = String(format: " waveBodySamples=120 renderer=%@ cpuMeanMS=%.3f cpuP95MS=%.3f cpuMaxMS=%.3f", cpuWave ? "coregraphics" : "metal", mean, sorted[113], sorted[119])
+                        print("SYNTHETIC_LIVE_WAVE_BODY" + bodyMetrics + " includesCueOverlay=true excludesGPUCompletionAndComposition=true simulatorNotPhone=true")
+                    }
+                }
+            }
+        }
+        #endif
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
         if cpuWave { ctx.setFillColor(UIColor.black.cgColor); ctx.fill(bounds) }
         else { ctx.clear(bounds) }
