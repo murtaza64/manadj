@@ -108,6 +108,7 @@ struct WorkspaceView: View {
                     if settings {
                         VStack(spacing: 0) {
                             HStack { Text("SETTINGS").font(Ink.font(14, bold: true)); Spacer(); Button("CLOSE") { settings = false }.buttonStyle(PerformanceKeyStyle()).frame(width: 75, height: 38) }
+                            if feedback.active { LiveFeedbackToolbar(session: feedback, model: model).frame(maxWidth: 300) }
                             SettingsView()
                         }.background(Ink.base).transition(.move(edge: .bottom))
                     }
@@ -139,8 +140,8 @@ struct WorkspaceView: View {
                 VStack(spacing: 4) { deckInfo(1).frame(height: 36); minimap(1).frame(height: 30); deckControls(1, compact: true) }.frame(width: geometry.size.width * 0.28)
             }.padding(.horizontal, 8)
             .overlay(alignment: .leading) {
-                if browsing { VStack { library; browseKey.frame(height: 36) }.frame(width: geometry.size.width * 0.6).background(Ink.base) }
-                if settings { VStack { Button("CLOSE SETTINGS") { settings = false }; SettingsView() }.frame(width: geometry.size.width * 0.6).background(Ink.base) }
+                if browsing { VStack { if feedback.active { LiveFeedbackToolbar(session: feedback, model: model).frame(maxWidth: 300) }; library; browseKey.frame(height: 36) }.frame(width: geometry.size.width * 0.6).background(Ink.base) }
+                if settings { VStack { Button("CLOSE SETTINGS") { settings = false }; if feedback.active { LiveFeedbackToolbar(session: feedback, model: model).frame(maxWidth: 300) }; SettingsView() }.frame(width: geometry.size.width * 0.6).background(Ink.base) }
             }
         }
     }

@@ -14,8 +14,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+import hashlib
+
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image, PngImagePlugin
 
@@ -153,6 +155,182 @@ def freeze(service, reports):
 
 def batch(service, id):
     return next(item for item in service.list()["batches"] if item["id"] == id)
+
+
+def voice_payload(format="mp3", marker=b"", **changes):
+    """Tiny synthetic container stubs: valid magic only, not playable audio."""
+    blobs = {
+        "mp3": b"ID3\x04\x00\x00\x00\x00\x00\x10" + b"\xff\xfb" + bytes(64) + marker,
+        "m4a": b"\x00\x00\x00\x18ftypM4A " + bytes(64) + marker,
+        "caf": b"caff\x00\x01\x00\x00" + bytes(64) + marker,
+    }
+    prefixes = {
+        "mp3": "data:audio/mpeg;base64,",
+        "m4a": "data:audio/mp4;base64,",
+        "caf": "data:audio/caf;base64,",
+    }
+    body = {
+        "format": format,
+        "data_url": prefixes[format] + base64.b64encode(blobs[format]).decode("ascii"),
+        "duration_ms": 4200,
+        "started_at": "2026-11-21T01:00:00Z",
+        "ended_at": "2026-11-21T01:00:04Z",
+        "transcript": "the loop jumps back when I slide the wave",
+    }
+    body.update(changes)
+    return body
+
+
+def test_voice_is_local_file_evidence_and_never_uploaded(world):
+    service = world.make()
+    client = app_client(service)
+    payload = data(service, voice=voice_payload())
+    response = client.post("/api/feedback/reports", json=payload)
+    assert response.status_code == 200, response.text
+    report = response.json()
+    evidence = service.evidence(report["id"])["voice"]
+    assert evidence["format"] == "mp3" and evidence["duration_ms"] == 4200
+    assert evidence["transcript"] == "the loop jumps back when I slide the wave"
+    assert evidence["file"] == f"voice/{evidence['sha256']}.mp3"
+    assert "data_url" not in evidence and "base64" not in json.dumps(evidence)
+    audio = service.storage / evidence["file"]
+    assert audio.read_bytes() == base64.b64decode(payload["voice"]["data_url"].split(",", 1)[1])
+    if os.name != "nt":
+        assert audio.stat().st_mode & 0o777 == 0o600
+        assert (service.storage / "voice").stat().st_mode & 0o777 == 0o700
+    # The remote issue body carries no raw voice, path, hash or data URL.
+    body = world.gh.creates[0][1]
+    assert "voice" not in body and evidence["sha256"] not in body
+    assert "data:audio" not in body and str(service.storage) not in body
+    frozen = freeze(service, [report])
+    service.poll()
+    assert batch(service, frozen["id"])["status"] == "submitted"
+    _, _, prompt = world.daemon.sent[0]
+    assert str(audio) in prompt and "stays local" in prompt and "never upload" in prompt
+    assert "4,200" in prompt or "4200" in prompt
+
+
+def test_voice_optional_and_backward_compatible(world):
+    service = world.make()
+    report = submit(service)
+    assert service.evidence(report["id"])["voice"] is None
+
+
+@pytest.mark.parametrize("format", ["mp3", "m4a", "caf"])
+def test_voice_formats_accepted(world, format):
+    service = world.make()
+    report = submit(service, voice=voice_payload(format, transcript=None))
+    evidence = service.evidence(report["id"])["voice"]
+    assert evidence["format"] == format and evidence["transcript"] is None
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"format": "wav"},
+        {"data_url": "data:audio/mpeg;base64," + base64.b64encode(b"NOPE" + bytes(32)).decode()},
+        {"duration_ms": 0},
+        {"duration_ms": 120_001},
+        {"started_at": "2026-11-21T01:00:04Z", "ended_at": "2026-11-21T01:00:00Z"},
+        {"transcript": "x" * 10_001},
+        {"unexpected": "field"},
+    ],
+)
+def test_voice_validation_rejects(world, changes):
+    service = world.make()
+    with pytest.raises(Exception):
+        submit(service, voice=voice_payload(**changes))
+    assert service.list()["reports"] == []
+
+
+def test_voice_mismatched_container_and_oversize_rejected(world):
+    service = world.make()
+    # Declared mp3 but an M4A container: format/prefix agree, magic does not.
+    m4a_blob = b"\x00\x00\x00\x18ftypM4A " + bytes(64)
+    with pytest.raises(Exception):
+        submit(
+            service,
+            voice=voice_payload(
+                data_url="data:audio/mpeg;base64," + base64.b64encode(m4a_blob).decode()
+            ),
+        )
+    oversized = b"ID3\x04\x00\x00\x00\x00\x00\x10" + b"\xff\xfb" + bytes(5 * 1024 * 1024)
+    with pytest.raises(Exception):
+        submit(
+            service,
+            voice=voice_payload(
+                data_url="data:audio/mpeg;base64," + base64.b64encode(oversized).decode()
+            ),
+        )
+    assert service.list()["reports"] == []
+
+
+def test_voice_transcript_scrubbed_and_resubmission_immutable(world):
+    service = world.make()
+    client = app_client(service)
+    voice = voice_payload(transcript="my password: hunter2 is in this clip")
+    payload = data(service, voice=voice)
+    first = client.post("/api/feedback/reports", json=payload)
+    assert first.status_code == 200
+    evidence = service.evidence(payload["id"])["voice"]
+    assert "hunter2" not in evidence["transcript"] and "[REDACTED]" in evidence["transcript"]
+    assert client.post("/api/feedback/reports", json=payload).json() == first.json()
+    changed = data(service, id=payload["id"], origin=payload["origin"],
+                    voice=voice_payload(marker=b"different-bytes", transcript="different take"))
+    assert client.post("/api/feedback/reports", json=changed).status_code == 409
+    # The rejected resubmission must not have touched the stored audio.
+    evidence = service.evidence(payload["id"])["voice"]
+    assert "hunter2" not in evidence["transcript"]
+    original = base64.b64decode(voice["data_url"].split(",", 1)[1])
+    assert (service.storage / evidence["file"]).read_bytes() == original
+
+
+def test_conflicting_voice_resubmission_never_replaces_original_bytes(world):
+    service = world.make()
+    client = app_client(service)
+    first_voice = voice_payload()
+    payload = data(service, voice=first_voice)
+    assert client.post("/api/feedback/reports", json=payload).status_code == 200
+    original = base64.b64decode(first_voice["data_url"].split(",", 1)[1])
+    other = voice_payload(marker=b"rejected-take", transcript=None, duration_ms=900)
+    conflicting = data(service, id=payload["id"], origin=payload["origin"], voice=other)
+    assert client.post("/api/feedback/reports", json=conflicting).status_code == 409
+    evidence = service.evidence(payload["id"])["voice"]
+    assert evidence["transcript"] == first_voice["transcript"]
+    stored = service.storage / evidence["file"]
+    assert stored.read_bytes() == original
+    # Any file the rejected attempt wrote is content-named and unreferenced.
+    orphan_sha = hashlib.sha256(base64.b64decode(other["data_url"].split(",", 1)[1])).hexdigest()
+    assert evidence["file"] != f"voice/{orphan_sha}.mp3"
+
+
+def test_concurrent_conflicting_voice_keeps_winner_bytes(world):
+    first = world.make()
+    second = world.make(path=first.workspace.path)
+    report_id = str(uuid4())
+    voice_a = voice_payload(marker=b"take-a", transcript="take a")
+    voice_b = voice_payload(marker=b"take-b", transcript="take b", duration_ms=900)
+    body_a = data(first, id=report_id, voice=voice_a)
+    body_b = data(second, id=report_id, voice=voice_b)
+
+    def attempt(service, body):
+        try:
+            return service.submit(Submission.model_validate(body))
+        except HTTPException as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(
+            lambda args: attempt(*args), [(first, body_a), (second, body_b)]
+        ))
+    outcomes = sorted(
+        "conflict" if isinstance(r, HTTPException) else "stored" for r in results
+    )
+    assert outcomes == ["conflict", "stored"]
+    evidence = first.evidence(report_id)["voice"]
+    winner = voice_a if evidence["transcript"] == "take a" else voice_b
+    expected = base64.b64decode(winner["data_url"].split(",", 1)[1])
+    assert (first.storage / evidence["file"]).read_bytes() == expected
 
 
 def test_context_private_durable_store_and_api_contract(world):
@@ -1025,3 +1203,15 @@ def test_pointer_and_trail_snapshot_fields_round_trip(world):
         "event": "play",
         "detail": "deck A",
     }
+
+
+def test_voice_rejects_missing_or_mixed_timestamp_zones():
+    from pydantic import ValidationError
+    from backend.feedback import Voice
+    import base64
+    payload = dict(format="mp3", data_url="data:audio/mpeg;base64," + base64.b64encode(b"ID3" + bytes(20)).decode(), duration_ms=1000, started_at="2026-11-21T09:00:00", ended_at="2026-11-21T09:00:01Z")
+    with pytest.raises(ValidationError):
+        Voice(**payload)
+    payload["ended_at"] = "2026-11-21T09:00:01"
+    with pytest.raises(ValidationError):
+        Voice(**payload)

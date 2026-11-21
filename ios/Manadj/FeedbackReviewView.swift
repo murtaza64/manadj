@@ -224,6 +224,7 @@ struct FeedbackReviewView: View {
         }
         .sheet(isPresented: $showOutbox) { if let queueDirectory { FeedbackOutboxView(directory: queueDirectory, connection: queueConnection) } }
         .accessibilityElement(children: .contain).accessibilityIdentifier("feedback-review")
+        .onDisappear { player?.stop() }
         .preferredColorScheme(.dark)
     }
 
