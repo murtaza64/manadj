@@ -82,6 +82,18 @@ public final class SyncClient: Sendable {
         try check(response)
         return try PreviewPack.parse(data)
     }
+    /// Full-resolution MWF is separate from the 256-bin library preview.
+    public func detailWaveform(_ track: LibraryTrack) async throws -> Data {
+        guard track.id > 0, let revision = track.waveformRev else { throw SyncError("Full waveform not advertised by desktop") }
+        let (data, response) = try await session.data(for: connection.request(path: "/tracks/\(track.id)/waveform"))
+        try check(response)
+        guard data.count <= 64 * 1024 * 1024 else { throw SyncError("Full waveform exceeds size limit") }
+        guard (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Waveform-Rev") == revision else {
+            throw SyncError("Full waveform revision changed. Refresh the library before retrying.")
+        }
+        _ = try PreviewWaveform.parse(data)
+        return data
+    }
     /// URLSession streams to disk, never holds a whole audio download in Swift memory.
     public func downloadAudio(_ id: Int, to target: URL, expectedBytes: Int64? = nil, expectedRevision: String? = nil) async throws {
         guard id > 0 else { throw SyncError("Invalid track identity") }

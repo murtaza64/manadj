@@ -9,6 +9,7 @@ struct DeckViewState {
     var track: LibraryTrack?
     var duration: Double = 0
     var waveform: PreviewWaveform?
+    var waveformNotice: String?
     var engine = MDJDeck()
     var loading = false
 }
@@ -211,7 +212,12 @@ struct DeckViewState {
                     try await Task.sleep(for: .milliseconds(200))
                 }
             } catch is CancellationError { }
-            catch { self.pauseLocalLive(error.localizedDescription) }
+            catch {
+                // URLSession cancellation can arrive as URLError, not CancellationError.
+                // A stopped/replaced listener must never overwrite STOP or pause its successor.
+                guard !Task.isCancelled else { return }
+                self.pauseLocalLive(error.localizedDescription)
+            }
         }
     }
     private func pauseLocalLive(_ reason: String) {
@@ -244,7 +250,9 @@ struct DeckViewState {
                 try Task.checkCancellation()
                 decks[index].track = track; decks[index].title = track.title
                 decks[index].artist = track.artist ?? ""; decks[index].duration = duration
-                decks[index].waveform = await repository.preview(track)
+                let preview = await repository.preview(track)
+                try Task.checkCancellation()
+                decks[index].waveform = preview
                 // Fetch a fresh anchor after download/decode, never extrapolate old state.
                 liveStatus = "Audio ready · waiting for fresh anchor"
                 return
@@ -385,8 +393,14 @@ struct DeckViewState {
                 decks[deck].title = track.title
                 decks[deck].artist = track.artist ?? "Unknown artist"
                 decks[deck].track = track
-                decks[deck].duration = track.durationSecs ?? duration
-                decks[deck].waveform = await repository.preview(track)
+                decks[deck].duration = duration // Decoded audio is the authoritative timeline, not stale catalog metadata.
+                decks[deck].waveform = nil
+                decks[deck].waveformNotice = "Loading full waveform"
+                do {
+                    decks[deck].waveform = try await repository.detail(track, connection: connection)
+                    decks[deck].waveformNotice = decks[deck].waveform == nil ? "Full waveform not generated on desktop" : nil
+                } catch { decks[deck].waveformNotice = "Full waveform unavailable locally. Audio remains playable." }
+                // Never magnify the 256-bin browser preview into a performance lane.
                 downloaded = await repository.downloadedIds()
             } catch { loadFailed(error, deck: deck, previousLoad: previousLoad) }
         }

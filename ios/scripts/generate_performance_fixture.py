@@ -31,4 +31,11 @@ for name, hz in [('A', 220), ('B', 261.63)]:
     header[32]=8;struct.pack_into('<f',header,36,.5)
     struct.pack_into('<9f',header,40,*edges)
     (root / ('synthetic-'+name+'.mwf')).write_bytes(header+struct.pack('<II',len(p),len(b)//8)+p+b)
-print('Generated 24-second synthetic A/B WAV + analyzed MWF1')
+# Use the production preview reducer so tests cannot accidentally substitute
+# full detail data into the browser-preview cache again.
+import sys
+sys.path.insert(0, str(root.parents[2]))
+from backend.waveform_data import build_preview_blob
+for name in ['A', 'B']:
+    (root / ('synthetic-'+name+'-preview.mwf')).write_bytes(build_preview_blob((root / ('synthetic-'+name+'.mwf')).read_bytes()))
+print('Generated synthetic A/B WAV, full MWF and separate 256-bin previews')

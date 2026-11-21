@@ -76,6 +76,15 @@ public actor LibraryRepository {
         try await SyncClient(connection).downloadAudio(track.id, to: target, expectedBytes: track.fileSizeBytes, expectedRevision: track.audioRev)
         return target
     }
+    public func detail(_ track: LibraryTrack, connection: DesktopConnection?) async throws -> PreviewWaveform? {
+        if let cached = store.detail(track) { return cached }
+        guard track.waveformRev != nil else { return nil }
+        guard let connection else { throw SyncError("Full waveform not cached. Connect to desktop to fetch detail; audio remains playable.") }
+        let data = try await SyncClient(connection).detailWaveform(track)
+        try Task.checkCancellation()
+        try store.saveDetail(data, track: track)
+        return try PreviewWaveform.parse(data)
+    }
     public func downloadedIds() -> Set<Int> { Set((snapshot?.tracks ?? []).filter(store.hasAudio).map(\.id)) }
     public func preview(_ track: LibraryTrack) -> PreviewWaveform? { store.preview(track) }
 }
