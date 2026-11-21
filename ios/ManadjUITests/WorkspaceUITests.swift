@@ -33,13 +33,13 @@ final class WorkspaceUITests: XCTestCase {
             XCTAssertLessThanOrEqual(control.frame.maxY, app.frame.maxY - 14)
         }
         let initial = XCTAttachment(screenshot: app.screenshot()); initial.name = "Compact review: full-size pinned transport and scrollable mixer"; initial.lifetime = .keepAlways; add(initial)
-        scroll.swipeUp()
+        app.buttons["PADS"].tap()
         let pad = app.buttons["deck-0-hotcue-0"]
         XCTAssertTrue(pad.isHittable)
         XCTAssertEqual(pad.frame.width, pad.frame.height, accuracy: 1)
         XCTAssertGreaterThanOrEqual(pad.frame.width, 44)
         let pads = XCTAttachment(screenshot: app.screenshot()); pads.name = "Compact review: scrolled square pads, transport remains fixed"; pads.lifetime = .keepAlways; add(pads)
-        scroll.swipeDown()
+        app.buttons["MIXER"].tap()
         app.buttons["feedback-open"].tap()
         for id in ["feedback-rec", "feedback-review-open"] {
             let control = app.buttons[id]

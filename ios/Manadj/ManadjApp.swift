@@ -94,18 +94,26 @@ struct WorkspaceView: View {
                 HStack { Text("SETTINGS"); Spacer(); Button("CLOSE") { settings = false }.frame(minWidth: 44, minHeight: 44) }
                 SettingsView()
             } else {
-                ScrollView {
+                ScrollViewReader { proxy in
+                    VStack(spacing: 0) {
+                        HStack {
+                            Button("MIXER") { withAnimation { proxy.scrollTo("compact-mixer", anchor: .top) } }
+                            Button("PADS") { withAnimation { proxy.scrollTo("compact-pads", anchor: .top) } }
+                        }.font(Ink.font(12, bold: true)).frame(height: 44)
+                        ScrollView {
                     VStack(spacing: 6) {
-                        mixerPanel(pinnedFeedback: true).frame(height: 360)
+                        mixerPanel(pinnedFeedback: true).frame(height: 360).id("compact-mixer")
                         HStack(spacing: 6) { minimap(0); browseKey.frame(width: 100); minimap(1) }.frame(height: 44)
                         HStack(spacing: 6) {
                             ForEach(0..<2) { index in
                                 PerformanceDeckControls(index: index, pitch: .constant(false), compact: true,
                                     onTransport: { AnyView(EmptyView()) }, externalTransport: true)
                             }
-                        }.frame(height: 260)
+                        }.frame(height: 260).id("compact-pads")
                     }
-                }.accessibilityIdentifier("compact-mixer-scroll")
+                        }.accessibilityIdentifier("compact-mixer-scroll")
+                    }
+                }
             }
             if feedback.active { LiveFeedbackToolbar(session: feedback, model: model) }
             HStack(spacing: 6) { transport(0); transport(1) }.frame(height: 52)
