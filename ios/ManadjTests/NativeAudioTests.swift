@@ -338,7 +338,12 @@ final class NativeAudioTests: XCTestCase {
         // than assuming readiness and a playing anchor fit inside the first one.
         let readinessStarted = ProcessInfo.processInfo.systemUptime
         let readinessDeadline = readinessStarted + 30
+        var previousStatus = ""
         while ProcessInfo.processInfo.systemUptime < readinessDeadline {
+            if model.liveStatus != previousStatus {
+                previousStatus = model.liveStatus
+                print("SYNTHETIC_LIVE_TRANSITION elapsed=\(ProcessInfo.processInfo.systemUptime - readinessStarted) status=\(previousStatus) roundTrip=\(model.liveRoundTrip) audioReady=\(model.audio?.state(0).ready ?? false)")
+            }
             if model.audio?.state(0).playing == true { heardPlaying = true; break }
             try await Task.sleep(for: .milliseconds(40))
         }
