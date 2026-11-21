@@ -265,7 +265,8 @@ final class WorkspaceUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Local live monitor - synthetic paired host, not device proof"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["STOP"].tap()
-        XCTAssertTrue(status.label.hasPrefix("Stopped"))
+        let stopped = NSPredicate(format: "label BEGINSWITH %@", "Stopped")
+        expectation(for: stopped, evaluatedWith: status); waitForExpectations(timeout: 5)
     }
 
 }
