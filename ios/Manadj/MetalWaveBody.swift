@@ -103,7 +103,7 @@ import ManadjCore
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: count * 3)
         encoder.endEncoding()
         if let drawable { command.present(drawable) }
-        if !wait { let gate = inFlight; command.addCompletedHandler { _ in gate.signal() } }
+        if !wait { Self.signalOnCompletion(command, gate: inFlight) }
         command.commit(); committed = true
         lastCPUEncodeMS = (ProcessInfo.processInfo.systemUptime - begin) * 1000
         frameCount += 1
@@ -113,6 +113,13 @@ import ManadjCore
             return (lastCPUEncodeMS, max(0, command.gpuEndTime - command.gpuStartTime) * 1000)
         }
         return (lastCPUEncodeMS, 0)
+    }
+
+    // Metal invokes completions on its driver queue. A closure created inside
+    // render inherits MainActor and traps there under executor checking, even
+    // when it only signals a thread-safe semaphore. Create it outside that actor.
+    nonisolated private static func signalOnCompletion(_ command: MTLCommandBuffer, gate: DispatchSemaphore) {
+        command.addCompletedHandler { _ in gate.signal() }
     }
 
     private static let shader = """
