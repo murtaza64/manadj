@@ -381,18 +381,45 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(list.waitForExistence(timeout: 10))
         let origin = list.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.15))
         origin.press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: 240)), withVelocity: .slow, thenHoldForDuration: 0.3)
-        print("BROWSER_NATIVE_HANDOFF_DIAGNOSTIC \(list.value ?? "missing")")
+        if list.exists { print("BROWSER_NATIVE_HANDOFF_DIAGNOSTIC \(list.value ?? "missing")") }
         let closed = NSPredicate(format: "exists == false")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: closed, object: list)], timeout: 5), .completed, "At the list top, downward overscroll must move and close the drawer rather than bounce rows independently")
         XCTAssertFalse(app.alerts.firstMatch.exists, "Drawer drag must not load a track")
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Top-of-list downward drag settled drawer"; shot.lifetime = .keepAlways; add(shot)
     }
 
+    @MainActor func testBrowserModerateFlingSettlesLikeHandle() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture", "--browser-scroll-fixture"]; app.launch()
+        for fromList in [false, true] {
+            app.buttons["browser-open"].tap()
+            let list = app.scrollViews["library-track-list"]
+            XCTAssertTrue(list.waitForExistence(timeout: 10))
+            let target = fromList ? list : app.otherElements["browser-drag-handle"]
+            let start = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: fromList ? 0.15 : 0.5))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 110)), withVelocity: 900, thenHoldForDuration: 0)
+            let closed = NSPredicate(format: "exists == false")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: closed, object: list)], timeout: 5), .completed, "Moderate downward fling should settle closed from both handle and top row")
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+            for index in 0..<2 { XCTAssertFalse((app.buttons["deck-\(index)-info"].value as? String ?? "").contains("Test Tone")) }
+        }
+    }
+
     @MainActor func testLandscapeBrowserControlsAndRowsStayReachable() {
-        defer { XCUIDevice.shared.orientation = .portrait; captureFailure() }
+        defer { captureFailure(); XCUIDevice.shared.orientation = .portrait }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
         XCUIDevice.shared.orientation = .landscapeLeft
-        let rotated = NSPredicate { _, _ in app.frame.width > app.frame.height }
+        // A transient rotated bounding box can be wider than tall before the
+        // orientation animation finishes. Wait for the stable landscape window.
+        var lastFrame = CGRect.zero
+        var stablePolls = 0
+        let rotated = NSPredicate { _, _ in
+            let frame = app.windows.firstMatch.frame
+            let stable = frame.width > frame.height && abs(frame.minX) < 1 && abs(frame.minY) < 1 && frame == lastFrame
+            stablePolls = stable ? stablePolls + 1 : 0
+            lastFrame = frame
+            return stablePolls >= 2
+        }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: rotated, object: app)], timeout: 10), .completed)
         app.buttons["browser-open"].firstMatch.tap()
         let search = app.textFields["Search title, artist, file"]
