@@ -16,7 +16,7 @@ for ((attempt=0; attempt<480; attempt++)); do
       printf '%s\n' "$processes" >> "${OUT%.mp4}-device.txt"
       xcrun simctl io "$udid" recordVideo --codec=h264 "$OUT" &
       VIDEO_PID=$!
-      for ((tick=0; tick<360; tick++)); do
+      for ((tick=0; tick<2400; tick++)); do
         [[ -f "$STOP" ]] && exit 0
         kill -0 "$VIDEO_PID" 2>/dev/null || exit 0
         sleep 0.5
