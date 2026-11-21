@@ -82,7 +82,7 @@ struct WorkspaceView: View {
                         mixer.frame(maxHeight: .infinity)
                         HStack(spacing: 6) { minimap(0); browseKey.frame(width: 84); minimap(1) }.frame(height: compact ? 36 : 44)
                         HStack(alignment: .top, spacing: 14) { deckControls(0, compact: compact); deckControls(1, compact: compact) }
-                    }
+                    }.allowsHitTesting(!browsing).accessibilityHidden(browsing)
                     }
                     if browsing {
                         VStack(spacing: 0) {
@@ -109,7 +109,7 @@ struct WorkspaceView: View {
         }
     }
     private func browserDrawerDrag(height: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 6)
+        DragGesture(minimumDistance: 6, coordinateSpace: .global)
             .onChanged { value in
                 // Direct manipulation has no easing. The entire browser,
                 // including its real scrolling list, travels under the finger.

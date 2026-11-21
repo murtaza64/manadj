@@ -161,7 +161,6 @@ struct LibraryBrowser: View {
                                 .accessibilityLabel("Select " + track.title)
                                 .accessibilityValue(selectedTrack == track.id ? "Selected" : "Not selected")
                             LibraryRow(track: track, downloaded: model.downloaded.contains(track.id), evidence: followLabels[track.id]).environmentObject(model)
-                                .accessibilityAddTraits(.isButton)
                         }
                     }
                     .onAppear {

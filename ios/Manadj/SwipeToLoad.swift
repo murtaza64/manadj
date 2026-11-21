@@ -30,6 +30,8 @@ struct SwipeToLoad<Content: View>: View {
                 if target == 0 { loadA() }; if target == 1 { loadB() }
             })
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: "Load selected deck", tap)
         .accessibilityAction(named: "Load to A", loadA)
         .accessibilityAction(named: "Load to B", loadB)
     }
