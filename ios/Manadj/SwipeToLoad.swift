@@ -12,6 +12,7 @@ struct SwipeToLoad<Content: View>: View {
     var background: Color = Ink.base
     @ViewBuilder var content: Content
     @State private var dx: CGFloat = 0
+    @State private var direction: Bool?
     private var deck: Int { dx < 0 ? 0 : 1 }
     var body: some View {
         ZStack {
@@ -24,101 +25,25 @@ struct SwipeToLoad<Content: View>: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Ink.decks[deck].opacity(0.2))
                     .accessibilityIdentifier("swipe-load-reveal")
             }
-            DirectionLockedRow(content: content.background(background).offset(x: dx), tapped: tap, changed: { dx = $0 }, ended: { travel, vertical, cancelled in
-                let target = cancelled ? nil : LoadSwipeIntent.target(travel: travel, vertical: vertical, projected: travel)
-                withAnimation(.easeOut(duration: 0.16)) { dx = 0 }
-                if target == 0 { loadA() }; if target == 1 { loadB() }
-            })
+            content.background(background).offset(x: dx)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: tap)
+                .simultaneousGesture(DragGesture(minimumDistance: 12, coordinateSpace: .global)
+                    .onChanged { value in
+                        let t = value.translation
+                        if direction == nil { direction = abs(t.width) > abs(t.height) * 1.5 }
+                        if direction == true { dx = max(-240, min(240, t.width)) }
+                    }.onEnded { value in
+                        let t = value.translation
+                        let target = direction == true ? LoadSwipeIntent.target(travel: Double(t.width), vertical: Double(t.height), projected: Double(t.width)) : nil
+                        direction = nil
+                        withAnimation(.easeOut(duration: 0.16)) { dx = 0 }
+                        if target == 0 { loadA() }; if target == 1 { loadB() }
+                    })
         }
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: "Load selected deck", tap)
         .accessibilityAction(named: "Load to A", loadA)
         .accessibilityAction(named: "Load to B", loadB)
-    }
-}
-
-private struct DirectionLockedRow<Content: View>: UIViewControllerRepresentable {
-    let content: Content
-    let tapped: () -> Void
-    let changed: (CGFloat) -> Void
-    let ended: (Double, Double, Bool) -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(tapped: tapped, changed: changed, ended: ended) }
-    func makeUIViewController(context: Context) -> RowHost<Content> {
-        let controller = RowHost(rootView: content)
-        controller.safeAreaRegions = []; controller.view.backgroundColor = .clear
-        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pan(_:)))
-        pan.delegate = context.coordinator; pan.maximumNumberOfTouches = 1
-        pan.cancelsTouchesInView = true; controller.touchSurface.addGestureRecognizer(pan)
-        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:)))
-        tap.delegate = context.coordinator; tap.require(toFail: pan)
-        controller.touchSurface.addGestureRecognizer(tap)
-        return controller
-    }
-    func updateUIViewController(_ controller: RowHost<Content>, context: Context) {
-        controller.rootView = content; context.coordinator.tapped = tapped; context.coordinator.changed = changed; context.coordinator.ended = ended
-    }
-    func sizeThatFits(_ proposal: ProposedViewSize, uiViewController: RowHost<Content>, context: Context) -> CGSize? {
-        uiViewController.sizeThatFits(in: CGSize(width: proposal.width ?? 320, height: proposal.height ?? .greatestFiniteMagnitude))
-    }
-    @MainActor final class RowHost<RowContent: View>: UIHostingController<RowContent> {
-        let touchSurface = UIView()
-        override func viewDidLoad() {
-            super.viewDidLoad()
-            touchSurface.backgroundColor = .clear
-            view.addSubview(touchSurface)
-        }
-        override func viewDidLayoutSubviews() {
-            super.viewDidLayoutSubviews()
-            // Keep native row recognition above SwiftUI's own gesture graph.
-            // Selection's first44points remains the real independent button.
-            touchSurface.frame = CGRect(x: 44, y: 0, width: max(0, view.bounds.width - 44), height: view.bounds.height)
-            view.bringSubviewToFront(touchSurface)
-        }
-        override init(rootView: RowContent) { super.init(rootView: rootView) }
-        @MainActor required dynamic init?(coder aDecoder: NSCoder) { fatalError("init(coder:) is unavailable") }
-    }
-    @MainActor final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var tapped: () -> Void
-        var changed: (CGFloat) -> Void
-        var ended: (Double, Double, Bool) -> Void
-        private var armed = false
-        private let haptic = UISelectionFeedbackGenerator()
-        init(tapped: @escaping () -> Void, changed: @escaping (CGFloat) -> Void, ended: @escaping (Double, Double, Bool) -> Void) { self.tapped = tapped; self.changed = changed; self.ended = ended }
-        @objc func tap(_ recognizer: UITapGestureRecognizer) { if recognizer.state == .ended { tapped() } }
-        func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-            // The first 44pt is the independent selection button, never a load.
-            if recognizer is UITapGestureRecognizer { return true }
-            return true
-        }
-        func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-            // A vertical-only UIScrollView may begin its ancestor pan before
-            // this child gets direction-lock. Share recognition, not decisions:
-            // vertical rows still fail shouldBegin and can never load.
-            recognizer is UIPanGestureRecognizer && other is UIPanGestureRecognizer
-        }
-        func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
-            guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
-            let t = pan.translation(in: pan.view?.window)
-            #if DEBUG
-            print("BROWSER_ROW_PAN_BEGIN x=\(t.x) y=\(t.y)")
-            #endif
-            return abs(t.x) > 3 && abs(t.x) > abs(t.y) * 1.5
-        }
-        @objc func pan(_ pan: UIPanGestureRecognizer) {
-            let t = pan.translation(in: pan.view?.window)
-            #if DEBUG
-            print("BROWSER_ROW_PAN state=\(pan.state.rawValue) x=\(t.x) y=\(t.y)")
-            #endif
-            switch pan.state {
-            case .began: haptic.prepare(); fallthrough
-            case .changed:
-                changed(max(-240, min(240, t.x)))
-                let next = abs(t.x) >= 60
-                if next != armed { armed = next; haptic.selectionChanged() }
-            case .ended, .cancelled, .failed:
-                ended(Double(t.x), Double(t.y), pan.state != .ended); armed = false
-            default: break
-            }
-        }
     }
 }

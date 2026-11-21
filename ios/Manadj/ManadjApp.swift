@@ -78,7 +78,7 @@ struct WorkspaceView: View {
                 HStack(spacing: 10) { deckInfo(0); deckInfo(1); feedbackButton }.frame(height: browsing && keyboardOpen ? 36 : 44)
                 if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: compact ? 83 : 135) }
                 ZStack(alignment: .bottom) {
-                    if !settings { VStack(spacing: gap) {
+                    if !settings && !browsing { VStack(spacing: gap) {
                         mixer.frame(maxHeight: .infinity)
                         HStack(spacing: 6) { minimap(0); browseKey.frame(width: 84); minimap(1) }.frame(height: compact ? 36 : 44)
                         HStack(alignment: .top, spacing: 14) { deckControls(0, compact: compact); deckControls(1, compact: compact) }
