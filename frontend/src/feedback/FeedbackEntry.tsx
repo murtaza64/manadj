@@ -13,6 +13,18 @@ import { CaptureOverlay } from './overlay';
 import { installModalKeyGuard } from '../focus/modalKeys';
 import './feedback.css';
 
+/** Inline copy for speech-service failures reported by dictate.ts. */
+const DICTATION_FAILURES: Record<string, string> = {
+  'not-allowed': 'Microphone access was blocked. Allow the mic, or use the keyboard or system dictation.',
+  'service-not-allowed': 'Microphone access was blocked. Allow the mic, or use the keyboard or system dictation.',
+  'audio-capture': 'No microphone was found. Use the keyboard or system dictation.',
+  network: 'The browser speech service could not be reached. Use the keyboard or system dictation.',
+  'no-speech': 'No speech came through. Try again, or use the keyboard.',
+};
+function dictationFailureMessage(reason: string): string {
+  return DICTATION_FAILURES[reason] ?? 'Dictation stopped unexpectedly. Use the keyboard or system dictation.';
+}
+
 const reportStatus = {
   pending: 'Pending GitHub filing', filing: 'Filing on GitHub', filed: 'Filed; not sent to an agent',
   filing_failed: 'GitHub filing failed', filing_uncertain: 'GitHub filing outcome uncertain',
@@ -199,7 +211,10 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
       if (!text) return;
       if (field === 'title') setTitle((current) => `${current.replace(/\s+$/, '')}${current ? ' ' : ''}${text}`.slice(0, 200));
       else setDescription((current) => `${current.replace(/\s+$/, '')}${current ? ' ' : ''}${text}`.slice(0, 10000));
-    }, () => { dictationRef.current = null; setDictating(null); });
+    }, () => { dictationRef.current = null; setDictating(null); },
+    // Async service failures (denied permission, no mic, unreachable
+    // service) used to reset the button silently; name the failure inline.
+    (reason) => setError(dictationFailureMessage(reason)));
     if (session) { dictationRef.current = session; setDictating(field); }
     } catch { setError("Dictation could not start. Use the keyboard or system dictation."); }
   }
