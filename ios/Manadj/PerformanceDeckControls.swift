@@ -7,6 +7,7 @@ struct PerformanceDeckControls: View {
     @Binding var pitch: Bool
     let compact: Bool
     let onTransport: () -> AnyView
+    var externalTransport = false
     @State private var jump = 32.0
     @State private var shift = false
     private var state: MDJDeck { model.decks[index].engine }
@@ -68,9 +69,9 @@ struct PerformanceDeckControls: View {
                     Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
                     Button("▶▶") { model.set(MDJBeatJump, index, jump) }.frame(maxWidth: 40)
                 }.buttonStyle(PerformanceStripStyle(color: color)).clipShape(Capsule()).overlay(Capsule().stroke(color.opacity(0.7), lineWidth: 1.5)).padding(3).frame(height: row).disabled(!state.ready)
-                onTransport().frame(height: row + 8)
+                if !externalTransport { onTransport().frame(height: row + 8) }
                 PerformanceBend(color: color, enabled: state.ready, value: Double(state.bend)) { model.set(MDJBend, index, $0) }.frame(height: row)
-                Button { withAnimation(.easeOut(duration: 0.24)) { pitch.toggle() } } label: {
+                if !externalTransport { Button { withAnimation(.easeOut(duration: 0.24)) { pitch.toggle() } } label: {
                     VStack(spacing: 0) {
                         Capsule().fill(color).frame(width: 28, height: 3).padding(.top, 3)
                         HStack(alignment: .center) {
@@ -83,7 +84,7 @@ struct PerformanceDeckControls: View {
                         }.padding(.horizontal, 7).frame(maxHeight: .infinity)
                     }.background(Ink.panel).clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
                         .overlay(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12).stroke(color.opacity(0.6), lineWidth: 1.5)).padding(2)
-                }.buttonStyle(.plain).frame(height: row).accessibilityLabel("\(Ink.deckName(index)) PITCH panel").feedbackTarget("Deck \(Ink.deckName(index)) pitch panel")
+                }.buttonStyle(.plain).frame(height: row).accessibilityLabel("\(Ink.deckName(index)) PITCH panel").feedbackTarget("Deck \(Ink.deckName(index)) pitch panel") }
 
             }
             .overlay {
@@ -117,6 +118,6 @@ struct PerformanceDeckControls: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }.clipped()
-        }.frame(minHeight: compact ? 316 : 360)
+        }.frame(minHeight: externalTransport ? 260 : compact ? 316 : 360)
     }
 }
