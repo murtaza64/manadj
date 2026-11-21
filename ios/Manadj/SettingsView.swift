@@ -10,7 +10,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                SectionLabel(title: "DESKTOP · PHONE SYNC")
+                if !syncOnly { SectionLabel(title: "DESKTOP · PHONE SYNC") }
                 if !syncOnly {
                 Text("On the desktop: Settings → Phone sync. Enable the LAN listener, then enter one of the shown LAN addresses here. Both devices must be on the same trusted network.").font(Ink.font(14)).foregroundStyle(Ink.muted)
                 }
@@ -18,7 +18,7 @@ struct SettingsView: View {
                     .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     .padding(12).background(Ink.crust).overlay(Rectangle().stroke(Ink.edge)).disabled(model.busy)
                     .accessibilityLabel("Desktop address")
-                Text("LAN sync uses the desktop's HTTP listener. Audio, library data and pairing credentials are not encrypted in transit on that connection. Use a trusted private network.").font(Ink.font(11)).foregroundStyle(Ink.warning)
+
                 if let paired = model.pairedOrigin {
                     Text("PAIRED TO \(paired)").font(Ink.font(12)).foregroundStyle(Ink.play).textSelection(.enabled)
                 }
@@ -36,6 +36,7 @@ struct SettingsView: View {
                     }
                 }
                 Text(model.status).font(Ink.font(12)).foregroundStyle(Ink.muted)
+                Text("LAN sync uses the desktop's HTTP listener. Audio, library data and pairing credentials are not encrypted in transit on that connection. Use a trusted private network.").font(Ink.font(11)).foregroundStyle(Ink.warning)
                 if let progress = model.syncProgress {
                     VStack(alignment: .leading, spacing: 6) {
                         if progress.phase == .audio {
