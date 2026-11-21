@@ -74,6 +74,25 @@ final class WorkspaceUITests: XCTestCase {
         shot.name = "Synthetic full-audio file progress - not device transfer proof"; shot.lifetime = .keepAlways; add(shot)
     }
 
+    @MainActor func testCenterTabsExposeRealPairingAndKeepControlsReachable() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        XCTAssertTrue(app.buttons["center-tab-sync"].waitForExistence(timeout: 15))
+        for id in ["center-tab-fx", "feedback-open", "center-tab-audio", "center-tab-sync"] {
+            let tab = app.buttons[id]; XCTAssertTrue(tab.isHittable); XCTAssertGreaterThanOrEqual(tab.frame.height, 44)
+        }
+        var shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Actual compact center tabs standard phone FX"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["center-tab-sync"].tap()
+        XCTAssertTrue(app.otherElements["center-sync-panel"].waitForExistence(timeout: 5))
+        let address = app.textFields["Desktop address"]
+        XCTAssertTrue(address.exists)
+        let panel = app.otherElements["center-sync-panel"]
+        for _ in 0..<5 where !address.isHittable { panel.swipeUp() }
+        XCTAssertTrue(address.isHittable, "Actual pairing address must be reachable inside Sync")
+        shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Actual Sync tab reuses desktop pairing and library sync"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["center-tab-fx"].tap()
+        XCTAssertFalse(panel.exists)
+    }
     @MainActor func testPlayingWaveTouchLockPreservesTransportAndPausedSeek() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
