@@ -63,6 +63,14 @@ struct PerformanceWave: UIViewRepresentable {
     private var bodyKey = ""
     private var cachedStep = 0.0
     private var clock = WaveClock()
+    private var metalBody: MetalWaveBody?
+    private var metalOverlay: MetalWaveOverlay?
+    private var triedMetal = false
+    private var metalPrototype: Bool { ProcessInfo.processInfo.arguments.contains("--metal-waveform-prototype") && !overview }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        metalBody?.frame = bounds; metalOverlay?.frame = bounds
+    }
     private var link: CADisplayLink?
     private var proxy: DisplayProxy?
     var spanSeconds = 12.0
@@ -214,8 +222,26 @@ struct PerformanceWave: UIViewRepresentable {
     }
 
     override func draw(_ rect: CGRect) {
+        if metalPrototype && wave != nil {
+            if !triedMetal {
+                triedMetal = true
+                if let gpu = MetalWaveBody(frame: bounds) {
+                    metalBody = gpu; addSubview(gpu)
+                    let overlay = MetalWaveOverlay(frame: bounds); overlay.owner = self
+                    overlay.isOpaque = false; overlay.backgroundColor = .clear; overlay.isUserInteractionEnabled = false
+                    metalOverlay = overlay; addSubview(overlay)
+                    accessibilityHint = "Metal waveform experiment"
+                } else { accessibilityHint = "Core Graphics fallback: Metal unavailable" }
+            }
+            if let overlay = metalOverlay { overlay.setNeedsDisplay(); return }
+        }
+        metalBody?.isHidden = true; metalOverlay?.isHidden = true
+        drawContent(rect, cpuWave: true)
+    }
+    fileprivate func drawContent(_ rect: CGRect, cpuWave: Bool) {
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
-        ctx.setFillColor(UIColor.black.cgColor); ctx.fill(bounds)
+        if cpuWave { ctx.setFillColor(UIColor.black.cgColor); ctx.fill(bounds) }
+        else { ctx.clear(bounds) }
         guard duration > 0, let state = state?() else { return }
         let rate = (1 + Double(state.pitch) / 100) * (1 + Double(state.bend) / 100)
         let moving = (state.playing || state.preview) && !scrubbing
@@ -235,7 +261,11 @@ struct PerformanceWave: UIViewRepresentable {
             ctx.move(to: vertical ? CGPoint(x: 0, y: value) : CGPoint(x: value, y: 0))
             ctx.addLine(to: vertical ? CGPoint(x: across, y: value) : CGPoint(x: value, y: across)); ctx.strokePath()
         }
-        if let wave, wave.nBands == 8 {
+        if !cpuWave, let wave {
+            metalBody?.isHidden = false; metalOverlay?.isHidden = false
+            metalBody?.render(wave: wave, source: source, start: start, span: span, gain: fillGain, vertical: vertical)
+        }
+        if cpuWave, let wave, wave.nBands == 8 {
             if overview {
                 let key = "\(source)-\(Int(along * scale))x\(Int(across * scale))-\(wave.bands.count)-\(wave.durationSecs)"
                 if key != bodyKey || body == nil { bodyKey = key; body = overviewBody(wave, size: bounds.size, scale: scale) }
@@ -336,4 +366,9 @@ struct PerformanceWave: UIViewRepresentable {
 @MainActor private final class DisplayProxy: NSObject {
     weak var owner: PerformanceWaveView?
     @objc func frame(_ link: CADisplayLink) { owner?.frame(link) }
+}
+
+@MainActor private final class MetalWaveOverlay: UIView {
+    weak var owner: PerformanceWaveView?
+    override func draw(_ rect: CGRect) { owner?.drawContent(rect, cpuWave: false) }
 }

@@ -1,6 +1,7 @@
 import XCTest
 import Combine
 import UIKit
+import MetalKit
 import AVFoundation
 import ManadjAudio
 import ManadjCore
@@ -8,6 +9,36 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    @MainActor func testMetalWaveBodyGPUCompletionAndReadbackSynthetic() throws {
+        let gpu = try XCTUnwrap(MetalWaveBody(frame: CGRect(x: 0, y: 0, width: 390, height: 60)), "Metal must initialize; fallback alone is not proof")
+        let device = try XCTUnwrap(gpu.device)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 1170, height: 180, mipmapped: false)
+        descriptor.usage = [.renderTarget, .shaderRead]; descriptor.storageMode = .shared
+        let texture = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        let resource = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "mwf"))
+        let wave = try PreviewWaveform.parse(Data(contentsOf: resource))
+        var cpu = 0.0, gpuTime = 0.0, validGPUSamples = 0
+        for i in 0..<100 {
+            let result = try XCTUnwrap(gpu.render(wave: wave, source: 1, start: 4.4 + Double(i) / 60, span: 12, gain: 1, vertical: false, target: texture, wait: true))
+            if i >= 10 { cpu += result.cpuMS; if result.gpuMS > 0 { gpuTime += result.gpuMS; validGPUSamples += 1 } }
+        }
+        print("SYNTHETIC_METAL_BODY cpuEncodeMeanMS=\(cpu/90) gpuMeanMS=\(validGPUSamples > 0 ? gpuTime/Double(validGPUSamples) : -1) gpuTimestampSamples=\(validGPUSamples) frames=90 size=1170x180 simulatorNotPhone=true excludesCueOverlay=true")
+        _ = try XCTUnwrap(gpu.render(wave: wave, source: 1, start: 4.4, span: 12, gain: 1, vertical: false, target: texture, wait: true))
+        var reference = MDJDeck(); reference.position = 8; reference.hotCues = (-1,-1,-1,-1,-1,-1,-1,-1)
+        let cpuView = PerformanceWaveView(frame: CGRect(x: 0, y: 0, width: 390, height: 60))
+        cpuView.wave = wave; cpuView.duration = wave.durationSecs; cpuView.state = { reference }; cpuView.contentScaleFactor = 3
+        let format = UIGraphicsImageRendererFormat(); format.scale = 3
+        let cpuImage = UIGraphicsImageRenderer(size: cpuView.bounds.size, format: format).image { _ in cpuView.draw(cpuView.bounds) }
+        let cpuShot = XCTAttachment(image: cpuImage); cpuShot.name = "Core Graphics comparison same synthetic body plus playhead"; cpuShot.lifetime = .keepAlways; add(cpuShot)
+        var bytes = [UInt8](repeating: 0, count: 1170 * 180 * 4)
+        bytes.withUnsafeMutableBytes { raw in texture.getBytes(raw.baseAddress!, bytesPerRow: 1170 * 4, from: MTLRegionMake2D(0,0,1170,180), mipmapLevel: 0) }
+        XCTAssertTrue(bytes.enumerated().contains { $0.offset % 4 != 3 && $0.element > 32 }, "GPU output must contain waveform pixels, not just a clear")
+        let data = Data(bytes)
+        let provider = try XCTUnwrap(CGDataProvider(data: data as CFData))
+        let image = try XCTUnwrap(CGImage(width: 1170, height: 180, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 1170*4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue).union(.byteOrder32Little), provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+        let shot = XCTAttachment(image: UIImage(cgImage: image)); shot.name = "Metal synthetic body actual GPU readback without cue overlay"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     @MainActor func testRendererBeforeAfterFrozenBaselineSynthetic() throws {
         let resource = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "mwf"))
         let wave = try PreviewWaveform.parse(Data(contentsOf: resource))

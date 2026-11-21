@@ -19,6 +19,14 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
+    @MainActor func testMetalPrototypeWorkspacePixelsAndFallbackStatus() {
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture", "--metal-waveform-prototype"]; app.launch()
+        let wave = app.otherElements["deck-0-detail-wave"]
+        XCTAssertTrue(wave.waitForExistence(timeout: 15))
+        // The native readback test proves shader initialization and actual GPU output.
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Metal opt-in full workspace synthetic"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     @MainActor func testBrowserOpenResponsivenessSyntheticFixture() {
         let options = XCTMeasureOptions(); options.iterationCount = 3
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
