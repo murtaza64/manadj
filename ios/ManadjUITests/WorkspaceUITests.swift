@@ -431,7 +431,7 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(close.isHittable)
         // Capture the device screen as well as the application crop: rotated
         // application screenshots can carry an orientation/crop mismatch.
-        let screen = XCTAttachment(screenshot: XCUIDevice.shared.screenshot()); screen.name = "Landscape whole device screen"; screen.lifetime = .keepAlways; add(screen)
+        let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); screen.name = "Landscape whole device screen"; screen.lifetime = .keepAlways; add(screen)
         let hierarchy = XCTAttachment(string: app.debugDescription); hierarchy.name = "Landscape browser open global geometry"; hierarchy.lifetime = .keepAlways; add(hierarchy)
         let bounds = app.windows.firstMatch.frame
         for control in [search, close, row] {
