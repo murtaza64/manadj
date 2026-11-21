@@ -17,6 +17,7 @@ struct FeedbackReviewView: View {
     @State private var confirming = false
     @State private var includeVoice = true
     @State private var player: AVAudioPlayer?
+    @State private var voicePlaybackError: String?
     let voice: FeedbackVoice?
     let voiceURL: URL?
     @State private var kind = FeedbackKind.bug
@@ -161,12 +162,13 @@ struct FeedbackReviewView: View {
                                 HStack {
                                     Button("▶ VOICE · \(voice.durationMs / 1000)s") {
                                         guard let voiceURL else { return }
-                                        do { player = try AVAudioPlayer(contentsOf: voiceURL); player?.play() } catch { }
+                                        do { player = try AVAudioPlayer(contentsOf: voiceURL); guard player?.play() == true else { throw CocoaError(.fileReadUnknown) }; voicePlaybackError = nil } catch { voicePlaybackError = "Voice could not play: " + error.localizedDescription }
                                     }.font(Ink.font(10)).accessibilityIdentifier("feedback-play-voice")
                                     Spacer()
                                     Button("REMOVE") { player?.stop(); includeVoice = false }.font(Ink.font(9)).accessibilityIdentifier("feedback-remove-voice")
                                 }
                             }
+                            if let voicePlaybackError { Text(voicePlaybackError).font(Ink.font(9)).foregroundStyle(Ink.warning) }
                             TextField("What would make this better?", text: comment, axis: .vertical)
                                 .font(Ink.font(13)).lineLimit(2...3).padding(8).background(Ink.crust, in: RoundedRectangle(cornerRadius: 8))
                                 .accessibilityIdentifier("feedback-title").focused($editing)
@@ -189,7 +191,7 @@ struct FeedbackReviewView: View {
                                         if let data = try? JSONSerialization.data(withJSONObject: alwaysIncluded, options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed]), let text = String(data: data, encoding: .utf8) {
                                             DisclosureGroup("Always included: view, capture time and viewport") { Text(text).font(Ink.font(9)) }.font(Ink.font(10))
                                         }
-                                        Text("Only your text and report link go to GitHub. The marked screen and selected context stay in the desktop feedback store. If unreachable, this reviewed report stays on this iPhone with no automatic retry.").font(Ink.font(10)).foregroundStyle(Ink.muted)
+                                        Text("Only your text and report link go to GitHub. Voice, the marked screen and selected context stay in the desktop feedback store. If unreachable, this reviewed report stays on this iPhone with no automatic retry.").font(Ink.font(10)).foregroundStyle(Ink.muted)
                                         ForEach(capture.warnings, id: \.self) { Text($0).font(Ink.font(10)).foregroundStyle(Ink.warning) }
                                     }.padding(.vertical, 4)
                                 }.frame(maxHeight: min(210, geometry.size.height * 0.3))

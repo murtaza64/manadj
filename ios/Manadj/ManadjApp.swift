@@ -198,7 +198,7 @@ struct WorkspaceView: View {
             VStack(spacing: 4) {
                 HStack(spacing: 2) {
                     Button("QUANT") { model.quantize.toggle(); model.set(MDJQuantize, 0, model.quantize ? 1 : 0) }.buttonStyle(PerformanceKeyStyle(active: model.quantize)).feedbackTarget("Quantize")
-                    Button { feedback.contextual = feedback.contextual == "HEARD" ? "FX" : "HEARD" } label: { Image(systemName: "slider.horizontal.3").font(.system(size: 10)) }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 24).accessibilityLabel("Heard quantization settings")
+                    Button { feedback.contextual = feedback.contextual == "HEARD" ? "FX" : "HEARD" } label: { Image(systemName: "slider.horizontal.3").font(.system(size: 10)) }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 24).disabled(feedback.active).accessibilityLabel("Heard quantization settings")
                     Button("XF") { xf.toggle(); if !xf { model.crossfade = 0; model.set(MDJCrossfade, 0, 0) } }.buttonStyle(PerformanceKeyStyle(active: xf))
                 }.frame(height: 36)
                 HStack(spacing: 2) {
@@ -213,7 +213,7 @@ struct WorkspaceView: View {
                 else { fxCard }
                 HStack(spacing: 2) {
                     feedbackButton
-                    Button { feedback.contextual = feedback.contextual == "OUTPUT" ? "FX" : "OUTPUT" } label: { Image(systemName: outputSymbol).frame(width: 30, height: 28) }.buttonStyle(.plain).foregroundStyle(Ink.accent).accessibilityLabel("Audio output: " + outputDescription)
+                    Button { feedback.contextual = feedback.contextual == "OUTPUT" ? "FX" : "OUTPUT" } label: { Image(systemName: outputSymbol).frame(width: 30, height: 28) }.buttonStyle(.plain).foregroundStyle(Ink.accent).disabled(feedback.active).accessibilityLabel("Audio output: " + outputDescription)
                 }.frame(height: 28)
                 if xf { PerformanceFader(value: Binding(get: { (model.crossfade + 1) / 2 }, set: { model.crossfade = $0 * 2 - 1; model.set(MDJCrossfade, 0, model.crossfade) }), color: Ink.accent, vertical: false, label: "Crossfader").frame(height: 40).feedbackTarget("Crossfader") }
             }.padding(.horizontal, 3)
@@ -269,7 +269,7 @@ struct WorkspaceView: View {
             HStack { Text("OUTPUT"); Spacer(); Button("×") { feedback.contextual = "FX" } }.font(Ink.font(11, bold: true))
             Text(outputDescription.isEmpty ? "No output route" : outputDescription).font(Ink.font(10)).lineLimit(2)
             NativeRoutePicker().frame(height: 28).accessibilityLabel("Choose system audio output")
-            Toggle("SPLIT MONO", isOn: $model.splitOutput).font(Ink.font(9)).onChange(of: model.splitOutput) { _, on in model.audio?.splitOutput(on) }
+            Toggle("SPLIT MONO", isOn: $model.splitOutput).font(Ink.font(9)).onChange(of: model.splitOutput) { _, on in model.noteFeedbackAction("split-mono", value: on ? 1 : 0); model.audio?.splitOutput(on) }
             Text("L master / R cue. DJ splitter needed.").font(Ink.font(8)).foregroundStyle(Ink.muted)
         }.padding(5).background(Ink.panel).onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in outputRoute = AVAudioSession.sharedInstance().currentRoute }
     }
@@ -292,7 +292,7 @@ struct WorkspaceView: View {
             }.frame(height: 40)
         }.padding(3).background(Ink.warning.opacity(0.05)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Ink.warning.opacity(0.4)))
     }
-    private func updateFX() { model.audio?.beatFX(effect: effect, target: fxTarget, on: fx, depth: fxDepth, beats: fxBeats[fxBeatIndex]) }
+    private func updateFX() { model.noteFeedbackAction("beat-fx", value: fxDepth, slot: effect); model.noteFeedbackAction("beat-fx-enabled", value: fx ? 1 : 0, slot: fxTarget); model.noteFeedbackAction("beat-fx-beats", value: fxBeats[fxBeatIndex]); model.audio?.beatFX(effect: effect, target: fxTarget, on: fx, depth: fxDepth, beats: fxBeats[fxBeatIndex]) }
     private func value(_ index: Int, _ op: MDJOp, _ current: Double) -> Binding<Double> { Binding(get: { current }, set: { model.set(op, index, $0) }) }
     private func transport(_ index: Int, browser: Bool = false) -> some View {
         let state = model.decks[index].engine
