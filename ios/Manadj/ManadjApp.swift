@@ -49,10 +49,11 @@ struct WorkspaceView: View {
     @State private var fxDepth = -0.5
     @State private var selected = 0
     @State private var notice: String?
+    @State private var compactPitch: Int?
     var body: some View {
         GeometryReader { geometry in
             let landscape = geometry.size.width > geometry.size.height
-            Group { if landscape { landscapeBody } else { portraitBody } }
+            Group { if landscape { landscapeBody } else if geometry.size.height < 760 { compactPhoneBody } else { portraitBody } }
                 .background(Ink.base)
                 .overlay(alignment: .top) {
                     if let notice { Text(notice).font(Ink.font(11)).padding(8).background(Ink.crust).padding(.top, 50).onTapGesture { self.notice = nil } }
@@ -81,6 +82,64 @@ struct WorkspaceView: View {
         .onPreferenceChange(FeedbackTargetPreference.self) { feedbackTargets = $0 }
         .feedbackReporter(model: model, session: feedback, browsing: browsing, settings: settings, requested: $feedbackRequested, targets: feedbackTargets,
                           autoPresent: ProcessInfo.processInfo.arguments.contains("--feedback-ui-fixture"))
+    }
+    // Review candidate: full-size controls on small phones, no uniform scaling.
+    // Transport and pitch stay fixed; the mixer and pad bank scroll independently.
+    private var compactPhoneBody: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 8) { deckInfo(0); deckInfo(1) }.frame(height: 44)
+            VStack(spacing: 2) { detailWave(0); detailWave(1) }.frame(height: 64)
+            if browsing { library }
+            else if settings {
+                HStack { Text("SETTINGS"); Spacer(); Button("CLOSE") { settings = false }.frame(minWidth: 44, minHeight: 44) }
+                SettingsView()
+            } else {
+                ScrollViewReader { proxy in
+                    VStack(spacing: 0) {
+                        HStack {
+                            Button("MIXER") { withAnimation { proxy.scrollTo("compact-mixer", anchor: .top) } }
+                            Button("PADS") { withAnimation { proxy.scrollTo("compact-pads", anchor: .top) } }
+                        }.font(Ink.font(12, bold: true)).frame(height: 44)
+                        ScrollView {
+                    VStack(spacing: 6) {
+                        mixerPanel(pinnedFeedback: true).frame(height: 360).id("compact-mixer")
+                        HStack(spacing: 6) { minimap(0); browseKey.frame(width: 100); minimap(1) }.frame(height: 44)
+                        HStack(spacing: 6) {
+                            ForEach(0..<2) { index in
+                                PerformanceDeckControls(index: index, pitch: .constant(false), compact: true,
+                                    onTransport: { AnyView(EmptyView()) }, externalTransport: true)
+                            }
+                        }.frame(height: 260).id("compact-pads")
+                    }
+                        }.accessibilityIdentifier("compact-mixer-scroll")
+                    }
+                }
+            }
+            if feedback.active { LiveFeedbackToolbar(session: feedback, model: model) }
+            HStack(spacing: 6) { transport(0); transport(1) }.frame(height: 52)
+            HStack(spacing: 6) {
+                ForEach(0..<2) { index in
+                    Button { compactPitch = index } label: {
+                        Text(Ink.deckName(index) + String(format: "  %+.2f%%  PITCH", model.decks[index].engine.pitch))
+                            .font(Ink.font(12, bold: true))
+                    }.buttonStyle(PerformanceKeyStyle(color: Ink.decks[index]))
+                        .accessibilityLabel(Ink.deckName(index) + " PITCH panel")
+                }
+            }.frame(height: 48)
+            PerformanceBattery().frame(height: 14)
+        }.padding(.horizontal, 8)
+        .sheet(isPresented: Binding(get: { compactPitch != nil }, set: { if !$0 { compactPitch = nil } })) {
+            if let index = compactPitch {
+                VStack(spacing: 12) {
+                    Text(Ink.deckName(index) + " PITCH").font(Ink.font(18, bold: true))
+                    PerformanceFader(value: Binding(get: { (Double(model.decks[index].engine.pitch) + 8) / 16 },
+                        set: { model.set(MDJPitch, index, $0 * 16 - 8) }), color: Ink.decks[index],
+                        doubleTapCenter: true, label: Ink.deckName(index) + " pitch fader").frame(width: 60, height: 240)
+                    Button("RESET 0.00%") { model.set(MDJPitch, index, 0) }.frame(minHeight: 44).accessibilityLabel("Reset pitch")
+                    Button("CLOSE") { compactPitch = nil }.frame(minHeight: 44).accessibilityLabel("Close pitch panel")
+                }.padding().presentationDetents([.medium, .large])
+            }
+        }
     }
     private var portraitBody: some View {
         GeometryReader { geometry in
@@ -199,7 +258,8 @@ struct WorkspaceView: View {
             return accepted
         })
     }
-    private var mixer: some View {
+    private var mixer: some View { mixerPanel(pinnedFeedback: false) }
+    private func mixerPanel(pinnedFeedback: Bool) -> some View {
         HStack(spacing: 0) {
             knobColumn(0).frame(width: 48)
             channel(0).frame(width: 42)
@@ -215,7 +275,7 @@ struct WorkspaceView: View {
                 }.frame(height: 36)
                 recordingBar.frame(height: 44)
                 Spacer(minLength: 0)
-                if feedback.contextual == "FEEDBACK" { LiveFeedbackToolbar(session: feedback, model: model) }
+                if feedback.contextual == "FEEDBACK" { if !pinnedFeedback { LiveFeedbackToolbar(session: feedback, model: model) } }
                 else if feedback.contextual == "OUTPUT" { outputContext }
                 else if feedback.contextual == "HEARD" { heardContext }
                 else { fxCard }

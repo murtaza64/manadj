@@ -19,6 +19,42 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
+    @MainActor func testCompactFixedTargetsAndScrollableMixerReview() throws {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        guard app.frame.height < 760 else { throw XCTSkip("Compact arrangement is verified by the dedicated SE pass") }
+        let scroll = app.scrollViews["compact-mixer-scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 15))
+        for name in ["A play pause", "B play pause", "A PITCH panel", "B PITCH panel"] {
+            let control = app.buttons[name]
+            XCTAssertTrue(control.isHittable, name)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44, name)
+            XCTAssertGreaterThanOrEqual(control.frame.width, 44, name)
+            XCTAssertLessThanOrEqual(control.frame.maxY, app.frame.maxY - 14)
+        }
+        let initial = XCTAttachment(screenshot: app.screenshot()); initial.name = "Compact review: full-size pinned transport and scrollable mixer"; initial.lifetime = .keepAlways; add(initial)
+        app.buttons["PADS"].tap()
+        let pad = app.buttons["deck-0-hotcue-0"]
+        XCTAssertTrue(pad.isHittable)
+        XCTAssertEqual(pad.frame.width, pad.frame.height, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(pad.frame.width, 44)
+        let pads = XCTAttachment(screenshot: app.screenshot()); pads.name = "Compact review: scrolled square pads, transport remains fixed"; pads.lifetime = .keepAlways; add(pads)
+        app.buttons["MIXER"].tap()
+        app.buttons["feedback-open"].tap()
+        for id in ["feedback-rec", "feedback-review-open"] {
+            let control = app.buttons[id]
+            XCTAssertTrue(control.isHittable)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+            XCTAssertGreaterThanOrEqual(control.frame.width, 44)
+        }
+        let feedback = XCTAttachment(screenshot: app.screenshot()); feedback.name = "Compact review: pinned44pointRec and review, no scaling"; feedback.lifetime = .keepAlways; add(feedback)
+        app.buttons["feedback-review-open"].tap()
+        XCTAssertTrue(app.otherElements["feedback-review"].waitForExistence(timeout: 5))
+        app.buttons["CANCEL"].tap()
+        app.buttons["A PITCH panel"].tap()
+        XCTAssertTrue(app.buttons["Close pitch panel"].waitForExistence(timeout: 5))
+    }
+
     @MainActor func testKnobDetentFullscreenAndSquarePads() { verifyKnobWorkspace(reduced: false) }
     @MainActor func testKnobReducedMotionOpaqueFallback() { verifyKnobWorkspace(reduced: true) }
     @MainActor private func verifyKnobWorkspace(reduced: Bool) {
