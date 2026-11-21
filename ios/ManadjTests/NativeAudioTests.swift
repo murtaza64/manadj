@@ -9,6 +9,21 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    private func syntheticMultibandWave() throws -> PreviewWaveform {
+        let resource = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "mwf"))
+        var bytes = [UInt8](try Data(contentsOf: resource))
+        let n = Int(bytes[32]), counts = 40 + (n + 1) * 4
+        let peaks = (0..<4).reduce(0) { $0 | (Int(bytes[counts + $1]) << ($1 * 8)) }
+        let start = counts + 8 + peaks
+        // Generated independent band motion exercises color nesting, not just
+        // the pure-low sine fixture. No user's audio or waveform is involved.
+        for i in start..<bytes.count {
+            let frame = (i - start) / max(1, n), band = (i - start) % max(1, n)
+            bytes[i] = UInt8((frame * (band + 3) + band * 43) % 231)
+        }
+        return try PreviewWaveform.parse(Data(bytes))
+    }
+
     @MainActor func testMetalAsynchronousDriverCompletionReturnsFramePermits() async throws {
         let gpu = try XCTUnwrap(MetalWaveBody(experimentFrame: CGRect(x: 0, y: 0, width: 390, height: 60)))
         let device = try XCTUnwrap(gpu.device)
@@ -32,8 +47,7 @@ final class NativeAudioTests: XCTestCase {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 1170, height: 180, mipmapped: false)
         descriptor.usage = [.renderTarget, .shaderRead]; descriptor.storageMode = .shared
         let texture = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
-        let resource = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "mwf"))
-        let wave = try PreviewWaveform.parse(Data(contentsOf: resource))
+        let wave = try syntheticMultibandWave()
         var cpu = 0.0, gpuTime = 0.0, validGPUSamples = 0
         for i in 0..<100 {
             let result = try XCTUnwrap(gpu.render(wave: wave, source: 1, start: 4.4 + Double(i) / 60, span: 12, gain: 1, vertical: false, target: texture, wait: true))
@@ -77,8 +91,7 @@ final class NativeAudioTests: XCTestCase {
     }
 
     @MainActor func testDetailRasterTilesWarmColdParityAndBoundedCache() throws {
-        let resource = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "mwf"))
-        let wave = try PreviewWaveform.parse(Data(contentsOf: resource))
+        let wave = try syntheticMultibandWave()
         var state = MDJDeck(); state.ready = true
         state.hotCues = (-1,-1,-1,-1,-1,-1,-1,-1)
         for vertical in [false, true] {
