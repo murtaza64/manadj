@@ -34,9 +34,9 @@ struct PerformanceDeckControls: View {
     var body: some View {
         GeometryReader { geometry in
             let padHeight: CGFloat = compact ? 80 : 104
-            let row = max(CGFloat(22), (geometry.size.height - padHeight - 158) / 2)
+            let row = max(CGFloat(22), (geometry.size.height - padHeight - 162) / 2)
             let transportHeight: CGFloat = 44
-            let pitchHeight: CGFloat = 44
+            let pitchHeight: CGFloat = 48
             VStack(spacing: 4) {
                 HStack(spacing: 0) {
                     if index == 0 { shiftKey }
