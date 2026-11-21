@@ -53,7 +53,12 @@ struct SwipeToLoad<Content: View>: View {
 struct BrowserTopPull: UIViewRepresentable {
     var changed: (CGFloat) -> Void
     var ended: (CGFloat, CGFloat) -> Void
-    func makeUIView(context: Context) -> Probe { Probe() }
+    func makeUIView(context: Context) -> Probe {
+        #if DEBUG
+        print("BROWSER_PROBE_CREATED")
+        #endif
+        return Probe()
+    }
     func updateUIView(_ view: Probe, context: Context) {
         view.changed = changed; view.ended = ended
         DispatchQueue.main.async { [weak view] in view?.attach() }
@@ -67,7 +72,13 @@ struct BrowserTopPull: UIViewRepresentable {
         private var anchor: CGFloat?
         private var distance: CGFloat = 0
         private var priorBounces = true
-        override func didMoveToWindow() { super.didMoveToWindow(); if window != nil { attach() } else { detach() } }
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            #if DEBUG
+            print("BROWSER_PROBE_WINDOW attached=\(window != nil)")
+            #endif
+            if window != nil { attach() } else { detach() }
+        }
         override func layoutSubviews() { super.layoutSubviews(); attach() }
         func attach() {
             guard window != nil else { return }

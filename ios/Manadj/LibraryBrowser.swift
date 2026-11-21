@@ -176,7 +176,11 @@ struct LibraryBrowser: View {
                     .padding(.leading, 2).padding(.trailing, 8)
                     .overlay(alignment: .bottom) { Rectangle().fill(Ink.edge).frame(height: 0.5) }
                     .contextMenu { if let bpm = track.bpm { Button("Match BPM ±6") { bpmCenter = bpm; filtersOpen = true } }; Button("Follow this track") { followReference = track.id }; ForEach(0..<4) { index in Button("Load deck \(Ink.deckName(index))") { if model.load(track, deck: index) { searchFocused = false } } } }
-                } }.background(BrowserTopPull(changed: onDrawerPull, ended: onDrawerRelease).frame(width: 1, height: 1)) }.scrollDismissesKeyboard(.interactively)
+                } } }.scrollDismissesKeyboard(.interactively)
+                    .overlay(alignment: .topLeading) {
+                        BrowserTopPull(changed: onDrawerPull, ended: onDrawerRelease)
+                            .frame(width: 1, height: 1).allowsHitTesting(false)
+                    }
                     .accessibilityIdentifier("library-track-list")
                     .accessibilityValue(firstRowTiming)
                 }
