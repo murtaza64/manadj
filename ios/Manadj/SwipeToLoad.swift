@@ -43,22 +43,39 @@ private struct DirectionLockedRow<Content: View>: UIViewControllerRepresentable 
     let changed: (CGFloat) -> Void
     let ended: (Double, Double, Bool) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(tapped: tapped, changed: changed, ended: ended) }
-    func makeUIViewController(context: Context) -> UIHostingController<Content> {
-        let controller = UIHostingController(rootView: content)
+    func makeUIViewController(context: Context) -> RowHost<Content> {
+        let controller = RowHost(rootView: content)
         controller.safeAreaRegions = []; controller.view.backgroundColor = .clear
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pan(_:)))
         pan.delegate = context.coordinator; pan.maximumNumberOfTouches = 1
-        pan.cancelsTouchesInView = true; controller.view.addGestureRecognizer(pan)
+        pan.cancelsTouchesInView = true; controller.touchSurface.addGestureRecognizer(pan)
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:)))
         tap.delegate = context.coordinator; tap.require(toFail: pan)
-        controller.view.addGestureRecognizer(tap)
+        controller.touchSurface.addGestureRecognizer(tap)
         return controller
     }
-    func updateUIViewController(_ controller: UIHostingController<Content>, context: Context) {
+    func updateUIViewController(_ controller: RowHost<Content>, context: Context) {
         controller.rootView = content; context.coordinator.tapped = tapped; context.coordinator.changed = changed; context.coordinator.ended = ended
     }
-    func sizeThatFits(_ proposal: ProposedViewSize, uiViewController: UIHostingController<Content>, context: Context) -> CGSize? {
+    func sizeThatFits(_ proposal: ProposedViewSize, uiViewController: RowHost<Content>, context: Context) -> CGSize? {
         uiViewController.sizeThatFits(in: CGSize(width: proposal.width ?? 320, height: proposal.height ?? .greatestFiniteMagnitude))
+    }
+    @MainActor final class RowHost<RowContent: View>: UIHostingController<RowContent> {
+        let touchSurface = UIView()
+        override func viewDidLoad() {
+            super.viewDidLoad()
+            touchSurface.backgroundColor = .clear
+            view.addSubview(touchSurface)
+        }
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            // Keep native row recognition above SwiftUI's own gesture graph.
+            // Selection's first44points remains the real independent button.
+            touchSurface.frame = CGRect(x: 44, y: 0, width: max(0, view.bounds.width - 44), height: view.bounds.height)
+            view.bringSubviewToFront(touchSurface)
+        }
+        override init(rootView: RowContent) { super.init(rootView: rootView) }
+        @MainActor required dynamic init?(coder aDecoder: NSCoder) { fatalError("init(coder:) is unavailable") }
     }
     @MainActor final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var tapped: () -> Void
@@ -70,7 +87,7 @@ private struct DirectionLockedRow<Content: View>: UIViewControllerRepresentable 
         @objc func tap(_ recognizer: UITapGestureRecognizer) { if recognizer.state == .ended { tapped() } }
         func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
             // The first 44pt is the independent selection button, never a load.
-            if recognizer is UITapGestureRecognizer { return touch.location(in: recognizer.view).x >= 44 }
+            if recognizer is UITapGestureRecognizer { return true }
             return true
         }
         func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
