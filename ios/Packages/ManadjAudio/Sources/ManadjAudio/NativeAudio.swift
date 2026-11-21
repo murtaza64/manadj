@@ -1,5 +1,6 @@
 #if canImport(AVFoundation) && os(iOS)
 import AVFoundation
+import Accelerate
 import CEngine
 import Foundation
 
@@ -31,7 +32,10 @@ private final class RenderContext: @unchecked Sendable {
             for channel in 0..<buffers.count {
                 guard let bytes = buffers[channel].mData else { continue }
                 let out = bytes.assumingMemoryBound(to: Float.self)
-                for i in 0..<n { out[offset + i] = channel < 2 ? scratch[i * 2 + channel] : 0 }
+                if channel < 2 {
+                    // C vector copy avoids a per-sample Swift loop in development builds.
+                    cblas_scopy(Int32(n), scratch.advanced(by: channel), 2, out.advanced(by: offset), 1)
+                } else { memset(out.advanced(by: offset), 0, n * MemoryLayout<Float>.size) }
             }
             offset += n
         }
