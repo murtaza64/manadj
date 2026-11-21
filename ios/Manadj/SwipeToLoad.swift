@@ -194,7 +194,7 @@ struct BrowserHandlePan: UIViewRepresentable {
         var ended: (CGFloat, CGFloat) -> Void = { _, _ in }
         override init(frame: CGRect) {
             super.init(frame: frame)
-            let pan = UIPanGestureRecognizer(target: self, action: #selector(move(_:)))
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
             pan.maximumNumberOfTouches = 1; pan.delegate = self; addGestureRecognizer(pan)
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
@@ -203,7 +203,7 @@ struct BrowserHandlePan: UIViewRepresentable {
             let v = pan.velocity(in: window)
             return v.y > 0 && v.y > abs(v.x) * 1.5
         }
-        @objc private func move(_ pan: UIPanGestureRecognizer) {
+        @objc private func handlePan(_ pan: UIPanGestureRecognizer) {
             let distance = max(0, pan.translation(in: window).y)
             switch pan.state {
             case .began, .changed: changed(distance)
