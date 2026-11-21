@@ -93,7 +93,7 @@ struct WorkspaceView: View {
                             library
                             HStack(spacing: 12) { transport(0, browser: true); transport(1, browser: true) }.frame(height: 44).padding(.horizontal, 6).background(Ink.panel)
                         }.background(Ink.base).compositingGroup().offset(y: browserDrag).transition(.move(edge: .bottom))
-                            .accessibilityIdentifier("browser-drawer")
+                            .accessibilityElement(children: .contain).accessibilityIdentifier("browser-drawer")
                     }
                     if settings {
                         VStack(spacing: 0) {
