@@ -100,7 +100,7 @@ struct LibraryPreviewWave: View {
             Canvas { context, size in drawCues(context: context, size: size) }
         }.frame(width: 110, height: 19)
             .task(id: key) { raster = BrowserPreviewRaster.shared.image(key: key, wave: waveform, json: styleJSON, scale: scale) }
-            .accessibilityLabel("Spectral track preview and saved hotcues")
+            .accessibilityLabel(waveform.nBands == 8 && waveform.bandFrames > 0 ? "Spectral track preview and saved hotcues" : "Peak track preview and saved hotcues, spectral data unavailable")
     }
     private func cueColor(slot: Int, hex: String?) -> Color {
         guard let hex, let rgb = ManadjCore.parseHexColor(hex) else { return Ink.cues[slot] }
