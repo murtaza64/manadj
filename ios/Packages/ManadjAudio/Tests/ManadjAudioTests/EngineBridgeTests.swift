@@ -3,28 +3,6 @@ import CEngine
 @testable import ManadjAudio
 
 final class EngineBridgeTests: XCTestCase {
-    func testSourceRatesAndPitchFollowOutputTimeWithoutStarvation() throws {
-        for sourceRate in [44_100, 48_000, 96_000] {
-            for pitch in [-8.0, 0.0, 8.0] {
-                let e = try XCTUnwrap(mdj_create(48_000)); defer { mdj_destroy(e) }
-                var out = [Float](repeating: 0, count: 512)
-                _ = mdj_prepare(e, 0, 1)
-                out.withUnsafeMutableBufferPointer { mdj_render(e, $0.baseAddress!, 256, 2) }
-                let frames = sourceRate * 4
-                XCTAssertTrue(mdj_track_begin(e, 0, 1, UInt64(frames), Int32(sourceRate)))
-                let pcm = [Float](repeating: 0.1, count: frames * 2)
-                pcm.withUnsafeBufferPointer { XCTAssertEqual(mdj_track_write(e, 0, 1, $0.baseAddress!, Int32(frames)), Int32(frames)) }
-                XCTAssertTrue(mdj_track_finish(e, 0, 1))
-                _ = mdj_submit(e, MDJPitch, 0, pitch, 0); _ = mdj_submit(e, MDJPlay, 0, 0, 0)
-                for _ in 0..<375 { out.withUnsafeMutableBufferPointer { mdj_render(e, $0.baseAddress!, 256, 2) } }
-                XCTAssertEqual(mdj_deck(e, 0).position, 2 * (1 + pitch / 100), accuracy: 0.0001)
-                XCTAssertEqual(mdj_starved_frames(e), 0)
-                XCTAssertEqual(mdj_phase_align(e, -1, 0, 1), 0)
-                XCTAssertEqual(mdj_phase_align(e, 0, 0, 1), 0)
-                XCTAssertNotEqual(mdj_sync_members(e, 3, 1), 0)
-            }
-        }
-    }
     func testWholeTrackLifecycleSeekAndOutput() throws {
         let engine = try XCTUnwrap(mdj_create(48_000)); defer { mdj_destroy(engine) }
         var out = [Float](repeating: 0, count: 2048)

@@ -1,6 +1,5 @@
 #if canImport(AVFoundation) && os(iOS)
 import AVFoundation
-import Accelerate
 import CEngine
 import Foundation
 
@@ -32,10 +31,7 @@ private final class RenderContext: @unchecked Sendable {
             for channel in 0..<buffers.count {
                 guard let bytes = buffers[channel].mData else { continue }
                 let out = bytes.assumingMemoryBound(to: Float.self)
-                if channel < 2 {
-                    // C vector copy avoids a per-sample Swift loop in development builds.
-                    cblas_scopy(Int32(n), scratch.advanced(by: channel), 2, out.advanced(by: offset), 1)
-                } else { memset(out.advanced(by: offset), 0, n * MemoryLayout<Float>.size) }
+                for i in 0..<n { out[offset + i] = channel < 2 ? scratch[i * 2 + channel] : 0 }
             }
             offset += n
         }
@@ -128,10 +124,6 @@ private final class NotificationTokens: @unchecked Sendable {
     @discardableResult public func send(_ op: MDJOp, deck: Int = 0, value: Double = 0, slot: Int = 0) -> Bool {
         mdj_submit(handle.raw, op, Int32(deck), value, Int32(slot)) != 0
     }
-    public var renderedFrames: UInt64 { mdj_frames(handle.raw) }
-    public var starvedFrames: UInt64 { mdj_starved_frames(handle.raw) }
-    @discardableResult public func alignPhase(_ deck: Int, reference: Int, ratio: Double) -> Bool { mdj_phase_align(handle.raw, Int32(deck), Int32(reference), ratio) != 0 }
-    @discardableResult public func syncMembers(_ members: Int, synced: Int) -> Bool { mdj_sync_members(handle.raw, Int32(members), Int32(synced)) != 0 }
     public func state(_ deck: Int) -> MDJDeck { mdj_deck(handle.raw, Int32(deck)) }
     public func grid(_ deck: Int, bpm: Double, anchor: Double) { _ = mdj_grid(handle.raw, Int32(deck), bpm, anchor) }
     public func filter(_ deck: Int, position: Double) { _ = mdj_filter(handle.raw, Int32(deck), position) }

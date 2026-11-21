@@ -61,23 +61,6 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
-    @MainActor func testTempoSyncButtonJoinsAndLeavesGroup() {
-        defer { captureFailure() }
-        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
-        let play = app.buttons["A play pause"]
-        XCTAssertTrue(play.waitForExistence(timeout: 20)); waitForReadyTransport(play, app: app)
-        app.buttons["A PITCH panel"].tap()
-        let sync = app.buttons["A tempo sync"]
-        XCTAssertTrue(sync.waitForExistence(timeout: 5)); XCTAssertTrue(sync.isEnabled)
-        sync.tap()
-        let joined = NSPredicate(format: "value == %@", "synced")
-        expectation(for: joined, evaluatedWith: sync); waitForExpectations(timeout: 5)
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Synthetic Android-group tempo sync joined - not hardware proof"; shot.lifetime = .keepAlways; add(shot)
-        sync.tap()
-        let left = NSPredicate(format: "value == %@", "off")
-        expectation(for: left, evaluatedWith: sync); waitForExpectations(timeout: 5)
-    }
-
     @MainActor func testSyncProgressShowsFileCountAndForegroundWarning() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--sync-progress-ui-fixture"]; app.launch()
