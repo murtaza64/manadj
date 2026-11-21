@@ -7,6 +7,29 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    @MainActor func testPreviewPlayTakeoverSurvivesCueRelease() async throws {
+        let audio = try NativeAudio()
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "wav"))
+        _ = try await audio.load(url, deck: 0)
+        for hotcue in [false, true] {
+            audio.send(MDJPause); audio.send(MDJSeek, value: 0)
+            if hotcue { audio.send(MDJHotCueSetAt, value: 0, slot: 0) }
+            try await Task.sleep(for: .milliseconds(80))
+            audio.send(hotcue ? MDJHotCueDown : MDJCueDown, slot: 0)
+            try await Task.sleep(for: .milliseconds(80))
+            XCTAssertTrue(audio.state(0).preview)
+            audio.send(MDJPlay)
+            audio.send(hotcue ? MDJHotCueUp : MDJCueUp, slot: 0)
+            try await Task.sleep(for: .milliseconds(80))
+            XCTAssertTrue(audio.state(0).playing); XCTAssertFalse(audio.state(0).preview)
+        }
+        audio.send(MDJPause); audio.send(MDJSeek, value: 0)
+        try await Task.sleep(for: .milliseconds(80))
+        audio.send(MDJCueDown); try await Task.sleep(for: .milliseconds(80))
+        audio.send(MDJCueUp); try await Task.sleep(for: .milliseconds(80))
+        XCTAssertFalse(audio.state(0).playing); XCTAssertFalse(audio.state(0).preview)
+    }
+
     @MainActor func testLoadedDeckReadsOfflineFullWaveformCache() async throws {
         let root = try XCTUnwrap(AppModel.makePerformanceUIFixture())
         defer { try? FileManager.default.removeItem(at: root) }

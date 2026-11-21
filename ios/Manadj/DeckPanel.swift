@@ -56,7 +56,7 @@ struct DeckPanel: View {
             HStack(spacing: 8) {
                 HoldControl(title: "CUE", color: Ink.cue, active: state.preview && state.previewSlot == 8, enabled: state.ready && !deck.loading, down: {
                     model.set(MDJCueDown, index, 0)
-                }, up: { model.set(MDJCueUp, index, 0) }).frame(height: 52)
+                }, up: { model.set(MDJCueUp, index, 0) }, canLatch: { let live = model.audio?.state(index); return live?.preview == true && live?.previewSlot == 8 }, latch: { model.set(MDJPlay, index, 0) }).frame(height: 52)
                 Button { model.play(index) } label: {
                     Label(state.playing ? "PAUSE" : "PLAY", systemImage: state.playing ? "pause.fill" : "play.fill").frame(maxWidth: .infinity)
                 }.buttonStyle(FlatButtonStyle(color: Ink.play, active: state.playing)).disabled(!state.ready || deck.loading)
@@ -83,7 +83,7 @@ struct DeckPanel: View {
                     HoldControl(title: "\(slot + 1)\(cue >= 0 ? " ·" : "")", color: erasePads ? Ink.danger : Ink.cues[slot], active: cue >= 0 && state.preview && state.previewSlot == slot, enabled: state.ready && !deck.loading, down: {
                         if erasePads { model.set(MDJHotCueClear, index, 0, slot: slot) }
                         else { model.set(cue < 0 ? MDJHotCueSet : MDJHotCueDown, index, 0, slot: slot) }
-                    }, up: { model.set(MDJHotCueUp, index, 0, slot: slot) }).frame(height: 44)
+                    }, up: { model.set(MDJHotCueUp, index, 0, slot: slot) }, canLatch: { let live = model.audio?.state(index); return !erasePads && live?.preview == true && live?.previewSlot == Int32(slot) }, latch: { model.set(MDJPlay, index, 0) }).frame(height: 44)
                         .accessibilityLabel("Hot cue \(slot + 1), \(cue >= 0 ? Ink.clock(cue) : "empty")")
                 }
             }

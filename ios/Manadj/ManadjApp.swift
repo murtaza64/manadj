@@ -231,7 +231,7 @@ struct WorkspaceView: View {
         let state = model.decks[index].engine
         return HStack(spacing: browser ? 4 : 0) {
             if browser { Text(Ink.deckName(index)).font(Ink.font(10, bold: true)).foregroundStyle(Ink.decks[index]).frame(width: 12) }
-            HoldControl(title: "CUE", color: Ink.warning, active: state.preview && state.previewSlot == 8, enabled: state.ready, rounded: true, bare: false, compact: browser, down: { model.set(MDJCueDown, index, 0) }, up: { model.set(MDJCueUp, index, 0) })
+            HoldControl(title: "CUE", color: Ink.warning, active: state.preview && state.previewSlot == 8, enabled: state.ready, rounded: true, bare: false, compact: browser, down: { model.set(MDJCueDown, index, 0) }, up: { model.set(MDJCueUp, index, 0) }, canLatch: { let live = model.audio?.state(index); return live?.preview == true && live?.previewSlot == 8 }, latch: { model.set(MDJPlay, index, 0) }).accessibilityIdentifier("deck-\(index)-cue-hold")
             Button { model.play(index) } label: { Label(state.playing ? "PAUSE" : "PLAY", systemImage: state.playing ? "pause.fill" : "play.fill") }.buttonStyle(BrowserAwareTransportStyle(compact: browser, active: state.playing)).disabled(!state.ready).accessibilityLabel("\(Ink.deckName(index)) play pause")
         }
     }
