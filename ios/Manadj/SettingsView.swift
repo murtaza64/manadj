@@ -33,6 +33,16 @@ struct SettingsView: View {
                     }
                 }
                 Text(model.status).font(Ink.font(12)).foregroundStyle(Ink.muted)
+                if let progress = model.syncProgress {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if progress.phase == .audio {
+                            if progress.total > 0 { ProgressView(value: Double(progress.completed), total: Double(progress.total)).accessibilityLabel("Audio files ready") }
+                            Text("Audio: \(progress.completed) of \(progress.total) files ready").accessibilityIdentifier("sync-audio-progress")
+                            Text("Completed files, not bytes. Already cached files count as ready.")
+                        } else { Text(progress.phase == .library ? "Fetching library…" : "Caching waveforms…") }
+                        Text("Screen stays awake during foreground sync. Keep manaDJ open; locking or leaving the app may interrupt it. Retry keeps complete cached files.")
+                    }.font(Ink.font(11)).foregroundStyle(Ink.muted)
+                }
                 if model.snapshot?.schemaStale == true { Text("This desktop snapshot is older than the current sync schema. Update manaDJ desktop and sync again.").font(Ink.font(12)).foregroundStyle(Ink.warning) }
                 Button("SYNC + ALL AUDIO") { bulkConfirmation = true }.buttonStyle(FlatButtonStyle()).disabled(model.busy || model.pairedOrigin == nil)
                 Text("Normal sync caches the library and previews. Audio downloads when loaded. All audio can use substantial storage. This slice does not automatically remove old revisions.").font(Ink.font(11)).foregroundStyle(Ink.muted)

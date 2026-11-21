@@ -18,6 +18,8 @@ struct DeckViewState {
     @Published var libraryVersion = 0
     @Published var snapshot: Snapshot? { didSet { libraryVersion += 1 } }
     @Published var downloaded: Set<Int> = []
+    @Published var syncProgress: LibrarySyncProgress?
+    let syncWake = SyncWakeScope()
     @Published var busy = false
     @Published var status = "Offline library"
     @Published var error: String?
@@ -55,7 +57,7 @@ struct DeckViewState {
         else if ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture") {
             root = Self.makePerformanceUIFixture() ?? FileManager.default.temporaryDirectory.appendingPathComponent("fixture-failed-" + UUID().uuidString)
         }
-        else if ProcessInfo.processInfo.arguments.contains("--usb-ui-fixture") {
+        else if ProcessInfo.processInfo.arguments.contains("--usb-ui-fixture") || ProcessInfo.processInfo.arguments.contains("--sync-progress-ui-fixture") {
             root = FileManager.default.temporaryDirectory.appendingPathComponent("usb-app-fixture-" + UUID().uuidString)
         }
         else if ProcessInfo.processInfo.arguments.contains("--library-ui-fixture") {
@@ -99,9 +101,17 @@ struct DeckViewState {
             repository = repo
             snapshot = await repo.cachedSnapshot()
             downloaded = await repo.downloadedIds()
-            if !ProcessInfo.processInfo.arguments.contains("--library-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--usb-ui-fixture"), let url = URL(string: origin), let token = PairingKeychain.token(for: origin) {
+            if !ProcessInfo.processInfo.arguments.contains("--library-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--usb-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--sync-progress-ui-fixture"), let url = URL(string: origin), let token = PairingKeychain.token(for: origin) {
                 connection = try DesktopConnection(url: url, deviceToken: token, deviceId: deviceId, deviceName: UIDevice.current.name)
             }
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--sync-progress-ui-fixture") {
+                busy = true
+                syncProgress = .init(phase: .audio, completed: 3, total: 10)
+                status = "Synthetic progress fixture · not a real transfer"
+                return
+            }
+            #endif
             if let warning = await repo.recoveryWarning { error = warning }
             status = snapshot.map { "\($0.tracks.count) tracks cached · offline ready" } ?? "Pair with your desktop to sync your library"
         } catch { self.error = "Offline cache: \(error.localizedDescription)" }
@@ -313,21 +323,30 @@ struct DeckViewState {
         guard let repository, let connection else { error = "Pair this iPhone with the desktop first"; return }
         task?.cancel(); busy = true; status = allAudio ? "Syncing library and all audio…" : "Syncing library and waveforms…"
         task = Task {
-            defer { busy = false }
+            defer { busy = false; syncProgress = nil }
             do {
-                snapshot = try await repository.sync(connection, allAudio: allAudio)
+                snapshot = try await syncWake.duringTransfer {
+                    try await repository.sync(connection, allAudio: allAudio) { [weak self] progress in
+                        await self?.setSyncProgress(progress)
+                    }
+                }
                 downloaded = await repository.downloadedIds()
                 status = "\(snapshot?.tracks.count ?? 0) tracks synced · \(downloaded.count) downloaded"
-            } catch is CancellationError { status = "Sync cancelled. Existing cache kept." }
+            } catch is CancellationError {
+                snapshot = await repository.cachedSnapshot()
+                downloaded = await repository.downloadedIds()
+                status = "Sync cancelled. Complete cached files kept. Retry when ready."
+            }
             catch {
                 // A snapshot may have landed before a preview failed. Show that truth, with the error.
                 snapshot = await repository.cachedSnapshot()
                 downloaded = await repository.downloadedIds()
                 self.error = error.localizedDescription
-                status = "Sync incomplete. Last valid library kept."
+                status = "Sync incomplete. Complete cached files kept. Retry when ready."
             }
         }
     }
+    private func setSyncProgress(_ progress: LibrarySyncProgress) { syncProgress = progress }
     func preview(_ track: LibraryTrack) async -> PreviewWaveform? { await repository?.preview(track) }
     func cancelWork() { task?.cancel() }
     var pairedOrigin: String? { connection?.baseURL.absoluteString }
@@ -428,5 +447,30 @@ struct DeckViewState {
     }
     func refreshRecordings() {
         recordings = ((try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("recordings"), includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "wav" }.sorted { $0.lastPathComponent > $1.lastPathComponent }
+    }
+}
+
+/// Only active foreground library transfers suppress automatic display sleep.
+/// Manual lock/backgrounding is not background-transfer support.
+@MainActor final class SyncWakeScope {
+    private var users = 0
+    private var saved: Bool?
+    private var active = true
+    private let read: () -> Bool
+    private let write: (Bool) -> Void
+    init(read: @escaping () -> Bool = { UIApplication.shared.isIdleTimerDisabled },
+         write: @escaping (Bool) -> Void = { UIApplication.shared.isIdleTimerDisabled = $0 }) {
+        self.read = read; self.write = write
+    }
+    func setActive(_ value: Bool) { active = value; update() }
+    private func update() {
+        if active && users > 0 {
+            if saved == nil { saved = read(); write(true) }
+        } else if let previous = saved { saved = nil; write(previous) }
+    }
+    func duringTransfer<T>(_ body: () async throws -> T) async rethrows -> T {
+        users += 1; update()
+        defer { users -= 1; update() }
+        return try await body()
     }
 }
