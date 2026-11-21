@@ -3,6 +3,50 @@ import XCTest
 /// The simulator has no accelerometer, so --feedback-ui-fixture presents the
 /// review sheet directly; shake itself is device-only coverage.
 final class FeedbackUITests: XCTestCase {
+    @MainActor func testExplicitButtonPicksTargetDrawsAndCancelsWithoutFiling() {
+        defer { captureFailure() }
+        let app = XCUIApplication()
+        app.launchArguments = ["--performance-ui-fixture"]
+        app.launch()
+        let open = app.buttons["feedback-open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 15))
+        let deck = app.descendants(matching: .any).matching(identifier: "deck-0-info").firstMatch.frame
+        let screen = app.frame
+        let point = CGVector(dx: deck.midX / screen.width, dy: deck.midY / screen.height)
+        let workspace = XCTAttachment(screenshot: app.screenshot())
+        workspace.name = "Workspace explicit feedback button"; workspace.lifetime = .keepAlways; add(workspace)
+        open.tap()
+        XCTAssertTrue(app.otherElements["feedback-review"].waitForExistence(timeout: 10))
+        let pick = app.buttons["feedback-pick-element"]
+        for _ in 0..<5 { if pick.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(pick.isHittable)
+        pick.tap()
+        let picker = app.otherElements["feedback-target-picker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        let pickerCanvas = picker.descendants(matching: .any).matching(identifier: "feedback-canvas").firstMatch
+        XCTAssertTrue(pickerCanvas.exists)
+        let pickShot = XCTAttachment(screenshot: app.screenshot())
+        pickShot.name = "Full screen frozen screenshot target picker"; pickShot.lifetime = .keepAlways; add(pickShot)
+        pickerCanvas.coordinate(withNormalizedOffset: point).tap()
+        let canvas = app.otherElements["feedback-review"].descendants(matching: .any).matching(identifier: "feedback-canvas").firstMatch
+        let target = app.staticTexts["feedback-selected-target"]
+        XCTAssertTrue(target.waitForExistence(timeout: 5))
+        XCTAssertTrue(target.label.contains("Deck A track info"), target.label)
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2))
+            .press(forDuration: 0.05, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.7)))
+        XCTAssertTrue(app.buttons["UNDO"].isEnabled)
+        let marked = XCTAttachment(screenshot: app.screenshot())
+        marked.name = "Feedback named target and freehand drawing"; marked.lifetime = .keepAlways; add(marked)
+        app.buttons["CLEAR TARGET"].tap()
+        XCTAssertFalse(target.exists)
+        app.buttons["CANCEL"].tap()
+        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        open.tap()
+        XCTAssertTrue(app.otherElements["feedback-review"].waitForExistence(timeout: 10))
+        app.buttons["feedback-open-outbox"].tap()
+        XCTAssertTrue(app.staticTexts["No saved reports."].waitForExistence(timeout: 5), "Picking/drawing/cancelling must not queue or send")
+    }
+
     @MainActor private func captureFailure() {
         if testRun?.hasSucceeded == false {
             let app = XCUIApplication()

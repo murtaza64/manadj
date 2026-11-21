@@ -29,7 +29,7 @@ struct PerformanceDeckControls: View {
             up: { model.set(MDJHotCueUp, index, 0, slot: slot) },
             canLatch: { canLatchHotCue(slot) }, latch: { model.set(MDJPlay, index, 0) }
         ).accessibilityIdentifier("deck-\(index)-hotcue-\(slot)")
-            .padding(3).accessibilityLabel("\(Ink.deckName(index)) hotcue \(slot + 1)")
+            .padding(3).accessibilityLabel("\(Ink.deckName(index)) hotcue \(slot + 1)").feedbackTarget("Deck \(Ink.deckName(index)) hotcue \(slot + 1)")
     }
     var body: some View {
         GeometryReader { geometry in
@@ -80,7 +80,7 @@ struct PerformanceDeckControls: View {
                         }.padding(.horizontal, 7).frame(maxHeight: .infinity)
                     }.background(Ink.panel).clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
                         .overlay(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12).stroke(color.opacity(0.6), lineWidth: 1.5)).padding(2)
-                }.buttonStyle(.plain).frame(height: row).accessibilityLabel("\(Ink.deckName(index)) PITCH panel")
+                }.buttonStyle(.plain).frame(height: row).accessibilityLabel("\(Ink.deckName(index)) PITCH panel").feedbackTarget("Deck \(Ink.deckName(index)) pitch panel")
 
             }
             .overlay {
