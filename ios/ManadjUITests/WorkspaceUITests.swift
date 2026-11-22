@@ -98,7 +98,9 @@ final class WorkspaceUITests: XCTestCase {
                 let list = app.descendants(matching: .any)["library-track-list"].firstMatch
                 if list.exists { list.swipeUp(velocity: .fast); list.swipeDown(velocity: .fast) }
                 let close = app.buttons["browser-close"]
-                XCTAssertTrue(close.isHittable); close.tap()
+                // A downward swipe at the top now intentionally dismisses.
+                if search.exists { XCTAssertTrue(close.isHittable); close.tap() }
+                XCTAssertFalse(search.exists, "Either native top pull or Close must settle dismissed")
                 let audio = app.buttons["center-tab-audio"]
                 let audioTab = audio.exists ? audio : app.segmentedControls.buttons["Audio"]
                 if audioTab.exists { audioTab.tap() }
@@ -479,6 +481,10 @@ final class WorkspaceUITests: XCTestCase {
         for delta in [CGVector(dx: 12, dy: -190), CGVector(dx: -18, dy: -200), CGVector(dx: 25, dy: 160), CGVector(dx: -20, dy: -150)] {
             let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: delta.dy < 0 ? 0.8 : 0.2))
             from.press(forDuration: 0.02, thenDragTo: from.withOffset(delta), withVelocity: .fast, thenHoldForDuration: 0)
+            if delta.dy < 0 {
+                XCTAssertFalse(app.staticTexts["Scroll fixture 082"].isHittable, "Upward row drag must actually scroll the initial top row offscreen")
+            }
+            print("BROWSER_SCROLL_DIAGNOSTIC delta=\(delta) frame=\(list.frame) value=\(list.value ?? "missing")")
             XCTAssertTrue(app.textFields["Search title, artist, file"].exists, "Scrolling must not close browser or load a track")
             XCTAssertFalse(app.alerts.firstMatch.exists, "Scrolling must not attempt unavailable track loads")
             for index in 0..<2 { XCTAssertFalse((app.buttons["deck-\(index)-info"].value as? String ?? "").contains("Test Tone")) }
@@ -506,6 +512,79 @@ final class WorkspaceUITests: XCTestCase {
         app.buttons["browser-open"].tap(); XCTAssertTrue(handle.waitForExistence(timeout: 5))
     }
 
+    @MainActor func testBrowserTopEdgeDragHandsOffToDrawer() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture", "--browser-scroll-fixture"]; app.launch()
+        app.buttons["browser-open"].tap()
+        let list = app.scrollViews["library-track-list"]
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        let origin = list.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.15))
+        origin.press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: 240)), withVelocity: .slow, thenHoldForDuration: 0.3)
+        if list.exists { print("BROWSER_NATIVE_HANDOFF_DIAGNOSTIC \(list.value ?? "missing")") }
+        let closed = NSPredicate(format: "exists == false")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: closed, object: list)], timeout: 5), .completed, "At the list top, downward overscroll must move and close the drawer rather than bounce rows independently")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "Drawer drag must not load a track")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Top-of-list downward drag settled drawer"; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    @MainActor func testBrowserModerateFlingSettlesLikeHandle() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture", "--browser-scroll-fixture"]; app.launch()
+        for fromList in [false, true, false, true, false, true] {
+            if app.buttons["browser-close"].exists { app.buttons["browser-close"].tap() }
+            app.buttons["browser-open"].tap()
+            let list = app.scrollViews["library-track-list"]
+            XCTAssertTrue(list.waitForExistence(timeout: 10))
+            let target = fromList ? list : app.otherElements["browser-drag-handle"]
+            let start = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: fromList ? 0.15 : 0.5))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 110)), withVelocity: 900, thenHoldForDuration: 0)
+            if list.exists { print("MODERATE_FLING_DIAGNOSTIC fromList=\(fromList) handle=\(app.otherElements["browser-drag-handle"].value ?? "missing") list=\(list.value ?? "missing")") }
+            let closed = NSPredicate(format: "exists == false")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: closed, object: list)], timeout: 5), .completed, "Moderate downward fling should settle closed from both handle and top row")
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+            for index in 0..<2 { XCTAssertFalse((app.buttons["deck-\(index)-info"].value as? String ?? "").contains("Test Tone")) }
+        }
+    }
+
+    @MainActor func testLandscapeBrowserControlsAndRowsStayReachable() {
+        defer { captureFailure(); XCUIDevice.shared.orientation = .portrait }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        // A transient rotated bounding box can be wider than tall before the
+        // orientation animation finishes. Wait for the stable landscape window.
+        var lastFrame = CGRect.zero
+        var stablePolls = 0
+        let rotated = NSPredicate { _, _ in
+            let frame = app.windows.firstMatch.frame
+            let stable = frame.width > frame.height && abs(frame.minX) < 1 && abs(frame.minY) < 1 && frame == lastFrame
+            stablePolls = stable ? stablePolls + 1 : 0
+            lastFrame = frame
+            return stablePolls >= 2
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: rotated, object: app)], timeout: 10), .completed)
+        app.buttons["browser-open"].firstMatch.tap()
+        let search = app.textFields["Search title, artist, file"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); XCTAssertTrue(search.isHittable)
+        let row = app.staticTexts["Cached Test Tone"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10)); XCTAssertTrue(row.isHittable, "Landscape header must leave visible rows")
+        let close = app.buttons["browser-close"]
+        XCTAssertTrue(close.isHittable)
+        // Capture the device screen as well as the application crop: rotated
+        // application screenshots can carry an orientation/crop mismatch.
+        let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); screen.name = "Landscape whole device screen"; screen.lifetime = .keepAlways; add(screen)
+        let hierarchy = XCTAttachment(string: app.debugDescription); hierarchy.name = "Landscape browser open global geometry"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+        let bounds = app.windows.firstMatch.frame
+        for control in [search, close, row] {
+            XCTAssertGreaterThanOrEqual(control.frame.minX, bounds.minX)
+            XCTAssertLessThanOrEqual(control.frame.maxX, bounds.maxX)
+            XCTAssertGreaterThanOrEqual(control.frame.minY, bounds.minY)
+            XCTAssertLessThanOrEqual(control.frame.maxY, bounds.maxY)
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Landscape browser application crop"; shot.lifetime = .keepAlways; add(shot)
+        close.tap()
+        XCTAssertFalse(search.exists)
+    }
+
     @MainActor func testLibraryQuickSwipeLoadsWithoutFullSwipe() {
         defer { captureFailure() }
         let app = XCUIApplication()
@@ -525,6 +604,7 @@ final class WorkspaceUITests: XCTestCase {
         let to = from.withOffset(CGVector(dx: -75, dy: 0))
         from.press(forDuration: 0.01, thenDragTo: to, withVelocity: .fast, thenHoldForDuration: 0)
         let deck = app.buttons["deck-0-info"]
+        print("SHORT_SWIPE_NATIVE_ROWS \(app.otherElements.matching(identifier: "library-swipe-row").allElementsBoundByIndex.map { $0.value ?? "missing" })")
         let loaded = NSPredicate(format: "value CONTAINS %@", "Cached Test Tone")
         expectation(for: loaded, evaluatedWith: deck); waitForExpectations(timeout: 8)
         XCTAssertFalse(search.exists, "Accepted swipe closes browser")
@@ -538,6 +618,7 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
         from.press(forDuration: 0.01, thenDragTo: from.withOffset(CGVector(dx: 75, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+        print("SHORT_SWIPE_NATIVE_ROWS \(app.otherElements.matching(identifier: "library-swipe-row").allElementsBoundByIndex.map { $0.value ?? "missing" })")
         let loaded = NSPredicate(format: "value CONTAINS %@", "Cached Test Tone")
         expectation(for: loaded, evaluatedWith: app.buttons["deck-1-info"]); waitForExpectations(timeout: 8)
         XCTAssertFalse((app.buttons["deck-0-info"].value as? String ?? "").contains("Cached Test Tone"))

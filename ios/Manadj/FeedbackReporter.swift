@@ -8,6 +8,9 @@ import ManadjAudio
 @MainActor final class LiveFeedbackSession: NSObject, ObservableObject {
     @Published var active = false
     @Published var sending = false
+    #if DEBUG
+    @Published var fixtureReceiptReady = false
+    #endif
     @Published var deliveryStatus: String?
     @Published var reportGeneration = UUID()
     func receivedReport() {
@@ -158,6 +161,14 @@ struct FeedbackReporter: ViewModifier {
     @State private var capturedTranscript = ""
     func body(content: Content) -> some View {
         content
+            .overlay(alignment: .topTrailing) {
+                #if DEBUG
+                if session.sending && ProcessInfo.processInfo.arguments.contains("--feedback-receipt-ui-fixture") {
+                    Button("Complete synthetic receipt") { session.fixtureReceiptReady = true }
+                        .accessibilityIdentifier("feedback-fixture-receipt-complete")
+                }
+                #endif
+            }
             .overlay {
                 if session.active && !session.reviewing && session.mode != "USE APP" {
                     FeedbackLiveInk(session: session, targets: targets).ignoresSafeArea()
@@ -168,8 +179,12 @@ struct FeedbackReporter: ViewModifier {
                         let result: FeedbackOutcome
                         #if DEBUG
                         if ProcessInfo.processInfo.arguments.contains("--feedback-receipt-ui-fixture") {
-                            // Deterministic receipt-state UI only. No network or filing.
-                            try? await Task.sleep(for: .seconds(5))
+                            // The test observes sending before releasing a synthetic receipt.
+                            // No timer race, network request or filing.
+                            while !session.fixtureReceiptReady && !Task.isCancelled {
+                                try? await Task.sleep(for: .milliseconds(50))
+                            }
+                            session.fixtureReceiptReady = false
                             result = .savedOnDesktop(status: "synthetic-ui-receipt", detail: "UI test only, no report sent")
                         } else {
                             result = await FeedbackSubmitter(queue: FeedbackQueue(directory: model.feedbackQueueRoot)).submit(draft, via: model.syncConnection)

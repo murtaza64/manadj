@@ -4,6 +4,8 @@ import ManadjCore
 struct LibraryBrowser: View {
     @EnvironmentObject var model: AppModel
     var onClose: () -> Void = {}
+    var onDrawerPull: (CGFloat) -> Void = { _ in }
+    var onDrawerRelease: (CGFloat, CGFloat) -> Void = { _, _ in }
     var onLoad: (LibraryTrack) -> Bool
     @FocusState private var searchFocused: Bool
     @State private var restoreSearchAfterError = false
@@ -23,6 +25,7 @@ struct LibraryBrowser: View {
     @State private var followLabels: [Int: String] = [:]
     @State private var filtering = false
     @State private var firstRowTiming = "awaiting first row"
+    @State private var panDiagnostic = "probe=not-reported"
     private var taskId: String {
         "\(model.libraryVersion)|\(model.downloaded.count)|\(search)|\(source.key)|\(sort.rawValue)|\(downloadedOnly)|\(tags.sorted())|\(bpmCenter ?? -1)|\(energy)|\(followReference ?? -1)"
     }
@@ -175,8 +178,12 @@ struct LibraryBrowser: View {
                     .overlay(alignment: .bottom) { Rectangle().fill(Ink.edge).frame(height: 0.5) }
                     .contextMenu { if let bpm = track.bpm { Button("Match BPM ±6") { bpmCenter = bpm; filtersOpen = true } }; Button("Follow this track") { followReference = track.id }; ForEach(0..<4) { index in Button("Load deck \(Ink.deckName(index))") { if model.load(track, deck: index) { searchFocused = false } } } }
                 } } }.scrollDismissesKeyboard(.interactively)
+                    .overlay(alignment: .topLeading) {
+                        BrowserTopPull(changed: onDrawerPull, ended: onDrawerRelease, diagnostic: { panDiagnostic = $0 })
+                            .frame(width: 1, height: 1).allowsHitTesting(false)
+                    }
                     .accessibilityIdentifier("library-track-list")
-                    .accessibilityValue(firstRowTiming)
+                    .accessibilityValue(firstRowTiming + " " + panDiagnostic)
                 }
             }
             .background(Ink.base)

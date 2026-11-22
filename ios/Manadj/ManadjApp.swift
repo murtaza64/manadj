@@ -32,6 +32,7 @@ struct WorkspaceView: View {
     @State private var outputRoute = AVAudioSession.sharedInstance().currentRoute
     @State private var browsing = false
     @State private var browserDrag: CGFloat = 0
+    @State private var browserHandleDiagnostic = "not started"
     @State private var feedbackRequested = false
     @State private var feedbackTargets: [FeedbackTarget] = []
     @State private var keyboardOpen = false
@@ -105,7 +106,16 @@ struct WorkspaceView: View {
                     if browsing {
                         VStack(spacing: 0) {
                             if !keyboardOpen { Capsule().fill(Ink.muted.opacity(0.7)).frame(width: 40, height: 4).frame(maxWidth: .infinity).frame(height: 24).contentShape(Rectangle())
-                                .gesture(browserDrawerDrag(height: geometry.size.height))
+                                .overlay {
+                                    BrowserHandlePan(changed: { distance in
+                                        var transaction = Transaction(); transaction.disablesAnimations = true
+                                        withTransaction(transaction) { browserDrag = distance }
+                                    }, ended: { distance, velocity in
+                                        let close = shouldCloseBrowser(distance: distance, velocity: velocity)
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { browsing = !close; browserDrag = 0 }
+                                    }, diagnostic: { browserHandleDiagnostic = $0 })
+                                }
+                                .accessibilityValue(browserHandleDiagnostic)
                                 .accessibilityIdentifier("browser-drag-handle")
                                 .accessibilityLabel("Close browser drag handle") }
                             if feedback.active { LiveFeedbackToolbar(session: feedback, model: model).frame(maxWidth: 300) }
@@ -128,21 +138,10 @@ struct WorkspaceView: View {
             .animation(.easeOut(duration: 0.24), value: settings)
         }
     }
-    private func browserDrawerDrag(height: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .global)
-            .onChanged { value in
-                // Direct manipulation has no easing. The entire browser,
-                // including its real scrolling list, travels under the finger.
-                var transaction = Transaction(); transaction.disablesAnimations = true
-                withTransaction(transaction) { browserDrag = max(0, value.translation.height) }
-            }
-            .onEnded { value in
-                let close = browserDrag > min(180, height * 0.25)
-                    || (browserDrag > 60 && value.predictedEndTranslation.height > height * 0.5)
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                    browsing = !close; browserDrag = 0
-                }
-            }
+    private func shouldCloseBrowser(distance: CGFloat, velocity: CGFloat) -> Bool {
+        // Project a short release coast, rather than making nearby native
+        // velocity samples on either side of one cutoff behave differently.
+        distance > 180 || (distance > 60 && distance + max(0, velocity) * 0.2 > 180)
     }
     private var feedbackButton: some View {
         Button { feedbackRequested = true } label: {
@@ -210,7 +209,13 @@ struct WorkspaceView: View {
         }.accessibilityIdentifier("browser-open").buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing)).feedbackTarget("Browse library")
     }
     private var library: some View {
-        LibraryBrowser(onClose: { withAnimation { browsing = false } }, onLoad: { track in
+        LibraryBrowser(onClose: { withAnimation { browsing = false } }, onDrawerPull: { distance in
+            var transaction = Transaction(); transaction.disablesAnimations = true
+            withTransaction(transaction) { browserDrag = distance }
+        }, onDrawerRelease: { distance, velocity in
+            let close = shouldCloseBrowser(distance: distance, velocity: velocity)
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { browsing = !close; browserDrag = 0 }
+        }, onLoad: { track in
             let accepted = model.load(track, deck: model.loadTarget)
             if accepted { withAnimation { browsing = false } }
             return accepted
