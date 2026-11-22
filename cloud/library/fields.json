@@ -1,0 +1,175 @@
+{
+  "tracks": [
+    "id",
+    "title",
+    "artist",
+    "key",
+    "key_provenance",
+    "bpm",
+    "energy",
+    "duration_secs",
+    "cue_point_time",
+    "codec",
+    "bitrate_kbps",
+    "filesize_bytes",
+    "created_at",
+    "updated_at",
+    "archived_at"
+  ],
+  "tag_categories": [
+    "id",
+    "name",
+    "display_order",
+    "color"
+  ],
+  "tags": [
+    "id",
+    "category_id",
+    "name",
+    "display_order",
+    "color"
+  ],
+  "track_tags": [
+    "id",
+    "track_id",
+    "tag_id",
+    "created_at"
+  ],
+  "playlists": [
+    "id",
+    "name",
+    "color",
+    "display_order",
+    "created_at",
+    "updated_at"
+  ],
+  "playlist_tracks": [
+    "id",
+    "playlist_id",
+    "track_id",
+    "position",
+    "created_at"
+  ],
+  "beatgrids": [
+    "id",
+    "track_id",
+    "tempo_changes_json",
+    "origin",
+    "anchor_time",
+    "created_at",
+    "updated_at"
+  ],
+  "metric_ladders": [
+    "id",
+    "track_id",
+    "arities_json",
+    "reset_marks_json",
+    "created_at",
+    "updated_at"
+  ],
+  "hotcues": [
+    "id",
+    "track_id",
+    "slot_number",
+    "time_seconds",
+    "label",
+    "color",
+    "created_at",
+    "updated_at"
+  ],
+  "track_links": [
+    "id",
+    "low_track_id",
+    "high_track_id",
+    "created_at"
+  ],
+  "transitions": [
+    "id",
+    "a_track_id",
+    "b_track_id",
+    "uuid",
+    "position",
+    "name",
+    "favorite",
+    "created_at",
+    "updated_at"
+  ],
+  "cameos": [
+    "id",
+    "host_track_id",
+    "guest_track_id",
+    "uuid",
+    "position",
+    "name",
+    "favorite",
+    "created_at",
+    "updated_at"
+  ],
+  "takes": [
+    "id",
+    "uuid",
+    "a_track_id",
+    "b_track_id",
+    "detected_at",
+    "window_start_s",
+    "window_end_s",
+    "confidence",
+    "detector_version",
+    "params_json",
+    "events_json",
+    "promoted_transition_uuid",
+    "session_uuid",
+    "origin",
+    "kind",
+    "engagement_uuid",
+    "created_at",
+    "updated_at"
+  ],
+  "sessions": [
+    "id",
+    "uuid",
+    "started_at",
+    "ended_at",
+    "created_at",
+    "updated_at"
+  ],
+  "session_chunks": [
+    "id",
+    "session_id",
+    "seq",
+    "events_json",
+    "created_at"
+  ],
+  "routine_takes": [
+    "id",
+    "uuid",
+    "session_uuid",
+    "entry_track_id",
+    "exit_track_id",
+    "cast_json",
+    "window_start_s",
+    "window_end_s",
+    "entry_offsets_json",
+    "origin_candidate_uuid",
+    "promoted_routine_uuid",
+    "confirmed_at",
+    "created_at",
+    "updated_at"
+  ],
+  "routines": [
+    "id",
+    "uuid",
+    "name",
+    "entry_track_id",
+    "exit_track_id",
+    "cast_json",
+    "entry_offsets_beats_json",
+    "entry_positions_json",
+    "duration_beats",
+    "origin_take_uuid",
+    "window_start_s",
+    "window_end_s",
+    "created_at",
+    "updated_at"
+  ]
+}
