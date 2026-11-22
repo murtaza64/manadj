@@ -13,6 +13,7 @@ struct SwipeToLoad<Content: View>: View {
     @ViewBuilder var content: Content
     @State private var dx: CGFloat = 0
     @State private var direction: Bool?
+    @State private var nativeDiagnostic = "no native pan"
     private var deck: Int { dx < 0 ? 0 : 1 }
     var body: some View {
         ZStack {
@@ -27,8 +28,10 @@ struct SwipeToLoad<Content: View>: View {
             }
             if #available(iOS 18.0, *) {
                 rowContent.gesture(HorizontalLoadPan(changed: { travel in
+                    nativeDiagnostic = "changed travel=\(travel)"
                     dx = max(-240, min(240, travel.x))
                 }, ended: { travel in
+                    nativeDiagnostic = "ended travel=\(travel)"
                     let target = LoadSwipeIntent.target(travel: Double(travel.x), vertical: Double(travel.y), projected: Double(travel.x))
                     withAnimation(.easeOut(duration: 0.16)) { dx = 0 }
                     if target == 0 { loadA() }; if target == 1 { loadB() }
@@ -50,6 +53,8 @@ struct SwipeToLoad<Content: View>: View {
             }
         }
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("library-swipe-row")
+        .accessibilityValue(nativeDiagnostic)
         .accessibilityAction(named: "Load selected deck", tap)
         .accessibilityAction(named: "Load to A", loadA)
         .accessibilityAction(named: "Load to B", loadB)
@@ -68,15 +73,15 @@ private struct HorizontalLoadPan: UIGestureRecognizerRepresentable {
     var changed: (CGPoint) -> Void
     var ended: (CGPoint) -> Void
     var cancelled: () -> Void
-    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
-        let pan = UIPanGestureRecognizer()
+    func makeUIGestureRecognizer(context: Context) -> WindowTravelPan {
+        let pan = WindowTravelPan()
         pan.maximumNumberOfTouches = 1
         pan.delegate = context.coordinator
         return pan
     }
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
-    func handleUIGestureRecognizerAction(_ pan: UIPanGestureRecognizer, context: Context) {
-        let travel = pan.translation(in: nil)
+    func handleUIGestureRecognizerAction(_ pan: WindowTravelPan, context: Context) {
+        let travel = pan.fullTravel
         #if DEBUG
         print("ROW_NATIVE_PAN state=\(pan.state.rawValue) travel=\(travel) velocity=\(pan.velocity(in: nil))")
         #endif
@@ -86,6 +91,27 @@ private struct HorizontalLoadPan: UIGestureRecognizerRepresentable {
         case .cancelled, .failed: cancelled()
         default: break
         }
+    }
+    final class WindowTravelPan: UIPanGestureRecognizer {
+        private var origin: CGPoint?
+        private var latest: CGPoint?
+        var fullTravel: CGPoint {
+            guard let origin, let latest else { return translation(in: view?.window) }
+            return CGPoint(x: latest.x - origin.x, y: latest.y - origin.y)
+        }
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            if let t = touches.first { origin = t.location(in: t.window); latest = origin }
+            super.touchesBegan(touches, with: event)
+        }
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+            if let t = touches.first { latest = t.location(in: t.window) }
+            super.touchesMoved(touches, with: event)
+        }
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+            if let t = touches.first { latest = t.location(in: t.window) }
+            super.touchesEnded(touches, with: event)
+        }
+        override func reset() { super.reset(); origin = nil; latest = nil }
     }
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {

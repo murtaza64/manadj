@@ -604,6 +604,7 @@ final class WorkspaceUITests: XCTestCase {
         let to = from.withOffset(CGVector(dx: -75, dy: 0))
         from.press(forDuration: 0.01, thenDragTo: to, withVelocity: .fast, thenHoldForDuration: 0)
         let deck = app.buttons["deck-0-info"]
+        print("SHORT_SWIPE_NATIVE_ROWS \(app.otherElements.matching(identifier: "library-swipe-row").allElementsBoundByIndex.map { $0.value ?? "missing" })")
         let loaded = NSPredicate(format: "value CONTAINS %@", "Cached Test Tone")
         expectation(for: loaded, evaluatedWith: deck); waitForExpectations(timeout: 8)
         XCTAssertFalse(search.exists, "Accepted swipe closes browser")
@@ -617,6 +618,7 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
         from.press(forDuration: 0.01, thenDragTo: from.withOffset(CGVector(dx: 75, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+        print("SHORT_SWIPE_NATIVE_ROWS \(app.otherElements.matching(identifier: "library-swipe-row").allElementsBoundByIndex.map { $0.value ?? "missing" })")
         let loaded = NSPredicate(format: "value CONTAINS %@", "Cached Test Tone")
         expectation(for: loaded, evaluatedWith: app.buttons["deck-1-info"]); waitForExpectations(timeout: 8)
         XCTAssertFalse((app.buttons["deck-0-info"].value as? String ?? "").contains("Cached Test Tone"))
