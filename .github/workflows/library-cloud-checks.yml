@@ -1,0 +1,60 @@
+name: Library cloud preparation checks
+on:
+  pull_request:
+    paths:
+      - 'cloud/library/**'
+      - 'desktop/cloud/**'
+      - '.github/workflows/library-*.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'cloud/library/**'
+      - 'desktop/cloud/**'
+      - '.github/workflows/library-*.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: library-cloud-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  synthetic:
+    name: Library contracts (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13'
+      - name: Locked runtime dependency, synthetic server and desktop primitive tests
+        run: |
+          set -euo pipefail
+          npm ci --prefix cloud/library --omit=dev --ignore-scripts --no-audit --no-fund
+          node --test desktop/cloud/*.test.js cloud/library/*.test.mjs
+      - name: Disabled target and configuration regression tests
+        run: |
+          set -euo pipefail
+          python cloud/library/check_config.py
+          python -m unittest discover -s cloud/library -p test_config.py
+      - name: Package the exact disabled Worker without deployment or credentials
+        if: runner.os == 'Linux'
+        working-directory: cloud/library
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx --no-install wrangler deploy --dry-run --outdir "$RUNNER_TEMP/library-worker-bundle"
