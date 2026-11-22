@@ -27,7 +27,9 @@ function ctor(): DictationCtor | null {
 }
 
 export function dictationAvailable(): boolean {
-  return typeof window !== 'undefined' && ctor() !== null;
+  // Electron ships Chromium, not the proprietary Web Speech recognition
+  // backend. A constructor there is not a working transcription capability.
+  return typeof window !== 'undefined' && !/Electron\//i.test(navigator.userAgent) && ctor() !== null;
 }
 
 export interface Dictation {
@@ -63,6 +65,7 @@ export function startDictation(onText: (text: string) => void, onEnd: () => void
   };
   recognition.onerror = (event) => {
     if (stopped) return;
+    stopped = true;
     onError?.(event?.error ?? 'unknown');
     recognition.stop();
   };

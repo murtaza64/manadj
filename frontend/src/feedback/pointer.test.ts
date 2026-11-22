@@ -94,3 +94,30 @@ describe('pickElement', () => {
     expect(document.querySelector('.feedback-picker')).toBeNull();
   });
 });
+
+it('ignores private feedback chrome, keeps picking, then accepts an app element', async () => {
+  const zone = document.createElement('div'); zone.dataset.feedbackPrivate = '';
+  const tool = document.createElement('button'); zone.append(tool); document.body.append(zone);
+  const app = document.createElement('button'); app.textContent = 'Play'; document.body.append(app);
+  const original = document.elementFromPoint;
+  document.elementFromPoint = () => tool;
+  try {
+    const work = pickElement(), picker = document.querySelector('.feedback-picker')!;
+    picker.dispatchEvent(new MouseEvent('pointermove', { bubbles: true }));
+    expect((picker.querySelector('.feedback-picker-box') as HTMLElement).hidden).toBe(true);
+    picker.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+    window.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(document.querySelector('.feedback-picker')).not.toBeNull();
+    document.elementFromPoint = () => app;
+    picker.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+    window.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await expect(work).resolves.toMatchObject({ text: 'Play' });
+  } finally { document.elementFromPoint = original; }
+});
+
+it('activates intended toolbar Cancel without selecting it',async()=>{
+ const bar=document.createElement('div');bar.className='feedback-bar';bar.dataset.feedbackPrivate='';
+ const cancel=document.createElement('button');cancel.textContent='Cancel';bar.append(cancel);document.body.append(bar);
+ let clicks=0;cancel.onclick=()=>{clicks++};const original=document.elementFromPoint;document.elementFromPoint=()=>cancel;
+ try{const work=pickElement();document.querySelector('.feedback-picker')!.dispatchEvent(new MouseEvent('pointerdown',{bubbles:true}));window.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));await expect(work).resolves.toBeNull();expect(clicks).toBe(1);}finally{document.elementFromPoint=original;}
+});

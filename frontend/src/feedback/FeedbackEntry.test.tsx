@@ -619,3 +619,57 @@ it('excludes capture chrome from fallback screenshots and cancels safely with Es
   expect(document.querySelector('.feedback-overlay')).toBeNull();
   expect(captureFeedback).not.toHaveBeenCalled();
 });
+
+it('offers Type and Speak before capture, retains typed notes for final review without filing', async () => {
+  const file = vi.spyOn(feedbackApi, 'file');
+  await click('Feedback');
+  expect(button('Speak')).toBeTruthy();
+  await click('Type');
+  const notes = document.querySelector('[aria-label="Report notes"]') as HTMLTextAreaElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(notes, 'Notes before capture');
+    notes.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await click('Speak');
+  expect(document.body.textContent).toContain('Speech is unavailable');
+  expect(button('Start dictation').disabled).toBe(true);
+  await click('Done');
+  await act(async () => { await new Promise(r => setTimeout(r, 300)); });
+  expect(document.querySelector('textarea')?.value).toBe('Notes before capture');
+  expect(file).not.toHaveBeenCalled();
+});
+
+it('starts bar dictation only explicitly and stops it on tool change and capture', async () => {
+  const start = vi.fn(), stop = vi.fn();
+  let recognition!: { onresult: ((event: unknown) => void) | null; onend: (() => void) | null };
+  class FakeRecognition {
+    continuous=false; interimResults=false; lang=''; onresult=null; onerror=null; onend:(()=>void)|null=null;
+    constructor(){recognition=this;}
+    start(){start();} stop(){stop();this.onend?.();}
+  }
+  vi.stubGlobal('SpeechRecognition', FakeRecognition);
+  await click('Feedback'); await click('Speak');
+  expect(start).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain('browser speech service');
+  await click('Start dictation'); expect(start).toHaveBeenCalledTimes(1);
+  await act(async()=>recognition.onresult?.({resultIndex:0,results:[{isFinal:true,0:{transcript:'Spoken bar notes'}}]}));
+  expect((document.querySelector('[aria-label="Report notes"]') as HTMLTextAreaElement).value).toBe('Spoken bar notes');
+  await click('Type'); expect(stop).toHaveBeenCalledTimes(1);
+  await click('Speak'); await click('Start dictation');
+  await click('Done'); expect(stop).toHaveBeenCalledTimes(2);
+  await act(async()=>{await new Promise(r=>setTimeout(r,300));});
+  expect(document.querySelector('textarea')?.value).toBe('Spoken bar notes');
+});
+
+it('ignores asynchronous callbacks from a replaced speech session', async()=>{
+ const sessions: Array<{onend:(()=>void)|null;onerror:((e:{error:string})=>void)|null;onresult:((e:unknown)=>void)|null;stop:()=>void}>=[];
+ class FakeRecognition{continuous=false;interimResults=false;lang='';onend:(()=>void)|null=null;onerror:((e:{error:string})=>void)|null=null;onresult:((e:unknown)=>void)|null=null;start(){}stop=vi.fn();constructor(){sessions.push(this);}}
+ vi.stubGlobal('SpeechRecognition',FakeRecognition);await openForm();
+ const dictates=[...document.querySelectorAll('button')].filter(b=>b.textContent==='Dictate');
+ await act(async()=>dictates[0].click());await act(async()=>dictates[1].click());
+ expect(sessions[0].stop).toHaveBeenCalledTimes(1);
+ await act(async()=>{sessions[0].onend?.();sessions[0].onerror?.({error:'network'});});
+ expect(document.body.textContent).not.toContain('browser speech service could not be reached');
+ expect(button('Stop dictation')).toBeTruthy();
+ await click('Close');expect(sessions[1].stop).toHaveBeenCalledTimes(1);
+});

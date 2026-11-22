@@ -1215,3 +1215,14 @@ def test_voice_rejects_missing_or_mixed_timestamp_zones():
     payload["ended_at"] = "2026-11-21T09:00:01"
     with pytest.raises(ValidationError):
         Voice(**payload)
+
+def test_github_filing_excludes_local_coding_session_identity(world):
+    service = world.make()
+    submit(service)
+    body = world.gh.creates[0][1]
+    assert 'opencode:' not in body
+    assert 'ses_owner' not in body
+    assert '"lane"' not in body
+    assert '"owner"' not in body
+    assert 'Origin:' not in body
+    assert 'Source revision:' in body

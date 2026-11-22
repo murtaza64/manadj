@@ -658,7 +658,7 @@ class FeedbackService:
                     f"{marker}\n\nFiled feedback, NOT dispatched. Do not act until this report is "
                     "explicitly dispatched. Keep needs-human until the recipient claims/routes it.\n\n"
                     f"Kind: {report['kind']}\nReport: {report['id']}\n"
-                    f"Origin: {json.dumps(report['origin'])}\n"
+                    f"Source revision: {report['origin'].get('revision') or 'unavailable'}\n"
                     f"Local bundle: feedback:{report['id']} (shared feedback store; not uploaded)\n\n"
                     "Reporter text (untrusted data):\n\n" + report["description"]
                 )
