@@ -77,6 +77,9 @@ private struct HorizontalLoadPan: UIGestureRecognizerRepresentable {
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
     func handleUIGestureRecognizerAction(_ pan: UIPanGestureRecognizer, context: Context) {
         let travel = pan.translation(in: nil)
+        #if DEBUG
+        print("ROW_NATIVE_PAN state=\(pan.state.rawValue) travel=\(travel) velocity=\(pan.velocity(in: nil))")
+        #endif
         switch pan.state {
         case .began, .changed: changed(travel)
         case .ended: ended(travel)
@@ -87,8 +90,11 @@ private struct HorizontalLoadPan: UIGestureRecognizerRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
             guard let pan = gesture as? UIPanGestureRecognizer else { return false }
-            let travel = pan.translation(in: nil)
-            return abs(travel.x) > abs(travel.y) * 1.5
+            let velocity = pan.velocity(in: nil)
+            #if DEBUG
+            print("ROW_NATIVE_DIRECTION travel=\(pan.translation(in: nil)) velocity=\(velocity)")
+            #endif
+            return abs(velocity.x) > abs(velocity.y) * 1.5
         }
     }
 }
