@@ -17,9 +17,11 @@ public struct CloudFeedbackReport: Codable, Sendable, Equatable {
         let description = FeedbackScrub.text(draft.description)
         let transcript = includeTranscript ? draft.voice?.transcript.map(FeedbackScrub.text) : nil
         let logs = reviewedLogs.map(FeedbackScrub.text)
-        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title.count <= 200,
-              description.count <= 20000, (transcript?.count ?? 0) <= 50000,
-              (logs?.count ?? 0) <= 200000 else {
+        // Match the Worker's JavaScript UTF-16 string limits before Send.
+        // Swift Character.count would admit longer emoji/combined text.
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title.utf16.count <= 200,
+              description.utf16.count <= 20000, (transcript?.utf16.count ?? 0) <= 50000,
+              (logs?.utf16.count ?? 0) <= 200000 else {
             throw FeedbackFailure("The cloud feedback text is missing or too large")
         }
         if let screenshot = draft.screenshot { try FeedbackDraft.validateScreenshot(screenshot) }

@@ -20,6 +20,12 @@ final class CloudFeedbackReportTests: XCTestCase {
         XCTAssertEqual(report.title, "[REDACTED]"); XCTAssertEqual(report.description, "[REDACTED]")
         XCTAssertEqual(report.logs, "[REDACTED]"); XCTAssertNil(report.transcript)
     }
+    func testUnicodeLimitsMatchServerUTF16Counts() throws {
+        _ = try CloudFeedbackReport(reviewed: FeedbackDraft(kind: .bug, title: String(repeating: "🎛", count: 100)))
+        XCTAssertThrowsError(try CloudFeedbackReport(reviewed: FeedbackDraft(kind: .bug, title: String(repeating: "🎛", count: 101))))
+        XCTAssertThrowsError(try CloudFeedbackReport(reviewed: FeedbackDraft(kind: .bug, title: "Synthetic", description: String(repeating: "🎛", count: 10001))))
+        XCTAssertThrowsError(try CloudFeedbackReport(reviewed: FeedbackDraft(kind: .bug, title: "Synthetic"), reviewedLogs: String(repeating: "🎛", count: 100001)))
+    }
     func testInvalidScreenshotAndOversizedTextReject() {
         XCTAssertThrowsError(try CloudFeedbackReport(reviewed: FeedbackDraft(kind: .bug, title: "Synthetic", screenshot: "data:audio/mp3;base64,AAAA")))
         XCTAssertThrowsError(try CloudFeedbackReport(reviewed: FeedbackDraft(kind: .bug, title: "")))
