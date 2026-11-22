@@ -61,6 +61,7 @@ export function pickElement(): Promise<PointerInfo | null> {
   return new Promise((resolve) => {
     let settled = false;
     let picked: PointerInfo | null = null;
+    let control: HTMLButtonElement | null = null;
     // A manual popover sits in the top layer (reachable even while a modal
     // setup/picker dialog is open) WITHOUT inerting the app beneath it the
     // way showModal would — elementFromPoint must still see real elements.
@@ -90,7 +91,7 @@ export function pickElement(): Promise<PointerInfo | null> {
       overlay.style.pointerEvents = 'none';
       try {
         const target = document.elementFromPoint(event.clientX, event.clientY);
-        return target && !overlay.contains(target) ? target : null;
+        return target && !overlay.contains(target) && !target.closest('[data-feedback-private],.feedback-dialog,.feedback-entry') ? target : null;
       } finally {
         overlay.style.pointerEvents = '';
       }
@@ -110,6 +111,10 @@ export function pickElement(): Promise<PointerInfo | null> {
     });
     overlay.addEventListener('pointerdown', (event) => {
       event.preventDefault();
+      overlay.style.pointerEvents = 'none';
+      const raw = document.elementFromPoint(event.clientX, event.clientY);
+      overlay.style.pointerEvents = '';
+      control = raw?.closest('.feedback-bar button') as HTMLButtonElement | null;
       const target = underCursor(event);
       picked = target ? describeElement(target) : null;
       // Do not finish here: the paired click still fires and must be
@@ -118,7 +123,9 @@ export function pickElement(): Promise<PointerInfo | null> {
     const onClick = (event: Event) => {
       event.preventDefault();
       event.stopPropagation();
-      finish(picked);
+      // Excluded feedback chrome is not a pick, keep waiting for the app.
+      if (control && !control.disabled) { const button = control; finish(null); button.click(); }
+      else if (picked) finish(picked);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;

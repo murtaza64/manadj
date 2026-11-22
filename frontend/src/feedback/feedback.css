@@ -216,3 +216,18 @@
 }
 .feedback-bar .feedback-pointer-chip { margin-inline: var(--space-4); }
 .feedback-trail ul { margin: var(--space-6) 0 0; padding-left: var(--space-16); font-size: var(--font-small); color: var(--subtext0); }
+
+/* Fixed slots prevent tool-dependent controls moving the capture actions. */
+.feedback-bar { width: min(760px, calc(100vw - 32px)); display: grid; grid-template-columns: 1fr auto; grid-template-rows: 32px 174px; flex-wrap: nowrap; }
+.feedback-tools, .feedback-complete { display: flex; align-items: center; gap: 6px; }
+.feedback-tools .btn { min-width: 56px; }
+.feedback-complete { grid-column: 2; grid-row: 1; }
+.feedback-tool-panel { grid-column: 1 / -1; grid-row: 2; height: 174px; min-width: 0; overflow: auto; padding-top: 8px; }
+.feedback-tool-panel p { margin: 8px 0; }
+.feedback-tool-panel label { display: block; }
+.feedback-tool-panel textarea { display: block; width: 100%; box-sizing: border-box; resize: none; height: 58px; }
+.feedback-speech-controls { min-height: 40px; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.feedback-tool-status { margin-top: 8px; font-size: 12px; max-width: 100%; overflow: hidden; }
+@media (max-width: 520px) { .feedback-bar { grid-template-columns: 1fr; grid-template-rows: 32px 174px 32px; } .feedback-complete { grid-column: 1; grid-row: 3; justify-content: flex-end; } }
+
+.feedback-tool-panel textarea { background: var(--base); color: var(--text); border: 1px solid var(--surface1); font: inherit; padding: 6px; }

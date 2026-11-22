@@ -177,6 +177,7 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
   const captureLock = useRef(false);
   const actionLock = useRef(false);
   const dictationRef = useRef<Dictation | null>(null);
+  const speechGeneration = useRef(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const entry = useRef<HTMLSpanElement>(null);
   const id = useId();
@@ -191,31 +192,35 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
 
   useEffect(() => installModalKeyGuard(
     () => Boolean(dialog.current?.open || (document.querySelector('.feedback-overlay') && !document.querySelector('.feedback-picker'))),
-    () => { setPage(null); setOverlay(false); setDrawing(false); setPointer(null); setStrokes([]); },
+    () => { speechGeneration.current++; dictationRef.current?.stop(); setPage(null); setOverlay(false); setDrawing(false); setPointer(null); setStrokes([]); },
   ), []);
 
   function stopDictation() {
-    dictationRef.current?.stop();
+    speechGeneration.current++;
+    const previous = dictationRef.current;
     dictationRef.current = null;
+    previous?.stop();
     setDictating(null);
   }
   useEffect(() => {
-    if (!open) stopDictation();
-  }, [open]);
-  useEffect(() => () => { dictationRef.current?.stop(); }, []);
+    if (!open && !overlay) stopDictation();
+  }, [open, overlay]);
+  useEffect(() => () => { speechGeneration.current++; dictationRef.current?.stop(); }, []);
 
   function toggleDictation(field: 'title' | 'description') {
     if (dictating) { stopDictation(); if (dictating === field) return; }
+    const generation = ++speechGeneration.current;
+    let ended = false;
     try {
     const session = startDictation((text) => {
-      if (!text) return;
+      if (!text || generation !== speechGeneration.current) return;
       if (field === 'title') setTitle((current) => `${current.replace(/\s+$/, '')}${current ? ' ' : ''}${text}`.slice(0, 200));
       else setDescription((current) => `${current.replace(/\s+$/, '')}${current ? ' ' : ''}${text}`.slice(0, 10000));
-    }, () => { dictationRef.current = null; setDictating(null); },
+    }, () => { ended = true; if (generation !== speechGeneration.current) return; dictationRef.current = null; setDictating(null); },
     // Async service failures (denied permission, no mic, unreachable
     // service) used to reset the button silently; name the failure inline.
-    (reason) => setError(dictationFailureMessage(reason)));
-    if (session) { dictationRef.current = session; setDictating(field); }
+    (reason) => { if (generation === speechGeneration.current) setError(dictationFailureMessage(reason)); });
+    if (session && !ended && generation === speechGeneration.current) { dictationRef.current = session; setDictating(field); }
     } catch { setError("Dictation could not start. Use the keyboard or system dictation."); }
   }
 
@@ -265,10 +270,12 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
     setPointer(null);
     setStrokes([]); setAnnotating(false);
     setDrawing(true);
+    setError('');
     setOverlay(true);
   }
 
   function cancelOverlay() {
+    stopDictation();
     setOverlay(false); setDrawing(false);
     setPointer(null); setStrokes([]);
   }
@@ -276,6 +283,7 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
   async function finishCapture() {
     if (captureLock.current || actionLock.current) return;
     captureLock.current = true;
+    stopDictation();
     setCapturing(true);
     setError('');
     try {
@@ -293,7 +301,7 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
   async function begin(recapture = false) {
     if (captureLock.current || actionLock.current) return;
     if (capture && !recapture) { setPage('form'); return; }
-    if (payload && filingIssue !== 'conflict') return;
+    if (payload && filingIssue !== 'conflict') { setPage('form'); return; }
     if (!recapture) { openOverlay(); return; }
     captureLock.current = true;
     setCapturing(true);
@@ -424,6 +432,8 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
       <button className={`${entryClass}${page === 'review' ? ' btn-selected' : ''}`} aria-haspopup="dialog" aria-expanded={page === 'review'} title={listError || 'Reports awaiting dispatch, including pending or failed filing'} disabled={capturing || overlay} onClick={() => { setError(''); setPage('review'); }}>Queue ({pendingCount})</button>
     </span>
     {overlay && createPortal(<CaptureOverlay
+      description={description} onDescription={setDescription} canSpeak={canDictate}
+      speaking={dictating === 'description'} onSpeak={() => toggleDictation('description')} speechError={error}
       drawing={drawing} strokes={strokes} pointer={pointer}
       pointerText={pointer ? pointerLabel(pointer) : null} penColor={penColor}
       onStroke={(stroke) => setStrokes((current) => [...current, stroke])}
@@ -540,7 +550,7 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
         </>}
         </div>
         <footer className="feedback-footer">
-          <p className="text-tertiary">Files an issue with this text only; the screenshot, diagnostics and trail stay local. Agent work starts only when you send the batch.</p>
+          <p className="text-tertiary">Files the title, report text and routing metadata; screenshot, diagnostics and trail stay in the local feedback store. Agent work starts only when you send the batch.</p>
           <div className="feedback-actions">
           {!payload && <button className="btn btn-danger btn-mini" type="button" disabled={busy} onClick={() => {
             setCapture(null); setTitle(''); setDescription(''); setPointer(null); setStrokes([]); setAnnotating(false); setPage(null);
