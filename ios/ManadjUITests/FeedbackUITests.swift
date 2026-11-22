@@ -99,6 +99,7 @@ final class FeedbackUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["feedback-center-sending"].firstMatch.waitForExistence(timeout: 3))
         XCTAssertFalse(app.otherElements["feedback-review"].isHittable, "Retained draft must not be interactive while hidden")
         XCTAssertFalse(app.sheets.firstMatch.exists)
+        app.buttons["feedback-fixture-receipt-complete"].tap()
         let delivered = app.staticTexts["feedback-center-delivery"]
         XCTAssertTrue(delivered.waitForExistence(timeout: 8)); XCTAssertTrue(delivered.label.contains("RECEIVED ON DESKTOP"))
         XCTAssertTrue(app.otherElements["feedback-live-toolbar"].exists)

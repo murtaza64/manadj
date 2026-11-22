@@ -98,7 +98,9 @@ final class WorkspaceUITests: XCTestCase {
                 let list = app.descendants(matching: .any)["library-track-list"].firstMatch
                 if list.exists { list.swipeUp(velocity: .fast); list.swipeDown(velocity: .fast) }
                 let close = app.buttons["browser-close"]
-                XCTAssertTrue(close.isHittable); close.tap()
+                // A downward swipe at the top now intentionally dismisses.
+                if search.exists { XCTAssertTrue(close.isHittable); close.tap() }
+                XCTAssertFalse(search.exists, "Either native top pull or Close must settle dismissed")
                 let audio = app.buttons["center-tab-audio"]
                 let audioTab = audio.exists ? audio : app.segmentedControls.buttons["Audio"]
                 if audioTab.exists { audioTab.tap() }
@@ -479,6 +481,7 @@ final class WorkspaceUITests: XCTestCase {
         for delta in [CGVector(dx: 12, dy: -190), CGVector(dx: -18, dy: -200), CGVector(dx: 25, dy: 160), CGVector(dx: -20, dy: -150)] {
             let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: delta.dy < 0 ? 0.8 : 0.2))
             from.press(forDuration: 0.02, thenDragTo: from.withOffset(delta), withVelocity: .fast, thenHoldForDuration: 0)
+            print("BROWSER_SCROLL_DIAGNOSTIC delta=\(delta) frame=\(list.frame) value=\(list.value ?? "missing")")
             XCTAssertTrue(app.textFields["Search title, artist, file"].exists, "Scrolling must not close browser or load a track")
             XCTAssertFalse(app.alerts.firstMatch.exists, "Scrolling must not attempt unavailable track loads")
             for index in 0..<2 { XCTAssertFalse((app.buttons["deck-\(index)-info"].value as? String ?? "").contains("Test Tone")) }
