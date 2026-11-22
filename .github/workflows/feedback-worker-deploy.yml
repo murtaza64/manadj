@@ -19,7 +19,7 @@ jobs:
       - name: Check out reviewed immutable Worker source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 542089b3de88dc64b2219bc6a72078d16a8b1275
+          ref: 0f1d6a56ed57b0f98761606c72c83f3e0a454fc8
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
