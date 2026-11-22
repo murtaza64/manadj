@@ -25,9 +25,16 @@ struct SwipeToLoad<Content: View>: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Ink.decks[deck].opacity(0.2))
                     .accessibilityIdentifier("swipe-load-reveal")
             }
-            content.background(background).offset(x: dx)
-                .contentShape(Rectangle())
-                .onTapGesture(perform: tap)
+            if #available(iOS 18.0, *) {
+                rowContent.gesture(HorizontalLoadPan(changed: { travel in
+                    dx = max(-240, min(240, travel.x))
+                }, ended: { travel in
+                    let target = LoadSwipeIntent.target(travel: Double(travel.x), vertical: Double(travel.y), projected: Double(travel.x))
+                    withAnimation(.easeOut(duration: 0.16)) { dx = 0 }
+                    if target == 0 { loadA() }; if target == 1 { loadB() }
+                }, cancelled: { withAnimation(.easeOut(duration: 0.16)) { dx = 0 } }))
+            } else {
+                rowContent
                 .simultaneousGesture(DragGesture(minimumDistance: 12, coordinateSpace: .global)
                     .onChanged { value in
                         let t = value.translation
@@ -40,11 +47,49 @@ struct SwipeToLoad<Content: View>: View {
                         withAnimation(.easeOut(duration: 0.16)) { dx = 0 }
                         if target == 0 { loadA() }; if target == 1 { loadB() }
                     })
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: "Load selected deck", tap)
         .accessibilityAction(named: "Load to A", loadA)
         .accessibilityAction(named: "Load to B", loadB)
+    }
+    private var rowContent: some View {
+        content.background(background).offset(x: dx)
+            .contentShape(Rectangle()).onTapGesture(perform: tap)
+    }
+
+}
+
+/// Fail vertical recognition before beginning, so a row cannot claim a native
+/// list scroll merely because its SwiftUI DragGesture reached minimumDistance.
+@available(iOS 18.0, *)
+private struct HorizontalLoadPan: UIGestureRecognizerRepresentable {
+    var changed: (CGPoint) -> Void
+    var ended: (CGPoint) -> Void
+    var cancelled: () -> Void
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let pan = UIPanGestureRecognizer()
+        pan.maximumNumberOfTouches = 1
+        pan.delegate = context.coordinator
+        return pan
+    }
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+    func handleUIGestureRecognizerAction(_ pan: UIPanGestureRecognizer, context: Context) {
+        let travel = pan.translation(in: nil)
+        switch pan.state {
+        case .began, .changed: changed(travel)
+        case .ended: ended(travel)
+        case .cancelled, .failed: cancelled()
+        default: break
+        }
+    }
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+            guard let pan = gesture as? UIPanGestureRecognizer else { return false }
+            let travel = pan.translation(in: nil)
+            return abs(travel.x) > abs(travel.y) * 1.5
+        }
     }
 }
 

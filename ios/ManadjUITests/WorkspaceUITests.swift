@@ -481,6 +481,9 @@ final class WorkspaceUITests: XCTestCase {
         for delta in [CGVector(dx: 12, dy: -190), CGVector(dx: -18, dy: -200), CGVector(dx: 25, dy: 160), CGVector(dx: -20, dy: -150)] {
             let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: delta.dy < 0 ? 0.8 : 0.2))
             from.press(forDuration: 0.02, thenDragTo: from.withOffset(delta), withVelocity: .fast, thenHoldForDuration: 0)
+            if delta.dy < 0 {
+                XCTAssertFalse(app.staticTexts["Scroll fixture 082"].isHittable, "Upward row drag must actually scroll the initial top row offscreen")
+            }
             print("BROWSER_SCROLL_DIAGNOSTIC delta=\(delta) frame=\(list.frame) value=\(list.value ?? "missing")")
             XCTAssertTrue(app.textFields["Search title, artist, file"].exists, "Scrolling must not close browser or load a track")
             XCTAssertFalse(app.alerts.firstMatch.exists, "Scrolling must not attempt unavailable track loads")
