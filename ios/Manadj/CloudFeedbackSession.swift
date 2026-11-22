@@ -179,21 +179,30 @@ final class CloudFeedbackSession: NSObject, ASWebAuthenticationPresentationConte
     }
 
     private func authenticate(_ url: URL) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "earth.murtaza.manadj.ios") { [weak self] callback, error in
-                Task { @MainActor in
-                    self?.browser = nil
-                    if let callback { continuation.resume(returning: callback) }
-                    else if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin { continuation.resume(throwing: CancellationError()) }
-                    else { continuation.resume(throwing: FeedbackFailure("Cloud sign-in did not finish")) }
+        let currentGeneration = generation
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "earth.murtaza.manadj.ios") { [weak self] callback, error in
+                    Task { @MainActor in
+                        self?.browser = nil
+                        if let callback { continuation.resume(returning: callback) }
+                        else if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin { continuation.resume(throwing: CancellationError()) }
+                        else { continuation.resume(throwing: FeedbackFailure("Cloud sign-in did not finish")) }
+                    }
+                }
+                session.presentationContextProvider = self
+                session.prefersEphemeralWebBrowserSession = true
+                browser = session
+                if !session.start() {
+                    browser = nil
+                    continuation.resume(throwing: FeedbackFailure("Could not open cloud sign-in"))
                 }
             }
-            session.presentationContextProvider = self
-            session.prefersEphemeralWebBrowserSession = true
-            browser = session
-            if !session.start() {
-                browser = nil
-                continuation.resume(throwing: FeedbackFailure("Could not open cloud sign-in"))
+        } onCancel: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.generation == currentGeneration else { return }
+                self.browser?.cancel()
             }
         }
     }

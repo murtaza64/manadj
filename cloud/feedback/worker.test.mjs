@@ -31,6 +31,8 @@ test('owner signed assertion stores exactly one allowlisted immutable report', a
   assert.equal(puts[0][0], `reports/${report.id}.json`);
   assert.deepEqual(JSON.parse(puts[0][1]), report);
   assert.deepEqual(puts[0][2].onlyIf, { etagDoesNotMatch: '*' });
+  assert.match(puts[0][2].customMetadata.sha256, /^[0-9a-f]{64}$/);
+  assert.deepEqual(await r.json(), { version: 1, id: report.id, received: true, repeated: false });
 });
 for (const [name, claims, key] of [
   ['other account', { email: 'other@example.invalid' }],
@@ -67,7 +69,36 @@ test('body cap, string cap and route restrictions precede storage', async () => 
 });
 test('duplicate and failed writes do not claim a new receipt', async () => {
   for (const [result, expected] of [[null, 409], ['throw', 503]]) {
-    const e = env({ FEEDBACK_BUCKET: { put: async () => { if (result === 'throw') throw new Error('synthetic'); return result; } } });
+    const e = env({ FEEDBACK_BUCKET: {
+      put: async () => { if (result === 'throw') throw new Error('synthetic'); return result; },
+      head: async () => ({ customMetadata: {} }),
+    } });
     assert.equal((await handler(req(await token()), e)).status, expected);
   }
+});
+test('lost-response retry confirms identical report without overwrite or retention extension', async () => {
+  const objects = new Map(); let writes = 0;
+  const e = env({ FEEDBACK_BUCKET: {
+    put: async (key, body, options) => {
+      if (objects.has(key)) return null;
+      writes++; const object = { body, customMetadata: options.customMetadata, created: 'synthetic-original-time' };
+      objects.set(key, object); return object;
+    }, head: async key => objects.get(key),
+  } });
+  const jwt = await token();
+  assert.equal((await handler(req(jwt), e)).status, 201);
+  const reversed = Object.fromEntries(Object.entries(report).reverse());
+  const retry = await handler(req(jwt, reversed), e);
+  assert.equal(retry.status, 200);
+  assert.deepEqual(await retry.json(), { version: 1, id: report.id, received: true, repeated: true });
+  assert.equal(writes, 1); assert.equal(objects.size, 1);
+  const changed = await handler(req(jwt, { ...report, description: 'changed synthetic content' }), e);
+  assert.equal(changed.status, 409); assert.equal(writes, 1);
+  assert.equal(objects.get(`reports/${report.id}.json`).created, 'synthetic-original-time');
+  assert.equal(JSON.parse(objects.get(`reports/${report.id}.json`).body).description, report.description);
+});
+test('duplicate metadata read failure keeps draft unacknowledged', async () => {
+  const e = env({ FEEDBACK_BUCKET: { put: async () => null, head: async () => { throw new Error('synthetic'); } } });
+  const r = await handler(req(await token()), e);
+  assert.equal(r.status, 503); assert.equal(r.headers.get('Cache-Control'), 'no-store');
 });

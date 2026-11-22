@@ -27,8 +27,11 @@ non-PNG screenshots and bodies above 8 MiB are rejected. Client-side scrubbing
 and destination review are still required before enabling the app upload path.
 The Worker stores one immutable JSON object per report. There is no GET/list
 endpoint, public URL, arbitrary object key, automatic background send or
-retry-to-another-destination behavior. A 409 means the report id already exists,
-not permission to change it. An R2 failure must preserve the phone's local draft.
+retry-to-another-destination behavior. A successful receipt includes the report id.
+A lost-response retry of the same content confirms the existing receipt using an
+R2 metadata digest, without overwriting the object or extending retention. A 409
+means the id exists with different or unverifiable content, never permission to
+change it or clear a changed local draft. An R2 failure preserves the local draft.
 The feedback bucket's 30-day lifecycle applies here only. Future music library
 storage must be separate and durable with no automatic deletion.
 

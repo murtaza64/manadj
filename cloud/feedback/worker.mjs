@@ -7,6 +7,10 @@ const reply = (status, text) => new Response(text, { status, headers: {
   'X-Content-Type-Options': 'nosniff',
 } });
 
+const receipt = (status, id, repeated) => new Response(JSON.stringify({ version: 1, id, received: true, repeated }), {
+  status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
+});
+
 function configured(env) {
   if (env.UPLOADS_ENABLED !== 'true' || !env.FEEDBACK_BUCKET ||
       !env.POLICY_AUD || !env.OWNER_EMAIL || !env.TEAM_DOMAIN) return false;
@@ -90,11 +94,21 @@ export function createHandler(resolveForTest) {
     // One immutable report object keeps the 30-day lifecycle measured from Send.
     const key = `reports/${report.id}.json`;
     try {
-      const stored = await env.FEEDBACK_BUCKET.put(key, JSON.stringify(report), {
+      // Stable field order permits an exact same-content retry after a lost
+      // response. Head reads only receipt metadata, never returns report data.
+      // A matching UUID alone must not clear a changed draft on the phone.
+      const body = JSON.stringify(Object.fromEntries(Object.keys(report).sort().map(k => [k, report[k]])));
+      const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body))),
+        b => b.toString(16).padStart(2, '0')).join('');
+      const stored = await env.FEEDBACK_BUCKET.put(key, body, {
         onlyIf: { etagDoesNotMatch: '*' },
         httpMetadata: { contentType: 'application/json' },
+        customMetadata: { sha256: digest },
       });
-      return reply(stored ? 201 : 409, stored ? 'Received' : 'Report already received');
+      if (stored) return receipt(201, report.id, false);
+      const existing = await env.FEEDBACK_BUCKET.head(key);
+      if (existing?.customMetadata?.sha256 === digest) return receipt(200, report.id, true);
+      return reply(409, 'Report id already exists with different or unverified content');
     } catch { return reply(503, 'Could not save report; keep the local copy'); }
   };
 }
