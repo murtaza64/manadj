@@ -374,6 +374,8 @@ export function DeckWaveform({
       else idleTimer = window.setTimeout(loop, 250);
     };
     const loop = () => {
+      raf = 0;
+      idleTimer = 0;
       const snap = engine.getSnapshot();
       const rawPlayhead = engine.getPlayhead();
       const playhead = waveformClock.getPlayhead();
@@ -425,8 +427,17 @@ export function DeckWaveform({
       }
       schedule(advancing || snap.scratching || didDraw);
     };
+    // Like the GL body, the underlay must leave its idle poll on every
+    // transport gesture. Queue a frame, not a synchronous draw: the engine
+    // publishes its gesture before the corresponding playhead mutation.
+    const unsubscribe = engine.addTransportEventListener(() => {
+      window.clearTimeout(idleTimer);
+      idleTimer = 0;
+      if (!raf) raf = requestAnimationFrame(loop);
+    });
     raf = requestAnimationFrame(loop);
     return () => {
+      unsubscribe();
       cancelAnimationFrame(raf);
       window.clearTimeout(idleTimer);
     };
