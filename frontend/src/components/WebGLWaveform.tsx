@@ -23,6 +23,7 @@ export interface ScrubTransport {
 }
 
 interface WebGLWaveformProps {
+  playheadState?: 'held' | 'playing' | 'paused';
   trackId: number | null;
   /** Per-stem waveforms (stems #213): GPU-side mask compositing — ahead
    * of the playhead the top lobe shows the live-mask composite and the
@@ -84,6 +85,7 @@ interface WebGLWaveformProps {
 
 export default function WebGLWaveform({
   trackId,
+  playheadState,
   stemWaveforms = null,
   stemMaskAt = null,
   transparentBackground = false,
@@ -140,6 +142,8 @@ export default function WebGLWaveform({
     wakeKey,
     subscribeWake,
   });
+
+  useEffect(() => { rendererRef.current?.setPlayheadState(playheadState); }, [playheadState, waveformData]);
 
   // Apply the shared time-zoom (also after re-init when new data lands).
   useEffect(() => {

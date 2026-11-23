@@ -16,6 +16,7 @@ import { browseHostFor, sharedBrowseHandle } from '../browseHost';
 import { PERSISTED_SETTING_KEYS } from '../../settings/persistedSettings';
 import type { PlayGuideFrame } from '../../performance/playGuideModel';
 import type { Track } from '../../types';
+import {subscribeLoadBlocked} from '../../performance/deckActionFeedback';
 import { PerformanceView } from './PerformanceView';
 import { HFader, Knob } from './MixerStrip';
 import { dispatchFollow } from '../../follow/followStore';
@@ -295,19 +296,16 @@ describe('Performance library keyboard focus', () => {
     press('k'); expect(handle.navigate).toHaveBeenCalledTimes(3);
   });
 
-  it('loads physical decks, keeps focus, respects the lock, and disables C/D in two-deck layout', () => {
-    browse(); render(); press('Tab');
-    for (const key of ['a', 'b', 'c', 'd']) press(key);
-    expect(decks.A.loadTrack).toHaveBeenCalledOnce();
-    expect(decks.B.loadTrack).toHaveBeenCalledOnce();
-    expect(decks.C.loadTrack).not.toHaveBeenCalled(); // playing
-    expect(decks.D.loadTrack).toHaveBeenCalledOnce();
-    expect(isLibrary()).toBe(true);
-    press('a', { repeat: true }); expect(decks.A.loadTrack).toHaveBeenCalledOnce();
-    click('2 DECKS'); press('c'); press('d');
-    expect(decks.A.loadTrack).toHaveBeenCalledOnce();
-    expect(decks.B.loadTrack).toHaveBeenCalledOnce();
-    expect(decks.D.loadTrack).toHaveBeenCalledOnce();
+  it('accepted load returns keyboard to its deck; refusal keeps browse focus; load key must release', () => {
+    const refused=vi.fn();const off=subscribeLoadBlocked(refused);
+    browse();render();press('Tab');
+    press('c',{code:'KeyC'});expect(decks.C.loadTrack).not.toHaveBeenCalled();expect(isLibrary()).toBe(true);expect(refused).toHaveBeenCalledWith('C');off();
+    act(()=>document.body.dispatchEvent(new KeyboardEvent('keyup',{key:'c',code:'KeyC',bubbles:true})));
+    act(()=>document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'a',code:'KeyA',bubbles:true,cancelable:true})));expect(decks.A.loadTrack).toHaveBeenCalledOnce();expect(isLibrary()).toBe(false);
+    expect(press('a',{code:'KeyA',repeat:true}).defaultPrevented).toBe(true);
+    act(()=>document.body.dispatchEvent(new KeyboardEvent('keyup',{key:'a',code:'KeyA',bubbles:true})));
+    expect(press('a',{code:'KeyA'}).defaultPrevented).toBe(false);
+    press('Tab');press('b');expect(decks.B.loadTrack).toHaveBeenCalledOnce();expect(isLibrary()).toBe(false);
   });
 
   it('toggles Follow using loaded-track availability, not the browse selection', () => {

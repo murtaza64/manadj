@@ -13,6 +13,9 @@
  * Habit controls never mirror: transport order, slider polarity (right =
  * faster) and the foot's readout/button order are identical on every Deck.
  */
+import {waveformFillTimeAt} from '../../performance/waveformFillView';
+import {useHeardWaveformClock} from '../../performance/useHeardWaveformClock';
+import {OutputDelayCue} from '../../performance/OutputDelayCue';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
@@ -23,6 +26,7 @@ import { takeoverKey } from '../../midi/takeoverFeedback';
 import { useScrubTransport } from '../../hooks/useScrubTransport';
 import { useViewActive } from '../../contexts/viewActive';
 import WebGLWaveform from '../WebGLWaveform';
+import {DeckActionTrail, playbackVisualState} from '../../performance/DeckActionTrail';
 import WaveformMinimap from '../WaveformMinimap';
 import { useStemWaveforms } from '../../waveform/useStemWaveform';
 import { ALL_ON, stemMaskHistoryFor } from '../../performance/stemMaskHistory';
@@ -45,7 +49,7 @@ import { DeckDropOverlay } from '../../selection/DeckDropOverlay';
 import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
 import { DECK_COLORS, hexToRgbTriplet } from '../../theme/deckColors';
 import { AUDIBILITY_FILL_ALPHA } from '../../theme/markers';
-import { PLAY_MARKER_FRACTION, trackWindowSeconds } from '../../utils/waveformZoom';
+import { trackWindowSeconds } from '../../utils/waveformZoom';
 import { channelFaderToGain, trimToGain } from '../../playback/mixerMath';
 import { createStripHistory } from '../../performance/stripHistory';
 import type { StripValues } from '../../performance/stripHistory';
@@ -217,10 +221,12 @@ export function DeckWaveform({
   onVisibleSecondsChange: (seconds: number) => void;
 }) {
   const { deck, engine, loadedTrack, beatjump } = useDeck();
+  const waveformClock=useHeardWaveformClock(engine);
   const beatjumpBeats = useBeatjumpBeats(beatjump);
   const controlFocus = useControlFocus();
   const focused = controlFocus.left === deck || controlFocus.right === deck;
   const ready = useDeckReady();
+  const visualState = useDeckSnapshot(playbackVisualState);
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
   const loop = useDeckSnapshot((s) => s.loop);
   // Any audibly-advancing state pins the waveform loop at 60fps and wakes it
@@ -368,12 +374,13 @@ export function DeckWaveform({
     };
     const loop = () => {
       const snap = engine.getSnapshot();
-      const playhead = engine.getPlayhead();
+      const rawPlayhead = engine.getPlayhead();
+      const playhead = waveformClock.getPlayhead();
       const slip = engine.getSlipReturnPlayhead();
       const live = liveStrip();
       const advancing = snap.playing || snap.previewing;
-      historyRef.current.record(playhead, advancing, live);
-      stemHistory.record(playhead, advancing, liveStemMask());
+      historyRef.current.record(rawPlayhead, advancing, live);
+      stemHistory.record(rawPlayhead, advancing, liveStemMask());
 
       const canvas = fillCanvasRef.current;
       let didDraw = false;
@@ -402,9 +409,8 @@ export function DeckWaveform({
               const step = 2; // px per column — a translucent wash, not a plot
               const views = slip === null ? [[playhead, 0, h]] : [[playhead, 0, h / 2], [slip, h / 2, h]];
               for (const [position, y0, y1] of views) {
-                const start = position - span * PLAY_MARKER_FRACTION;
                 for (let x = 0; x < w; x += step) {
-                  const t = start + ((x + step / 2) / w) * span;
+                  const t = waveformFillTimeAt(position,span,x+step/2,w);
                   if (t < 0 || t > snap.duration) continue;
                   const v = historyRef.current.at(t, live);
                   const bar = channelFaderToGain(v.fader) * h;
@@ -423,7 +429,7 @@ export function DeckWaveform({
       cancelAnimationFrame(raf);
       window.clearTimeout(idleTimer);
     };
-  }, [engine, deck, liveStrip, viewActive, channelState]);
+  }, [engine, deck, liveStrip, viewActive, channelState, waveformClock]);
 
   // Machine tenure (Conductor / session replay): the control-focus
   // indicators are meaningless on the waveforms while a machine holds the
@@ -439,17 +445,20 @@ export function DeckWaveform({
     <div
       className={`perf-wave-row deck-${deck.toLowerCase()}${showFocus ? ' focused' : ''}${machineHeld ? ' machine' : ''}`}
       {...dropHandlers}
+      data-playback-state={visualState}
     >
       {/* Fader area fill UNDERLAY (see fillCss note): the GL strip has a
           transparent background, so the fill shows through background
           pixels only — the waveform body is never tinted. */}
       <canvas ref={fillCanvasRef} className="perf-wave-fader-fill" />
+      <OutputDelayCue engine={engine} active={viewActive}/>
       <WebGLWaveform
+        playheadState={visualState}
         trackId={loadedTrack?.id ?? null}
         stemWaveforms={stemWaveforms}
         stemMaskAt={stemMaskAt}
         transparentBackground
-        clock={engine}
+        clock={waveformClock}
         cuePoint={cuePoint}
         loop={loop}
         transport={transport}
@@ -464,6 +473,7 @@ export function DeckWaveform({
         modulationSplit
         getSlipReturnPlayhead={getSlipReturnPlayhead}
       />
+      <DeckActionTrail engine={engine} mixer={mixer} deck={deck} active={viewActive} trackId={loadedTrack?.id ?? null} />
       {showFocus ? <div className="perf-wave-focus-frame" /> : null}
       <DeckDropOverlay deck={deck} state={dropState} />
     </div>
@@ -1139,6 +1149,7 @@ export function DeckPanel({
   lockHint?: boolean;
 }) {
   const { deck, engine } = useDeck();
+  const waveformClock=useHeardWaveformClock(engine);
   const controlFocus = useControlFocus();
   const focused = controlFocus.left === deck || controlFocus.right === deck;
   const { dropState, dropHandlers } = useDeckDropTarget(deck);
@@ -1184,7 +1195,7 @@ export function DeckPanel({
             stemWaveforms={stemWaveforms}
             stemMaskAt={stemMaskAt}
             wakeKey={minimapWake}
-            clock={engine}
+            clock={waveformClock}
             cuePoint={cuePoint}
             loop={loop}
           onSeek={(t) => { if (deckReadyNow(engine, track?.id ?? null)) engine.seek(t); }}

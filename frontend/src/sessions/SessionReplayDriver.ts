@@ -1,3 +1,4 @@
+import {withoutControlFeedback} from '../playback/controlFeedbackOrigin';
 /**
  * Session replay driver (sessions 05, ADR 0033): plays a ReplayPlan
  * through the SHARED live decks — the same engine that made the sound.
@@ -1053,8 +1054,8 @@ export class SessionReplayDriver {
   private self<T>(fn: () => T): T {
     this.selfOps += 1;
     try {
-      return this.engines.A.withScratchSchedule(() => this.engines.B.withScratchSchedule(() =>
-        this.engines.C.withScratchSchedule(() => this.engines.D.withScratchSchedule(fn))));
+      return withoutControlFeedback(() => this.engines.A.withScratchSchedule(() => this.engines.B.withScratchSchedule(() =>
+        this.engines.C.withScratchSchedule(() => this.engines.D.withScratchSchedule(fn)))));
     } finally {
       this.selfOps -= 1;
     }

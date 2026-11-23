@@ -1,0 +1,4 @@
+.perf-output-delay{position:absolute;right:8px;top:4px;z-index:5;display:flex;align-items:center;gap:5px;background:var(--crust);color:var(--warning);font-size:11px;padding:3px 5px;pointer-events:none}
+.perf-output-delay>span{width:8px;height:8px;border:1px solid currentColor;border-right-color:transparent;border-radius:50%;animation:output-delay-spin .65s linear infinite}
+@keyframes output-delay-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.perf-output-delay>span{animation:none}}

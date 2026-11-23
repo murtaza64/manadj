@@ -15,6 +15,8 @@ import { MixerContext } from '../../hooks/useMixer';
 import { dispatchPerformanceFxKey, isPerformanceFxKey } from './performanceFxKeys';
 import { reportTutorialAction } from '../../tutorials/engine';
 
+import {subscribeAcceptedPerformanceLoad} from '../../performance/acceptedLoad';
+
 export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
   deckCount: 2 | 4;
   left: ChannelId;
@@ -38,6 +40,10 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
     }
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   };
+
+  useEffect(()=>subscribeAcceptedPerformanceLoad(()=>{
+    if(active && libraryFocus)changeFocus(false);
+  }));
 
   useEffect(() => {
     if (!active) return;

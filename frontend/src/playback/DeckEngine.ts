@@ -21,6 +21,7 @@ import { initialTransportState, isAudioRunning, reduceTransport } from './transp
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
 import { heardSeconds } from './heardStore';
+import { HeardClockHistory } from './heardClock';
 import { getCueMode } from './cueModeStore';
 import { addBeats, beatPhaseTarget, beatsBetween, crossDeckLaunchTarget } from './quantize';
 import type { LaunchReference } from './quantize';
@@ -60,6 +61,12 @@ export interface DeckTransportGesture {
   filter?: ScratchFilter;
   trackDuration?: number;
   audioTime?: number;
+}
+
+/** Display-only accepted controls. Separate from capture's discontinuity evidence. */
+export interface DeckControlFeedback {
+  kind: 'play' | 'pause' | 'cue' | 'hotCue' | 'loop' | 'loopExit' | 'pending';
+  value?: number;
 }
 
 export interface DeckTrackInfo {
@@ -223,6 +230,41 @@ export class DeckEngine {
   private anchorPosition = 0;
   private anchorCtxTime = 0;
 
+  /** Display-only history. Raw getPlayhead remains transport authority. */
+  private readonly heardDisplayHistory = new HeardClockHistory();
+  private heardDisplayContext: AudioContext | null = null;
+  private recordingHeardDisplay = false;
+  private heardDisplayStartedAt: number | null = null;
+
+  private recordHeardDisplay(): void {
+    if (!this.audio || this.recordingHeardDisplay) return;
+    this.recordingHeardDisplay = true;
+    try {
+    const ctx = this.audio.ctx;
+    if (this.heardDisplayContext !== ctx) {
+      this.heardDisplayHistory.reset(); this.heardDisplayContext = ctx;
+    }
+    const pending = this.pendingStart?.when !== undefined ? this.pendingStart : null;
+    const moving = this.runningStartId !== null || this.leadInActive || this.phantomActive || pending !== null;
+    const loop = this.transport.loop;
+    this.heardDisplayHistory.record({ at: ctx.currentTime, position: this.getPlayhead(),
+      rate: this.currentRate(), moving: moving && !this.scratch,
+      loop: loop ? { start: loop.start, end: loopFoldEnd(loop, this.buffer?.duration ?? loop.end, this.phantomActive) } : null,
+      min: -MAX_LEAD_IN_SECONDS, max: this.phantomActive ? Number.MAX_SAFE_INTEGER : this.buffer?.duration ?? 0 });
+    } finally { this.recordingHeardDisplay = false; }
+  }
+
+  getHeardDisplayWaitSeconds(latencySeconds:number):number {
+    if(!this.audio || this.heardDisplayStartedAt===null || this.scratch || !isAudioRunning(this.transport))return 0;
+    return Math.max(0,this.heardDisplayStartedAt+Math.max(0,Math.min(2,latencySeconds))-this.audio.ctx.currentTime);
+  }
+
+  /** Display seam, never used by audio, capture or gesture targeting. */
+  getHeardDisplayPlayhead(latencySeconds: number): number {
+    if (!this.audio || this.scratch) return this.getPlayhead();
+    return this.heardDisplayHistory.read(this.audio.ctx.currentTime, latencySeconds) ?? this.getPlayhead();
+  }
+
   private pitchPercent = 0;
   /** Momentary nudge multiplier on top of pitch; 0 when released. */
   private bendPercent = 0;
@@ -284,6 +326,16 @@ export class DeckEngine {
   addTransportEventListener(listener: (e: DeckTransportGesture) => void): () => void {
     this.transportEventListeners.add(listener);
     return () => this.transportEventListeners.delete(listener);
+  }
+
+  private controlFeedbackListeners = new Set<(e: DeckControlFeedback) => void>();
+  addControlFeedbackListener(listener: (e: DeckControlFeedback) => void): () => void {
+    this.controlFeedbackListeners.add(listener);
+    return () => this.controlFeedbackListeners.delete(listener);
+  }
+
+  private emitControlFeedback(e: DeckControlFeedback): void {
+    for (const listener of this.controlFeedbackListeners) listener(e);
   }
 
   private fireTransportEvent(e: DeckTransportGesture): void {
@@ -348,6 +400,8 @@ export class DeckEngine {
     this.clearScratchSchedule();
     this.slipLoop = null;
     this.cancelScratch();
+    this.heardDisplayHistory.reset();
+    this.heardDisplayStartedAt=null;
     this.loadAbort?.abort();
     const abort = new AbortController();
     this.loadAbort = abort;
@@ -499,19 +553,21 @@ export class DeckEngine {
       if (!this.pendingPlay) {
         this.pendingPlay = true;
         this.emit();
+        this.emitControlFeedback({kind: 'pending'});
       }
       return;
     }
-    this.dispatch({ type: 'play' });
+    this.dispatch({ type: 'play' }, undefined, undefined, true);
   }
 
   pause(): void {
     if (this.pendingPlay) {
       this.pendingPlay = false;
       this.emit();
+      this.emitControlFeedback({kind: 'pause'});
       return;
     }
-    this.dispatch({ type: 'pause' });
+    this.dispatch({ type: 'pause' }, undefined, undefined, true);
   }
 
   /** eventTime is a DOM event timestamp (performance.now's clock), not dispatch time. */
@@ -519,9 +575,10 @@ export class DeckEngine {
     if (this.isLoading()) {
       this.pendingPlay = !this.pendingPlay;
       this.emit();
+      this.emitControlFeedback({kind: this.pendingPlay ? 'pending' : 'pause'});
       return;
     }
-    this.dispatch({ type: 'toggle-play' }, undefined, eventTime);
+    this.dispatch({ type: 'toggle-play' }, undefined, eventTime, true);
   }
 
   seek(seconds: number): void {
@@ -686,7 +743,7 @@ export class DeckEngine {
   }
 
   cueDown(): void {
-    this.dispatch({ type: 'cue-down' });
+    this.dispatch({ type: 'cue-down' }, undefined, undefined, true);
   }
 
   cueUp(): void {
@@ -696,7 +753,7 @@ export class DeckEngine {
   hotCueDown(slot: number, timeSeconds: number | null): void {
     if (!this.buffer) return;
     const time = timeSeconds === null ? null : this.clampTime(timeSeconds);
-    this.dispatch({ type: 'hot-cue-down', slot, time });
+    this.dispatch({ type: 'hot-cue-down', slot, time }, undefined, undefined, true);
     // Capture tap AFTER the reducer: a quantized trigger lands at cue +
     // intra-beat phase, not the raw cue time — the recorded evidence must
     // be the actual landing (Take vectorization measures jump deltas).
@@ -772,7 +829,7 @@ export class DeckEngine {
   /** Auto-loop engage/release (looping 03). Inert on gridless Tracks (the
    * reducer refuses to guess); the playhead never moves on engage. */
   toggleLoop(): void {
-    this.dispatch({ type: 'loop-toggle' });
+    this.dispatch({ type: 'loop-toggle' }, undefined, undefined, true);
   }
 
   /** Resize — halve/double or absolute set-length (looping 04,
@@ -791,7 +848,7 @@ export class DeckEngine {
       this.emit();
       return;
     }
-    this.dispatch({ type: 'loop-resize', change });
+    this.dispatch({ type: 'loop-resize', change }, undefined, undefined, true);
   }
 
   /** Resize the RUNNING loop only (midi-performance-ops 03): returns
@@ -820,7 +877,7 @@ export class DeckEngine {
       this.emit();
       return;
     }
-    this.dispatch({ type: 'loop-preset', beats });
+    this.dispatch({ type: 'loop-preset', beats }, undefined, undefined, true);
   }
 
   // ── Sound controls ─────────────────────────────────────────────────────
@@ -1345,7 +1402,7 @@ export class DeckEngine {
 
   /** `ctx` overrides the ambient gesture context — machine-grade starts
    * (playAt) pass an unquantized one; performer gestures use the default. */
-  private dispatch(event: TransportEvent, ctx?: TransportContext, eventTime?: number): void {
+  private dispatch(event: TransportEvent, ctx?: TransportContext, eventTime?: number, displayControl = false): void {
     if (!this.buffer) return;
     this.endScratch();
     if (DeckEngine.CUE_FREEZING_EVENTS.has(event.type)) {
@@ -1430,6 +1487,22 @@ export class DeckEngine {
       this.syncLoopToSource();
     }
     this.emit();
+
+    // Emit one semantic symbol per accepted human entrypoint, never from
+    // generic snapshot diffs (EOF/decode/replay can change those too).
+    if (displayControl) {
+      let feedback: DeckControlFeedback | undefined;
+      if ((event.type === 'play' || event.type === 'pause' || event.type === 'toggle-play') && next.playing !== synced.playing)
+        feedback = {kind: next.playing ? 'play' : 'pause'};
+      else if (event.type === 'cue-down' && (next.previewing !== synced.previewing || cueChanged || next.playhead !== synced.playhead || next.playing !== synced.playing))
+        feedback = {kind: 'cue'};
+      else if (event.type === 'hot-cue-down' && event.time !== null)
+        feedback = {kind: 'hotCue', value: event.slot + 1};
+      else if (loopControl || event.type === 'loop-resize') {
+        if (next.loop !== synced.loop) feedback = next.loop ? {kind:'loop',value:next.loop.lengthBeats} : {kind:'loopExit'};
+      }
+      if (feedback) this.emitControlFeedback(feedback);
+    }
 
     // Cue placement and cue-walk landings persist the Deck Cue.
     if (
@@ -1669,6 +1742,8 @@ export class DeckEngine {
     this.runningStartId = startId;
     this.anchorPosition = offset;
     this.anchorCtxTime = startedAt;
+    this.heardDisplayStartedAt = startedAt;
+    this.recordHeardDisplay();
   }
 
   /** Build the worklet node for `ctx` (addModule + construction — the one
@@ -1701,6 +1776,9 @@ export class DeckEngine {
           return;
         }
         this.beginStart(node, audio.input, pending.at, pending.when);
+        // The initial dispatch ran before this asynchronous clock anchor existed.
+        // Notify display subscribers now, without another control-feedback event.
+        this.emit();
       })
       .catch((err) => {
         this.sourceNodeCreating = false;
@@ -1882,6 +1960,7 @@ export class DeckEngine {
   }
 
   private emit(): void {
+    this.recordHeardDisplay();
     this.snapshot = this.buildSnapshot();
     for (const listener of this.listeners) listener();
   }
