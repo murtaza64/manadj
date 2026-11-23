@@ -1,0 +1,30 @@
+name: Local Speech preparation compile
+on:
+  pull_request:
+    paths:
+      - 'desktop/local-speech*'
+      - '.github/workflows/local-speech-checks.yml'
+permissions:
+  contents: read
+concurrency:
+  group: local-speech-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compile-only:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Synthetic supervisor lifecycle tests
+        run: node --test desktop/local-speech.test.js
+      - name: Compile isolated helper without executing or microphone access
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun swiftc -swift-version 5 -framework Speech -framework AVFoundation desktop/local-speech.swift -o "$RUNNER_TEMP/manadj-local-speech"
+          test -x "$RUNNER_TEMP/manadj-local-speech"
