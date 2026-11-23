@@ -18,9 +18,10 @@ export class Ledger {
         !Array.isArray(s.snapshots) || s.snapshots.length > LIMITS.snapshots) reject(503, 'control_invalid');
     let total = 0; const ids = new Set();
     for (const x of s.snapshots) {
-      if (!exact(x, ['id', 'manifestHash', 'total', 'createdAt', 'committed', 'parts']) || !validID(x.id) || ids.has(x.id) ||
+      if (!exact(x, ['id', 'manifestHash', 'total', 'createdAt', 'committed', 'deleting', 'parts']) || !validID(x.id) || ids.has(x.id) ||
           !validHash(x.manifestHash) || !integer(x.total, 1, LIMITS.snapshotBytes) ||
           typeof x.createdAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(x.createdAt) || typeof x.committed !== 'boolean' ||
+          typeof x.deleting !== 'boolean' ||
           !Array.isArray(x.parts) || !integer(x.parts.length, 1, LIMITS.parts)) reject(503, 'control_invalid');
       let partTotal = 0;
       for (const p of x.parts) {
@@ -57,12 +58,15 @@ export class Ledger {
       this.debit(s, 'writes');
       const found = s.snapshots.find(x => x.id === manifest.snapshotId);
       if (found) {
+        // A deleting snapshot can never be retried back into existence. The
+        // deletion finishes and a fresh id is required for new data.
+        if (found.deleting) reject(409, 'snapshot_deleting');
         if (found.manifestHash !== hash) reject(409, 'snapshot_immutable');
         return receipt(found);
       }
       if (s.snapshots.length >= LIMITS.snapshots || s.snapshots.reduce((n, x) => n + x.total, 0) + total > LIMITS.storedBytes) reject(409, 'storage_limit');
       const x = { id: manifest.snapshotId, manifestHash: hash, total, createdAt: new Date(now).toISOString(),
-        committed: false, parts: manifest.parts.map(p => [p.bytes, p.sha256, false]) };
+        committed: false, deleting: false, parts: manifest.parts.map(p => [p.bytes, p.sha256, false]) };
       s.snapshots.push(x); return receipt(x);
     });
   }
@@ -70,7 +74,9 @@ export class Ledger {
     return this.change(s => {
       this.debit(s, 'writes');
       const x = s.snapshots.find(x => x.id === id);
-      if (!x || !x.parts[index]) reject(404, 'snapshot_not_found');
+      if (!x) reject(404, 'snapshot_not_found');
+      if (x.deleting) reject(409, 'snapshot_deleting');
+      if (!x.parts[index]) reject(404, 'snapshot_not_found');
       const p = x.parts[index];
       if (p[0] !== size || p[1] !== hash) reject(409, 'part_immutable');
       // Identical retries remain possible after commit. No new bytes can be admitted.
@@ -80,6 +86,7 @@ export class Ledger {
   async markStored(id, index, size, hash) {
     return this.change(s => {
       const x = s.snapshots.find(x => x.id === id), p = x?.parts[index];
+      if (x?.deleting) reject(409, 'snapshot_deleting');
       if (!p || p[0] !== size || p[1] !== hash) reject(409, 'part_immutable');
       p[2] = true; return { stored: true };
     });
@@ -89,6 +96,7 @@ export class Ledger {
       this.debit(s, 'writes');
       const x = s.snapshots.find(x => x.id === id);
       if (!x) reject(404, 'snapshot_not_found');
+      if (x.deleting) reject(409, 'snapshot_deleting');
       if (x.parts.some(p => !p[2])) reject(409, 'snapshot_incomplete');
       x.committed = true; return receipt(x);
     });
@@ -96,17 +104,41 @@ export class Ledger {
   async read(id = null, index = null) {
     return this.change(s => {
       this.debit(s, 'reads');
-      if (id === null) return s.snapshots.map(x => ({ snapshotId: x.id, state: x.committed ? 'committed' : 'incomplete',
+      if (id === null) return s.snapshots.map(x => ({ snapshotId: x.id,
+        state: x.deleting ? 'deleting' : x.committed ? 'committed' : 'incomplete',
         bytes: x.total, createdAt: x.createdAt, parts: x.parts.length }));
       const x = s.snapshots.find(x => x.id === id);
+      if (x?.deleting) reject(409, 'snapshot_deleting');
       if (!x || !x.committed) reject(404, 'snapshot_not_found');
       if (index !== null && !x.parts[index]) reject(404, 'part_not_found');
       return index === null ? receipt(x) : { bytes: x.parts[index][0], sha256: x.parts[index][1] };
     });
   }
+  // Explicit owner deletion, phase one: tombstone the entry first so a crash
+  // or concurrency race never leaves a readable snapshot with missing parts.
+  async startDelete(id) {
+    return this.change(s => {
+      this.debit(s, 'writes');
+      const x = s.snapshots.find(x => x.id === id);
+      if (!x) return { found: false, parts: 0, bytes: 0 };
+      const summary = { found: true, parts: x.parts.length, bytes: x.total };
+      x.deleting = true; return summary;
+    });
+  }
+  // Phase two runs only after every part object is verified absent, so the
+  // reservation bytes/slots are released last and a retry can always resume.
+  async finishDelete(id) {
+    return this.change(s => {
+      this.debit(s, 'writes');
+      const at = s.snapshots.findIndex(x => x.id === id);
+      if (at < 0) return { found: false };
+      if (!s.snapshots[at].deleting) reject(409, 'snapshot_delete_not_started');
+      s.snapshots.splice(at, 1); return { found: true };
+    });
+  }
 }
 export function receipt(x) {
-  return { schema: SCHEMA, snapshotId: x.id, state: x.committed ? 'committed' : 'incomplete', bytes: x.total,
+  return { schema: SCHEMA, snapshotId: x.id, state: x.deleting ? 'deleting' : x.committed ? 'committed' : 'incomplete', bytes: x.total,
     createdAt: x.createdAt, manifestSha256: x.manifestHash,
     parts: x.parts.map((p, index) => ({ index, bytes: p[0], sha256: p[1], stored: p[2] })) };
 }

@@ -16,6 +16,11 @@ class Bucket {
     return { size: copy.length, etag: x.etag, customMetadata: x.customMetadata,
       text: async () => new TextDecoder().decode(copy), arrayBuffer: async () => copy.buffer };
   }
+  async delete(key) {
+    this.calls.push(['delete', key]); await Promise.resolve();
+    if (this.hook) await this.hook(key, undefined, { delete: true });
+    this.objects.delete(key);
+  }
   async put(key, value, options = {}) {
     this.calls.push(['put', key]); await Promise.resolve();
     if (this.hook) await this.hook(key, value, options);
@@ -320,4 +325,66 @@ test('a lost control finalization never falsely commits and exact retry can fini
 test('metadata traversal budget is shared across rows and fields', () => {
   const value = { schema: SCHEMA, table: 'session_chunks', rows: Array.from({ length: 6 }, () => ({ events_json: Array(4000).fill(0) })) };
   assert.throws(() => validatePart(value), /structured_metadata_limit/);
+});
+
+test('explicit deletion removes a committed snapshot, verifies absence and is idempotent on retry', async () => {
+  const f = fixture(), values = [part(), { schema: SCHEMA, table: 'session_chunks', rows: [{ id: 1, events_json: [{ t: 1, kind: 'load', trackId: 1 }] }] }];
+  await complete(f, values);
+  const result = await f.call(`/v1/snapshots/${ID}`, 'DELETE');
+  assert.equal(result.status, 200);
+  assert.deepEqual(await result.json(), { snapshotId: ID, deleted: true, parts: 2, bytes: values.reduce((n, v) => n + bytes(v).length, 0) });
+  assert.equal(await f.bucket.get(partKey(ID, 0)), null); assert.equal(await f.bucket.get(partKey(ID, 1)), null);
+  assert.deepEqual((await (await f.call('/v1/snapshots')).json()).snapshots, []);
+  assert.equal((await f.call(`/v1/snapshots/${ID}`)).status, 404);
+  assert.equal((await f.call(`/v1/snapshots/${ID}/parts/0`)).status, 404);
+  const retry = await f.call(`/v1/snapshots/${ID}`, 'DELETE');
+  assert.equal(retry.status, 200); assert.deepEqual(await retry.json(), { snapshotId: ID, deleted: true, parts: 0, bytes: 0 });
+  const { state } = await new Ledger(f.bucket, 'synthetic-owner', NOW).load();
+  assert.equal(state.snapshots.length, 0); assert.equal(state.writes, 7);
+});
+test('deletion releases an incomplete reservation and never touches other snapshots', async () => {
+  const f = fixture(); await prepare(f); await complete(f, [part()], ID2);
+  const result = await f.call(`/v1/snapshots/${ID}`, 'DELETE');
+  assert.equal(result.status, 200); assert.deepEqual(await result.json(), { snapshotId: ID, deleted: true, parts: 1, bytes: bytes(part()).length });
+  const list = (await (await f.call('/v1/snapshots')).json()).snapshots;
+  assert.equal(list.length, 1); assert.equal(list[0].snapshotId, ID2); assert.equal(list[0].state, 'committed');
+  assert.ok(await f.bucket.get(partKey(ID2, 0)));
+});
+test('interrupted deletion resumes as deleting, rejects every other operation and finishes on retry', async () => {
+  const f = fixture(), values = [part(), part('second')]; await complete(f, values);
+  let armed = true;
+  f.bucket.hook = async (key, _value, options) => { if (armed && options?.delete && key === partKey(ID, 1)) { armed = false; throw new Error('synthetic interruption'); } };
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 503);
+  assert.ok(await f.bucket.get(partKey(ID, 1)), 'failed part delete leaves object for retry');
+  const list = (await (await f.call('/v1/snapshots')).json()).snapshots;
+  assert.equal(list[0].state, 'deleting');
+  assert.equal((await f.call(`/v1/snapshots/${ID}`)).status, 409);
+  assert.equal((await f.call(`/v1/snapshots/${ID}/parts/0`)).status, 409);
+  assert.equal((await f.call(`/v1/snapshots/${ID}/parts/0`, 'PUT', values[0])).status, 409);
+  assert.equal((await f.call(`/v1/snapshots/${ID}/commit`, 'POST', {})).status, 409);
+  assert.equal((await f.call('/v1/snapshots', 'POST', await manifest(ID, values))).status, 409);
+  const retry = await f.call(`/v1/snapshots/${ID}`, 'DELETE');
+  assert.equal(retry.status, 200);
+  assert.deepEqual((await (await f.call('/v1/snapshots')).json()).snapshots, []);
+  assert.equal(await f.bucket.get(partKey(ID, 0)), null); assert.equal(await f.bucket.get(partKey(ID, 1)), null);
+});
+test('deletion fails closed when readback still shows a part object', async () => {
+  const f = fixture(); await complete(f);
+  const original = f.bucket.delete.bind(f.bucket); let sabotaged = true;
+  f.bucket.delete = async key => { await original(key); if (sabotaged) { const m = await manifest(ID, [part()]);
+    await f.bucket.put(key, bytes(part()), { onlyIf: new Headers() , customMetadata: { sha256: m.parts[0].sha256 } }); sabotaged = false; } };
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 503);
+  const list = (await (await f.call('/v1/snapshots')).json()).snapshots;
+  assert.equal(list[0].state, 'deleting');
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 200);
+  assert.deepEqual((await (await f.call('/v1/snapshots')).json()).snapshots, []);
+});
+test('deletion is owner-gated and disabled-gated like every other snapshot route', async () => {
+  const f = fixture(); await complete(f);
+  const denied = await f.handler(new Request(ORIGIN + `/v1/snapshots/${ID}`, { method: 'DELETE', headers: { authorization: 'Bearer wrong' } }), f.env);
+  assert.ok(denied.status >= 400 && denied.status !== 404, 'authorization failure rejects before deletion');
+  assert.equal((await f.call('/v1/snapshots', 'DELETE')).status, 405);
+  f.env.SNAPSHOTS_ENABLED = 'false';
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 503);
+  assert.ok(await f.bucket.get(partKey(ID, 0)));
 });

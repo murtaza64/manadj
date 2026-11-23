@@ -4,6 +4,7 @@ const { authorizeFrame, CloudFailure } = require('./policy');
 const { EncryptedTokenStore } = require('./tokenStore');
 const { CloudConnection } = require('./connection');
 const { ReviewedUpload } = require('./upload');
+const { listSnapshots, deleteSnapshot } = require('./snapshots');
 const { prepareFromManagedBackend } = require('./source');
 const target = require('./target');
 function registerCloudIpc({ ipcMain, webContents, app, safeStorage, shell, getBackend,
@@ -34,6 +35,15 @@ function registerCloudIpc({ ipcMain, webContents, app, safeStorage, shell, getBa
         !/^[a-f0-9]{64}$/.test(args[0].reviewedSha256 || '')) throw new CloudFailure('cloud_request_invalid');
     await upload.upload(args[0].reviewID, args[0].reviewedSha256); return state();
   });
+  register('snapshots', async (...args) => { none(args);
+    if (connection.publicState().phase !== 'connected') throw new CloudFailure('cloud_signin_required');
+    return listSnapshots(connection); });
+  register('deleteSnapshot', async (...args) => {
+    if (args.length !== 1 || !args[0] || typeof args[0] !== 'object' || Array.isArray(args[0]) ||
+        Object.keys(args[0]).length !== 1 || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(args[0].snapshotId || ''))
+      throw new CloudFailure('cloud_request_invalid');
+    upload.clear(); // A cleared local review never claims cloud deletion; this does.
+    return deleteSnapshot(connection, args[0].snapshotId); });
   register('cancel', (...args) => { none(args); upload.cancel();
     if (connection.publicState().phase === 'connecting') connection.cancel();
     return state(); });

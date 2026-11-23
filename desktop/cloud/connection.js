@@ -155,7 +155,9 @@ class CloudConnection {
     const generation = this.generation; this.active(generation);
     // This adapter accepts only the fixed bounded server contract, never full URLs.
     if (!/^\/v1\/(?:status|snapshots(?:\/[a-f0-9-]+(?:\/(?:commit|parts\/\d{1,3}))?)?)$/.test(pathname) ||
-        !['GET', 'POST', 'PUT'].includes(method) || (body !== undefined && typeof body !== 'string')) fail('cloud_request_invalid');
+        !['GET', 'POST', 'PUT', 'DELETE'].includes(method) || (body !== undefined && typeof body !== 'string') ||
+        // Deletion exists only for one exact stored snapshot, never a collection or part.
+        (method === 'DELETE' && !/^\/v1\/snapshots\/[a-f0-9-]+$/.test(pathname))) fail('cloud_request_invalid');
     if (signal?.aborted) fail('cloud_operation_cancelled');
     if (!this.tokens) fail('cloud_signin_required');
     if (this.tokens.expiresAt - this.clock() < 30000) await this.refresh(generation);

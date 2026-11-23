@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("manadjLibraryCloud", {
   disconnect: () => ipcRenderer.invoke("library-cloud:disconnect"),
   review: () => ipcRenderer.invoke("library-cloud:review"),
   upload: (review) => ipcRenderer.invoke("library-cloud:upload", review),
+  snapshots: () => ipcRenderer.invoke("library-cloud:snapshots"),
+  deleteSnapshot: (snapshot) => ipcRenderer.invoke("library-cloud:deleteSnapshot", snapshot),
   cancel: () => ipcRenderer.invoke("library-cloud:cancel"),
 });
 
