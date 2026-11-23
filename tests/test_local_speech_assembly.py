@@ -38,7 +38,8 @@ class LocalSpeechAssembly(unittest.TestCase):
             (electron / 'MacOS').mkdir(parents=True)
             (electron / 'Resources').mkdir()
             if native:
-                shutil.copy2('/bin/echo', electron / 'MacOS/Electron')
+                # Do not copy system immutable flags from Apple's protected binary.
+                shutil.copy('/bin/echo', electron / 'MacOS/Electron')
             else:
                 (electron / 'MacOS/Electron').write_text('never executed')
             with (electron / 'Info.plist').open('wb') as stream:
@@ -59,13 +60,10 @@ class LocalSpeechAssembly(unittest.TestCase):
                 elif args[:2] == ['xcrun', 'swiftc']:
                     Path(args[-1]).write_text('never executed')
 
-            original_builder = dmg.build_local_speech
             with patch.multiple(dmg, ROOT=source, BUILD=base / 'build', BACKEND_DIRS=[], BACKEND_FILES=[]), \
                  patch.object(dmg, 'electron_dist', return_value=electron.parent), \
                  patch.object(dmg, 'copy_license_inventory'), patch.object(dmg, 'copy_cloud_runtime'), \
-                 patch.object(dmg, 'run', side_effect=run), \
-                 patch.object(dmg, 'build_local_speech', side_effect=lambda root, resources, version:
-                              original_builder(root, resources, version, run=run)):
+                 patch.object(dmg, 'run', side_effect=run):
                 app = dmg.assemble_app(base / 'python', base / 'ffmpeg', icon, '1.2.3')
             helper = app / 'Contents/Resources/manaDJ Speak.app'
             executable = helper / 'Contents/MacOS/manaDJ Speak'

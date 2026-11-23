@@ -109,7 +109,8 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     resolved = shutil.which(args[0])
     if resolved:
         args[0] = resolved
-    return subprocess.run(args, check=True, **kwargs)
+    kwargs.setdefault("check", True)
+    return subprocess.run(args, **kwargs)
 
 
 def step(name: str) -> None:
@@ -384,7 +385,7 @@ def assemble_app(python_runtime: Path, ffmpeg_dir: Path, icns: Path, version: st
 
     # Package only. The renderer bridge stays compiled OFF; never probe or start
     # the helper during assembly. Sign its dedicated identity before the parent.
-    build_local_speech(ROOT, resources, version)
+    build_local_speech(ROOT, resources, version, run=run)
 
     step("ad-hoc codesign")
     run(["codesign", "--force", "--deep", "--sign", "-", app])
