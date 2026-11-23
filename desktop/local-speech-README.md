@@ -8,8 +8,9 @@ falls back to a browser service after local denial. The OFF capability keeps
 Start disabled. Do not call this working Speak.
 
 `local_speech_bundle.py` builds a dedicated ad-hoc-signed helper application
-with both usage strings. It is not called by production assembly yet and does
-not prove stable identity or TCC attribution. Local preparation only.
+with both usage strings. macOS assembly now places it at the fixed runtime path before signing the
+outer app. Packaging never probes or starts it, and the runtime target stays
+OFF. Ad-hoc signing does not prove stable identity or TCC attribution.
 
 ## Boundary
 

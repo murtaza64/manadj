@@ -54,6 +54,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from cloud_runtime import copy_cloud_runtime  # noqa: E402
+from local_speech_bundle import build_local_speech  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / "build" / "release"
@@ -108,7 +109,8 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     resolved = shutil.which(args[0])
     if resolved:
         args[0] = resolved
-    return subprocess.run(args, check=True, **kwargs)
+    kwargs.setdefault("check", True)
+    return subprocess.run(args, **kwargs)
 
 
 def step(name: str) -> None:
@@ -381,9 +383,13 @@ def assemble_app(python_runtime: Path, ffmpeg_dir: Path, icns: Path, version: st
         run(["plutil", "-replace", key, "-string", value, plist],
             stdout=subprocess.DEVNULL)
 
+    # Package only. The renderer bridge stays compiled OFF; never probe or start
+    # the helper during assembly. Sign its dedicated identity before the parent.
+    build_local_speech(ROOT, resources, version, run=run)
+
     step("ad-hoc codesign")
     run(["codesign", "--force", "--deep", "--sign", "-", app])
-    run(["codesign", "--verify", app])
+    run(["codesign", "--verify", "--deep", "--strict", app])
     return app
 
 
