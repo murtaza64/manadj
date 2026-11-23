@@ -11,6 +11,12 @@ from pathlib import Path
 import re
 import sqlite3
 import time
+from uuid import UUID
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+
+from .peer_sync.group_contracts import DOMAIN, Delivery, Operation, Page, Signed, decode, unpack
+from .peer_sync.service import validate_complete
 
 SCHEMA = "manadj-library-snapshot/v1"
 MAX_PART = 250_000  # Reserve headroom for Python/JS numeric serialization differences.
@@ -29,6 +35,105 @@ class PreparationError(ValueError):
 
 def fail(code):
     raise PreparationError(code)
+
+def _canonical_uuid(value):
+    try:
+        return str(UUID(str(value)))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+def group_denied_sessions(db, existing):
+    """Verified signed-evidence group denial, equivalent to the app's selector
+    (peer_sync/group_history.received_operations) over the same durable rows.
+
+    Returns (claimed session uuids to exclude, verified own-issued count).
+    Own-issued operations verified against pinned member keys and the local
+    group authority stay local; every other claim from signed bodies and
+    possession proofs denies exactly its session. Unreadable evidence fails the
+    whole preparation - it never counts as local, never as empty."""
+    groups, members, replica = {}, {}, None
+    if "device_groups" in existing:
+        for row in db.execute('SELECT group_id,device_id,private_seed_b64 FROM "device_groups"'):
+            groups[row[0]] = (row[1], row[2])
+    if "device_group_members" in existing:
+        for row in db.execute('SELECT group_id,device_id,public_key_b64,revoked FROM "device_group_members"'):
+            members[(row[0], row[1])] = (row[2], row[3])
+    if "peer_sync_local" in existing:
+        row = db.execute('SELECT replica_id FROM "peer_sync_local" WHERE id=1').fetchone()
+        replica = row[0] if row else None
+    claimed, own_verified, own_count = set(), set(), 0
+
+    def verified(row, parsed):
+        """Full verified_operation equivalent; None on any failure."""
+        try:
+            group = groups.get(row[0])
+            if group is None or parsed is None or replica is None or replica != group[0]:
+                return None
+            local_member = members.get((row[0], group[0]))
+            if local_member is None or decode(local_member[0]) != \
+                    Ed25519PrivateKey.from_private_bytes(decode(group[1])).public_key().public_bytes_raw():
+                return None
+            operation, raw, hashed = unpack(Signed(body_b64=row[5], signature_b64=row[6]), Operation)
+            if str(operation.group_id) != row[0]:
+                return None
+            origin_member = members.get((row[0], str(operation.origin_device_id)))
+            if origin_member is None or origin_member[1]:
+                return None
+            Ed25519PublicKey.from_public_bytes(decode(origin_member[0])).verify(decode(row[6]), DOMAIN + raw)
+            manifest = operation.bundle.manifest
+            if (hashed != row[4] or str(operation.operation_id) != row[1]
+                    or str(manifest.session_uuid) != row[3]
+                    or str(operation.origin_device_id) != row[2]
+                    or manifest.origin_replica_id != operation.origin_device_id
+                    or not validate_complete(manifest, {c.seq: c.events for c in operation.bundle.chunks})):
+                return None
+            return operation
+        except Exception:  # Verification denial is fail-safe; parsing stays separate.
+            return None
+
+    if "device_group_operations" in existing:
+        for row in db.execute('SELECT group_id,operation_id,origin_device_id,session_uuid,sha256,body_b64,signature_b64'
+                              ' FROM "device_group_operations" ORDER BY group_id,operation_id'):
+            parsed = None
+            try:
+                parsed = unpack(Signed(body_b64=row[5], signature_b64=row[6]), Operation)[0]
+            except Exception:
+                pass
+            operation = verified(row, parsed)
+            if operation is not None and str(operation.origin_device_id) == groups[row[0]][0]:
+                own_count += 1
+                own_verified.add((str(operation.group_id), str(operation.operation_id),
+                    str(operation.bundle.manifest.session_uuid), str(operation.origin_device_id), row[4]))
+                continue
+            identities = set()
+            canonical = _canonical_uuid(row[3])
+            if canonical:
+                identities.add(canonical)
+            if parsed is not None:
+                identities.add(str(parsed.bundle.manifest.session_uuid))
+            if not identities:
+                fail("cloud_group_evidence_unreadable")
+            claimed |= identities
+    if "device_group_possessions" in existing:
+        for row in db.execute('SELECT proof_body_b64,proof_signature_b64 FROM "device_group_possessions"'):
+            proof = Signed(body_b64=row[0], signature_b64=row[1])
+            try:
+                try:
+                    signed_operations = [unpack(proof, Delivery)[0].operation]
+                except ValueError:
+                    signed_operations = unpack(proof, Page)[0].operations
+                if len(signed_operations) != 1:
+                    raise ValueError("Supplying proof lost its operation identity")
+                for signed in signed_operations:
+                    operation, _, hashed = unpack(signed, Operation)
+                    key = (str(operation.group_id), str(operation.operation_id),
+                           str(operation.bundle.manifest.session_uuid), str(operation.origin_device_id), hashed)
+                    if key in own_verified:
+                        continue
+                    claimed.add(key[2])
+            except (ValueError, TypeError, KeyError, RecursionError):
+                fail("cloud_group_evidence_unreadable")
+    return claimed, own_count
 
 def quoted(name):
     # All identifiers originate from the fixed schema vocabulary, not request data.
@@ -94,14 +199,13 @@ def prepare_snapshot(path: Path, *, timeout_seconds=15):
                     excluded_ids.add(row[0])
                     if len(excluded_ids) > 100000:
                         fail("cloud_peer_exclusion_limit")
-        # Group identity denial also depends on signed bodies and possession
-        # records, not only denormalized projection IDs. Until the selective
-        # exporter has equivalent verified recovery, fail the whole review when
-        # any group operation/possession exists. Never reinterpret it as local.
-        for table in ("device_group_operations", "device_group_possessions"):
-            if table in existing and db.execute("SELECT 1 FROM " + quoted(table) + " LIMIT 1").fetchone():
-                fail("cloud_group_provenance_review_required")
-        excluded_sessions = set()
+        # Group identity denial depends on signed bodies and possession records,
+        # not only denormalized projection IDs. Recovery is equivalent to the
+        # app's verified selector; unreadable evidence fails the whole review.
+        group_claims, own_group_operations = set(), 0
+        if "device_group_operations" in existing or "device_group_possessions" in existing:
+            group_claims, own_group_operations = group_denied_sessions(db, existing)
+        excluded_sessions = set(group_claims)
         if "peer_sync_sessions" in existing:
             peer_cols = {r[1] for r in db.execute('PRAGMA table_info("peer_sync_sessions")')}
             if not {"session_uuid", "direction"} <= peer_cols:
@@ -130,6 +234,7 @@ def prepare_snapshot(path: Path, *, timeout_seconds=15):
         elif excluded_ids:
             fail("cloud_history_schema_unrecognized")
         excluded_takes, excluded_routine_takes, excluded_transitions, excluded_routines = set(), set(), set(), set()
+        provenance = {"sessionless": 0, "pruned_local": 0}
         for table, destination, promoted in (("takes", excluded_takes, "promoted_transition_uuid"),
                                              ("routine_takes", excluded_routine_takes, "promoted_routine_uuid")):
             if table in existing:
@@ -137,15 +242,24 @@ def prepare_snapshot(path: Path, *, timeout_seconds=15):
                     fail("cloud_history_schema_unrecognized")
                 select = ["uuid", "session_uuid"] + ([promoted] if promoted in cols[table] else [])
                 for row in db.execute("SELECT " + ",".join(map(quoted, select)) + " FROM " + quoted(table)):
-                    # Legacy/sessionless or pruned-session evidence has no
-                    # positive local provenance. Do not infer it from origin
-                    # (detected/manual), tracks, timestamps or opaque events.
-                    if not row[1] or (row[1] not in known_sessions and row[1] not in excluded_sessions):
-                        fail("cloud_history_provenance_unresolved")
-                    if row[1] in excluded_sessions:
+                    if row[1] and row[1] in excluded_sessions:
                         destination.add(row[0])
                         if len(row) > 2 and row[2]:
                             (excluded_transitions if table == "takes" else excluded_routines).add(row[2])
+                    elif not row[1]:
+                        # Pre-Sessions Takes are sessionless and local by
+                        # construction (ADR 0020/0033): every peer/group bundle
+                        # requires a manifest session_uuid, so a missing one can
+                        # never be received evidence.
+                        provenance["sessionless"] += 1
+                    elif row[1] not in known_sessions:
+                        # Received evidence is durable: peer_sync_sessions rows
+                        # and signed group operations/possessions have no delete
+                        # path, group Sessions cannot be deleted (deny_group_uuid)
+                        # and the silent sweep exempts peer/group Sessions. A
+                        # dangling reference is therefore a deleted local Session;
+                        # Takes survive deletion by design (ADR 0033).
+                        provenance["pruned_local"] += 1
         parts, counts, total, excluded = [], {}, 0, 0
         def emit(table, rows):
             nonlocal total
@@ -198,6 +312,14 @@ def prepare_snapshot(path: Path, *, timeout_seconds=15):
         if not counts.get("tracks"):
             fail("cloud_empty_library")
         omitted.append("Peer/group-related rows excluded: " + str(excluded))
+        if group_claims:
+            omitted.append("Group-claimed sessions excluded by signed evidence: " + str(len(group_claims)))
+        if own_group_operations:
+            omitted.append("Own verified group-published sessions included as local: " + str(own_group_operations))
+        if provenance["sessionless"]:
+            omitted.append("Pre-Sessions takes without a session included as local evidence: " + str(provenance["sessionless"]))
+        if provenance["pruned_local"]:
+            omitted.append("Takes from deleted local sessions included: " + str(provenance["pruned_local"]))
         return {"parts": parts, "rowCounts": counts, "omissions": omitted}
     except PreparationError:
         raise

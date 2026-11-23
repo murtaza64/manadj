@@ -25,11 +25,15 @@ or URL parameter enables it. This is not an installed feature or release cut.
 - `backend/cloud_snapshot.py` reads this application's actual SQLite library in
   one bounded, read-only WAL-aware transaction. Fixed DTO fields only. Audio,
   paths, settings, secrets and peer/group sessions plus derived Takes are out.
-  Durable received-peer UUIDs also deny export after projection removal.
-  Sessionless/pruned Take provenance blocks preparation instead of assuming local
-  origin. Any group operation/possession currently blocks the whole preparation,
-  pending a verified signed-evidence selector. Unsupported values fail visibly,
-  not by truncation, redaction or fallback.
+  Durable received-peer UUIDs also deny export after projection removal. Group
+  identity denial recovers verified signed evidence exactly like the app's own
+  selector: own-issued operations verified against pinned member keys stay
+  local, every other signed-body or possession claim denies exactly its
+  session, and unreadable evidence fails the whole preparation. Sessionless
+  pre-Sessions Takes and Takes of deleted local Sessions are local by
+  construction (received/group evidence is durable, undeletable and always
+  session-bound) and are counted explicitly in the review omissions.
+  Unsupported values fail visibly, not by truncation, redaction or fallback.
 - `upload.js` validates/canonicalizes frozen parts and recomputes row counts,
   hashes and manifest before review. Review is bound to destination/connection
   and expires after15minutes. Only an explicit reviewed Upload sends bytes.
@@ -71,9 +75,13 @@ independent owner-browser download verification; a supported consistency-safe
 explicit deletion operation, including confirmation/readback, before promising
 retention until the owner deletes. No delete endpoint exists yet.
 
-Resolve legacy/sessionless/pruned history provenance and verified group-ledger
-selection before those libraries can prepare snapshots. Current preparation fails
-visibly for those cases; it does not infer ownership or silently omit history.
+Legacy/sessionless/pruned history provenance and verified group-ledger selection
+are resolved in the exporter: local classification rests on source-verified
+durability invariants (received/group evidence has no delete path, group
+Sessions are undeletable, every received bundle is session-bound), group denial
+uses the app's equivalent verified signed-evidence recovery, and every resolved
+case is counted explicitly in the review omissions. Unreadable group evidence
+still fails the whole preparation; it never infers ownership or omits history.
 Daily mutation/read quotas count requests, including failed/retried writes; they
 do not stop billing or replace a spending approval. The separately deployed server
 remains disabled with no bucket binding. Do not treat local mocks or a successful

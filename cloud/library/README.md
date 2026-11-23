@@ -141,8 +141,6 @@ Before enabling personal-data upload:
   or redesign visibly if needed; do not silently upgrade or raise limits.
 - Provide a supported consistency-safe explicit deletion operation and verify its
   result before enabling retention-until-user-deletes. No deletion exists yet.
-- Resolve legacy/sessionless history provenance and group signed-evidence
-  selection. The prepared exporter blocks those uncertain cases, not a fallback.
 - Keep the app default disabled until all gates pass. No personal audio/library
   files are needed for these synthetic checks. No release cut is authorized.
 
