@@ -52,6 +52,9 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+from cloud_runtime import copy_cloud_runtime  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / "build" / "release"
 OUT = BUILD / "out"
@@ -337,6 +340,8 @@ def assemble_app(python_runtime: Path, ffmpeg_dir: Path, icns: Path, version: st
     pkg = json.loads((app_dir / "package.json").read_text())
     pkg["version"] = version  # app.getVersion() matches the build (#298)
     (app_dir / "package.json").write_text(json.dumps(pkg, indent=2) + "\n")
+
+    copy_cloud_runtime(ROOT, resources)
 
     # Repo-shaped backend tree (MANADJ_BACKEND_ROOT default — desktop/backend.js).
     backend_root = resources / "backend"

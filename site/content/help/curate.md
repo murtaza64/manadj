@@ -66,3 +66,10 @@ Right-click a Track, or select several, and choose **Archive track(s)**. Confirm
 Settings > Library > Remote library has a manual **Mirror preview**. It is local, read-only groundwork, not a connected cloud library. Nothing uploads or changes. It shows file counts, total bytes and tracks that need attention, such as missing or unreadable audio, changed files, paths outside the configured tracks directory and case-only name conflicts.
 
 A preview reads and hashes every audio file. It can take minutes and shares the disk with playback, so run it when you are not mixing. Leaving the page does not cancel an active scan. A second scan is refused while one is running in the same server process. Treat the report as advisory, not proof that files will remain unchanged for a later upload. No cloud destination or upload has been configured by this panel.
+
+
+## Private metadata snapshots {#private-snapshots}
+
+Settings > Library > Private metadata snapshots is under construction. Cloud uploads are disabled in this build. The panel does not offer sign-in, review or upload controls, and your library stays on this device.
+
+This preparation is separate from your SSD backup. It is not audio storage, playback or sync. There is no cloud deletion control yet.

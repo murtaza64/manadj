@@ -4,12 +4,32 @@ on:
     paths:
       - 'cloud/library/**'
       - 'desktop/cloud/**'
+      - 'desktop/main.js'
+      - 'desktop/preload.js'
+      - 'backend/cloud_*.py'
+      - 'backend/serve.py'
+      - 'frontend/src/settings/LibraryCloud*'
+      - 'frontend/src/settings/libraryCloudBridge.d.ts'
+      - 'frontend/src/settings/SettingsPage.tsx'
+      - 'scripts/release/**'
+      - 'tests/test_cloud*'
+      - 'tests/test_build_dmg.py'
       - '.github/workflows/library-*.yml'
   push:
     branches: [main]
     paths:
       - 'cloud/library/**'
       - 'desktop/cloud/**'
+      - 'desktop/main.js'
+      - 'desktop/preload.js'
+      - 'backend/cloud_*.py'
+      - 'backend/serve.py'
+      - 'frontend/src/settings/LibraryCloud*'
+      - 'frontend/src/settings/libraryCloudBridge.d.ts'
+      - 'frontend/src/settings/SettingsPage.tsx'
+      - 'scripts/release/**'
+      - 'tests/test_cloud*'
+      - 'tests/test_build_dmg.py'
       - '.github/workflows/library-*.yml'
   workflow_dispatch:
 permissions:
@@ -51,6 +71,7 @@ jobs:
           set -euo pipefail
           python cloud/library/check_config.py
           python -m unittest discover -s cloud/library -p test_config.py
+          python -m unittest discover -s tests -p test_cloud_snapshot_unit.py
       - name: Package the exact disabled Worker without deployment or credentials
         if: runner.os == 'Linux'
         working-directory: cloud/library

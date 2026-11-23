@@ -1,39 +1,80 @@
-# Desktop cloud primitives, local preparation only
+# Native private-library connection, disabled preparation
 
-This directory is not wired to desktop/main.js, preload, settings or a network transport.
-There is no enabled production configuration, registered native client or token
-in this source. The separate protected library origin/managed OAuth configuration
-has been provisioned, but none of these primitives has completed real sign-in.
+The desktop shell now has main-process connection/review/upload modules and a
+Settings > Library > Private metadata snapshots section. The production target
+in `target.js` is compiled OFF. That section shows an under-construction notice;
+it cannot connect, prepare or upload. No environment variable, renderer option
+or URL parameter enables it. This is not an installed feature or release cut.
 
-Run `node --test desktop/cloud/*.test.js` from the repository root.
-19 local tests currently pass. No OS Keychain, Electron runtime, real Access
-sign-in, R2 upload, receipt or download has been tested.
+## Boundaries
 
-- policy.js: disabled-by-default configuration, pinned Access discovery,
-  random-state/S256 attempt, exact one-shot expiring callback and intended-frame IPC gate.
-- loopback.js: explicit-call exact-port receiver, bind before browser, static callback response, timeout/cancel cleanup and occupied-port rejection.
-- tokenStore.js: main-only adapter for Electron37 safeStorage, encrypted refresh
-  state bound to the target audience, atomic0600replacement and no Linux
-  basic_text/unknown/unavailable fallback. Mocks do not establish OS encryption.
-- policy.test.js: synthetic policy/storage tests using temporary fixtures only.
+- `policy.js` pins the resource, issuer, dynamic public-client discovery,
+  random state, S256 and exact one-shot expiring callback.
+- `loopback.js` binds the exact loopback port before opening the browser, serves
+  a static response, rejects occupied ports and cleans up on timeout/cancel.
+- `connection.js` registers a public client, exchanges/rotates opaque tokens,
+  checks owner-only `/v1/status` before saving, bounds bodies/timeouts and uses
+  generation guards and serialized persistence. Tokens never enter renderer IPC.
+- `tokenStore.js` uses Electron37 safeStorage for audience-bound encrypted refresh
+  state, atomic0600replacement and no Linux basic_text/unknown fallback. Mocks do
+  not establish actual OS encryption or Keychain behavior. Windows encryption
+  does not isolate this app from other programs running as the same OS user.
+- `source.js` accepts only the shell's actual managed backend and token, using a
+  fixed loopback endpoint. Attach-only mode has no snapshot provider. It never
+  accepts database paths, URLs, tables or byte payloads from the renderer.
+- `backend/cloud_snapshot.py` reads this application's actual SQLite library in
+  one bounded, read-only WAL-aware transaction. Fixed DTO fields only. Audio,
+  paths, settings, secrets and peer/group sessions plus derived Takes are out.
+  Durable received-peer UUIDs also deny export after projection removal.
+  Sessionless/pruned Take provenance blocks preparation instead of assuming local
+  origin. Any group operation/possession currently blocks the whole preparation,
+  pending a verified signed-evidence selector. Unsupported values fail visibly,
+  not by truncation, redaction or fallback.
+- `upload.js` validates/canonicalizes frozen parts and recomputes row counts,
+  hashes and manifest before review. Review is bound to destination/connection
+  and expires after15minutes. Only an explicit reviewed Upload sends bytes.
+  Partial failures keep exact bytes for explicit retry, never re-export behind
+  the review. Receipt and raw downloaded parts are checked independently.
+- `ipc.js` checks the intended main frame and exposes only verbs and safe
+  summaries. Top-level cross-document navigation cancels work; same-document
+  history/hash routing and subframe navigation do not. Disposal always cancels. Disconnect is local only; no claim of
+  remote revocation or cloud deletion. Canceling an upload keeps the connection
+  and frozen review; canceling sign-in invalidates that attempt.
 
-Exact callback aligned with the separately verified cloud provisioning:
-http://127.0.0.1:53682/oauth/library/callback. Saved Access configuration is verified;
-native owner/non-owner sign-in is not. Bind before launching the browser; fail if occupied.
-No port fallback, broad loopback registration or browser token exposure.
+Exact callback: `http://127.0.0.1:53682/oauth/library/callback`. No port fallback,
+broad loopback registration, browser token exposure or plaintext persistence.
+Keep safeStorage version compatibility under review before Electron upgrades.
 
-Pending work: native dynamic client registration/exchange/refresh,
-managed-backend shell-token-gated frozen exporter, reviewed Upload UI, bounded
-part transport/immutable receipt, owner-authenticated readback, cancellation/
-refresh generation guards, real-platform tests and the complete end-to-end gates.
+## Local proof
 
-Do not persist credentials in generic settings, renderer storage or .env.
-The synchronous safeStorage adapter targets the repo's Electron37. Revisit the
-adapter before a runtime upgrade; current upstream docs mark synchronous APIs
-for removal in Electron46. macOS build signing and Keychain prompts still need
-real-device verification. Windows OS encryption does not isolate this app from
-other programs running as the same OS user.
+Use project Python3.13+; older interpreters are unsupported. Run from repository root:
 
-These primitives do not themselves change cloud resources, install or release.
-The separate disabled server preparation is in cloud/library. Native app wiring
-and a real end-to-end gate remain unimplemented.
+```
+node --test desktop/cloud/*.test.js cloud/library/*.test.mjs
+python -m pytest tests/test_cloud_shell.py tests/test_cloud_snapshot_unit.py tests/test_cloud_runtime.py tests/test_build_dmg.py tests/test_serve.py
+cd frontend
+npx vitest run src/settings/LibraryCloudSettings.test.tsx
+npx tsc -b
+```
+
+Fixtures are synthetic, temporary and local. Package-layout tests load the
+native adapter and pure DTO validator from an assembled temp tree without
+node_modules. Shared macOS/Windows assembly copies only the runtime and pure
+schema files, not Worker auth/deployment code or test data.
+
+## Still required before enablement
+
+Real owner/browser and native sign-in, refresh/cancel and wrong-account denial;
+actual per-OS encrypted persistence; real private-R2 synthetic receipt/readback,
+concurrency/partial failures; largest-part/ledger Free-tier CPU measurements;
+independent owner-browser download verification; a supported consistency-safe
+explicit deletion operation, including confirmation/readback, before promising
+retention until the owner deletes. No delete endpoint exists yet.
+
+Resolve legacy/sessionless/pruned history provenance and verified group-ledger
+selection before those libraries can prepare snapshots. Current preparation fails
+visibly for those cases; it does not infer ownership or silently omit history.
+Daily mutation/read quotas count requests, including failed/retried writes; they
+do not stop billing or replace a spending approval. The separately deployed server
+remains disabled with no bucket binding. Do not treat local mocks or a successful
+deployment as these proofs. No personal metadata/audio needs uploading for tests.

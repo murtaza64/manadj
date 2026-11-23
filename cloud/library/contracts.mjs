@@ -2,22 +2,12 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 export const LIMITS = Object.freeze({ partBytes: 256 * 1024, parts: 256, snapshotBytes: 64 * 1024 * 1024,
   snapshots: 10, storedBytes: 640 * 1024 * 1024, controlBytes: 1024 * 1024, writes: 512, reads: 4096 });
-export const SCHEMA = 'manadj-library-snapshot/v1';
-export class Failure extends Error {
-  constructor(status, code) { super(code); this.status = status; this.code = code; }
-}
-export function reject(status, code) { throw new Failure(status, code); }
+import { SCHEMA, Failure, reject, validID, validHash, integer, exact } from './schema.mjs';
+export { SCHEMA, Failure, reject, validID, validHash, integer, exact } from './schema.mjs';
 const encoder = new TextEncoder();
 export const bytes = value => encoder.encode(JSON.stringify(value));
 export async function digest(value) {
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', value))].map(x => x.toString(16).padStart(2, '0')).join('');
-}
-export const validID = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
-export const validHash = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
-export const integer = (n, min, max) => Number.isSafeInteger(n) && n >= min && n <= max;
-export function exact(value, keys) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) &&
-    Object.keys(value).length === keys.length && keys.every(k => Object.hasOwn(value, k));
 }
 export async function readJSON(request, max = LIMITS.partBytes) {
   if (request.headers.get('content-type') !== 'application/json' ||
