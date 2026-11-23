@@ -129,6 +129,25 @@ public enum FollowRanker {
                               energy: 15 * MatchScore.energyContribution(a.energy, b.energy),
                               bpm: 10 * MatchScore.bpmContribution(a.bpm, b.bpm, threshold: threshold))
     }
+    /// Per-reference facts, before the existing best-score/union reduction.
+    /// Retaining this seam does not add agreement bonuses or change admission.
+    struct ReferenceEvidence {
+        let referenceId: Int
+        let known: KnownKind?
+        let admitted: Bool
+        let breakdown: ScoreBreakdown
+        let matchedTagIds: Set<Int>
+    }
+    static func referenceEvidence(_ reference: LibraryTrack, candidate: LibraryTrack,
+                                  snapshot: Snapshot, params: FollowParams, gate: BpmGate) -> ReferenceEvidence {
+        let transition = snapshot.transitions.first { $0.a == reference.id && $0.b == candidate.id }
+        let linked = snapshot.links.contains { ($0.0 == reference.id && $0.1 == candidate.id) || ($0.1 == reference.id && $0.0 == candidate.id) }
+        let known: KnownKind? = transition?.favorite == true ? .favoritedTransition : (linked ? .linked : (transition == nil ? nil : .savedTransition))
+        let score = breakdown(reference, candidate, threshold: params.bpmThresholdPercent)
+        return ReferenceEvidence(referenceId: reference.id, known: known,
+            admitted: !params.knownOnly && score.affinity >= 15 && gate.admits(candidate),
+            breakdown: score, matchedTagIds: Set(reference.tagIds).intersection(candidate.tagIds))
+    }
     public static func rank(_ tracks: [LibraryTrack], snapshot: Snapshot, references: [LibraryTrack], params: FollowParams = FollowParams()) -> [FollowRow] {
         var seen = Set<Int>()
         let refs = references.filter { seen.insert($0.id).inserted }
@@ -143,16 +162,14 @@ public enum FollowRanker {
             var artist = false
             var tags = Set<Int>()
             for r in refs {
-                let transition = snapshot.transitions.first { $0.a == r.id && $0.b == c.id }
-                let linked = snapshot.links.contains { ($0.0 == r.id && $0.1 == c.id) || ($0.1 == r.id && $0.0 == c.id) }
-                let k: KnownKind? = transition?.favorite == true ? .favoritedTransition : (linked ? .linked : (transition == nil ? nil : .savedTransition))
-                if let k, known == nil || k.rawValue < known!.rawValue { known = k }
-                let b = breakdown(r, c, threshold: params.bpmThresholdPercent)
+                let evidence = referenceEvidence(r, candidate: c, snapshot: snapshot, params: params, gate: gates[r.id]!)
+                if let k = evidence.known, known == nil || k.rawValue < known!.rawValue { known = k }
+                let b = evidence.breakdown
                 if best == nil || b.total > best!.total { best = b }
-                if !params.knownOnly && b.affinity >= 15 && gates[r.id]!.admits(c) { admitted = true }
+                if evidence.admitted { admitted = true }
                 keyMatched = keyMatched || b.keyRelation != .other
                 artist = artist || b.artist > 0
-                tags.formUnion(Set(r.tagIds).intersection(c.tagIds))
+                tags.formUnion(evidence.matchedTagIds)
             }
             if known == nil && !admitted { continue }
             rows.append(FollowRow(track: c, known: known, score: best?.total ?? 0, keyMatched: keyMatched, matchedTagIds: tags, sharedArtist: artist, breakdown: best))

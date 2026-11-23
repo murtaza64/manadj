@@ -282,19 +282,15 @@ struct LibraryBrowser: View {
             q.downloadedOnly = downloadedOnly; q.tagIds = tags
             q.bpmCenter = bpmCenter; q.bpmTolerance = 6
             q.energy = energy > 0 ? energy...energy : nil
-            let query = q, offline = model.downloaded, reference = followReference
             let scope = source
             let sourceTag: Int? = { if case let .tag(id) = scope { return id }; return nil }()
-            let result = await Task.detached(priority: .userInitiated) { () -> ([LibraryTrack], [Int: String]) in
-                let library = Library(snapshot, downloaded: { offline.contains($0.id) })
-                if let reference, !scope.isContainer {
-                    let ranked = library.follow([reference], within: query)
-                    return (ranked.map(\.track).filter { track in sourceTag.map { track.tagIds.contains($0) } ?? true }, Dictionary(uniqueKeysWithValues: ranked.map { ($0.id, $0.label) }))
-                }
-                return (library.query(query).filter { track in sourceTag.map { track.tagIds.contains($0) } ?? true }, [:])
+            let request = BrowserQueryRequest(query: q, downloadedIds: model.downloaded,
+                referenceId: followReference, sourceIsContainer: scope.isContainer, sourceTagId: sourceTag)
+            let result = await Task.detached(priority: .userInitiated) {
+                request.evaluate(snapshot)
             }.value
             guard !Task.isCancelled else { return }
-            rows = result.0; followLabels = result.1; filtering = false
+            rows = result.rows; followLabels = result.followLabels; filtering = false
         }
     }
 

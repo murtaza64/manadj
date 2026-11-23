@@ -41,6 +41,58 @@ final class FollowGoldenTests: XCTestCase {
         XCTAssertGreaterThan(count, 1500)
         print("Desktop Follow golden: \(cases.count) cases, \(count) rows")
     }
+    func testReferenceEvidencePreservesBestScoreAndUnion() throws {
+        let snapshot = try snapshot()
+        let references = Array(snapshot.tracks.prefix(2))
+        let params = FollowParams()
+        for row in FollowRanker.rank(snapshot.tracks, snapshot: snapshot, references: references, params: params) {
+            let facts = references.map { reference in
+                FollowRanker.referenceEvidence(reference, candidate: row.track, snapshot: snapshot,
+                    params: params, gate: BpmGate(reference: reference, params: params))
+            }
+            XCTAssertEqual(facts.map(\.referenceId), references.map(\.id))
+            XCTAssertEqual(row.score, facts.map { $0.breakdown.total }.max() ?? 0)
+            XCTAssertEqual(row.known?.rawValue, facts.compactMap { $0.known?.rawValue }.min())
+            XCTAssertEqual(row.keyMatched, facts.contains { $0.breakdown.keyRelation != .other })
+            XCTAssertEqual(row.sharedArtist, facts.contains { $0.breakdown.artist > 0 })
+            XCTAssertEqual(row.matchedTagIds, facts.reduce(into: Set<Int>()) { $0.formUnion($1.matchedTagIds) })
+            XCTAssertTrue(row.known != nil || facts.contains { $0.admitted })
+        }
+    }
+    func testBrowserQuerySeamPreservesInlineBehavior() throws {
+        let snapshot = try snapshot()
+        let offline = Set(snapshot.tracks.enumerated().filter { $0.offset % 2 == 0 }.map { $0.element.id })
+        let references: [Int?] = [nil] + snapshot.tracks.prefix(2).map { Optional($0.id) }
+        for reference in references {
+            for container in [false, true] {
+                for tag in [nil, snapshot.tags.first?.id] as [Int?] {
+                    for downloadedOnly in [false, true] {
+                        for sort in SortColumn.allCases {
+                            var query = LibraryQuery()
+                            query.sort = sort; query.descending = sort == .dateAdded
+                            query.downloadedOnly = downloadedOnly; query.bpmTolerance = 6
+                            let request = BrowserQueryRequest(query: query, downloadedIds: offline,
+                                referenceId: reference, sourceIsContainer: container, sourceTagId: tag)
+                            let got = request.evaluate(snapshot)
+                            let library = Library(snapshot, downloaded: { offline.contains($0.id) })
+                            let expected: [LibraryTrack]
+                            let labels: [Int: String]
+                            if let reference, !container {
+                                let ranked = library.follow([reference], within: query)
+                                expected = ranked.map(\.track).filter { track in tag.map { track.tagIds.contains($0) } ?? true }
+                                labels = Dictionary(uniqueKeysWithValues: ranked.map { ($0.id, $0.label) })
+                            } else {
+                                expected = library.query(query).filter { track in tag.map { track.tagIds.contains($0) } ?? true }
+                                labels = [:]
+                            }
+                            XCTAssertEqual(got.rows.map(\.id), expected.map(\.id))
+                            XCTAssertEqual(got.followLabels, labels)
+                        }
+                    }
+                }
+            }
+        }
+    }
     func testUnsupportedSnapshotVersion() {
         XCTAssertThrowsError(try SnapshotJson.parse("{\"version\":99}"))
     }
