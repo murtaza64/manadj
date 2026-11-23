@@ -1,9 +1,16 @@
 import { LIMITS, Failure, authorizeOwner, bytes, digest, reject, readJSON, validateManifest, validID, integer } from './contracts.mjs';
 import { Ledger, partKey } from './ledger.mjs';
 import { validatePart } from './part.mjs';
+import { CHECK_PAGE_HTML } from './check_page.mjs';
+import { CHECK_ASSETS } from './browser_sources.mjs';
 const HEADERS = { 'cache-control': 'no-store', 'content-type': 'application/json', 'x-content-type-options': 'nosniff',
   'content-security-policy': "default-src 'none'; frame-ancestors 'none'", 'referrer-policy': 'no-referrer' };
 const response = (value, status = 200, extra = {}) => new Response(bytes(value), { status, headers: { ...HEADERS, ...extra } });
+// TEMPORARY reviewed staging fixture assets (removed with the route once the
+// gates pass). Owner-only behind the same authorization; the page CSP allows
+// only same-origin scripts/connections.
+const CHECK_PAGE_HEADERS = { ...HEADERS, 'content-type': 'text/html; charset=utf-8',
+  'content-security-policy': "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" };
 export function createHandler({ authorize = authorizeOwner, clock = Date.now } = {}) {
   return async function handle(request, env) {
     try {
@@ -24,6 +31,17 @@ export function createHandler({ authorize = authorizeOwner, clock = Date.now } =
       // Browser writes must come from the owner origin; native clients omit Origin.
       const origin = request.headers.get('origin');
       if (origin && origin !== env.LIBRARY_ORIGIN) reject(403, 'origin_rejected');
+      // TEMPORARY reviewed staging fixture: owner-only page and its assets,
+      // read-only GETs that never touch storage.
+      if (url.pathname === '/v1/service-check') {
+        if (request.method !== 'GET') reject(405, 'method_not_allowed');
+        return new Response(CHECK_PAGE_HTML, { headers: CHECK_PAGE_HEADERS });
+      }
+      const checkAsset = CHECK_ASSETS[url.pathname];
+      if (checkAsset) {
+        if (request.method !== 'GET') reject(405, 'method_not_allowed');
+        return new Response(checkAsset[0], { headers: { ...HEADERS, 'content-type': checkAsset[1] } });
+      }
       const now = clock(), ledger = new Ledger(env.LIBRARY_BUCKET, owner.sub, now);
       if (url.pathname === '/v1/snapshots') {
         if (request.method === 'GET') return response({ snapshots: await ledger.read() });

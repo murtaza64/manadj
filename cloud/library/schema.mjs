@@ -1,5 +1,10 @@
 // Pure schema vocabulary shared by native main process and Worker. No auth/network imports.
 export const SCHEMA = 'manadj-library-snapshot/v1';
+const encoder = new TextEncoder();
+export const bytes = value => encoder.encode(JSON.stringify(value));
+export async function digest(value) {
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', value))].map(x => x.toString(16).padStart(2, '0')).join('');
+}
 export class Failure extends Error {
   constructor(status, code) { super(code); this.status = status; this.code = code; }
 }

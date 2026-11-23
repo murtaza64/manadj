@@ -159,6 +159,27 @@ Worker error and fails the run. Node-side wall times are reported for review
 but are not the CPU measurement; the pass/fail of the real service under the
 worst shape is.
 
+### TEMPORARY owner-only browser fixture
+
+`GET /v1/service-check` serves a clearly labeled TEMPORARY staging fixture page
+to the owner behind the exact same Access authorize route as the API, with the
+same fail-closed posture: the feature disabled or the bucket unbound returns
+503, a non-owner request is rejected before any route is served, cross-origin
+posts stay rejected, and nothing runs on page load. The page has two buttons
+that drive the same fixed synthetic shapes as the CLI check above (run A: one
+snapshot of 256 parts x 256KiB, run B: 10 snapshots of 8 parts x 16KiB) through
+the same `check_core.mjs` sequence the CLI uses. There are no inputs, no token
+fields, no file pickers and no auth configuration changes: the browser sends
+its Access session cookie same-origin, never an authorization header, and
+writes happen only after a click. The routes are GET-only and never touch
+storage themselves. This fixture exists so the real-service gate can run from
+the owner's browser on a reviewed enabled staging deployment; it is not the
+user-facing feature (which stays compiled off) and it is removed by the
+separately reviewed enablement change before personal data upload. The
+browser script is generated into `browser_sources.mjs` by
+`node sync_check_page.mjs` and the freshness test fails the suite if the
+checked-in copy drifts from `browser/app.js` and `check_core.mjs`.
+
 Write admission is budgeted before anything is stored. Verified against the
 ledger, an admitted call debits once and persists; a call rejected after
 admission (the changed-manifest and changed-part immutable 409 probes) rolls
