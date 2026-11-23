@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,7 +24,7 @@ test('generated browser sources are fresh copies of the canonical files', () => 
   };
   assert.deepEqual(Object.keys(CHECK_ASSETS).sort(), Object.keys(expected).sort());
   for (const [route, file] of Object.entries(expected)) {
-    assert.equal(CHECK_ASSETS[route][0], readFileSync(join(here, file), 'utf8'),
+    assert.equal(CHECK_ASSETS[route][0], readFileSync(join(here, file), 'utf8').replace(/\r\n/g, '\n'),
       `${route} is stale; run node cloud/library/sync_check_page.mjs`);
   }
 });
@@ -65,7 +66,7 @@ test('the browser bundle runs nothing on load and the click path checks out end 
   globalThis.location = { href: `${ORIGIN}/v1/service-check` };
   globalThis.fetch = (url, init) => { fetches++; return handler(new Request(url, init), env); };
   try {
-    await import(join(dir, 'app.js'));
+    await import(pathToFileURL(join(dir, 'app.js')).href);
     assert.equal(fetches, 0, 'importing the page script must not call the service');
     assert.ok(listeners.has('run-a:click') && listeners.has('run-b:click'));
     const before = bucket.calls.length;
@@ -105,7 +106,7 @@ test('the browser path sends no authorization header', async () => {
   globalThis.location = { href: `${ORIGIN}/v1/service-check` };
   globalThis.fetch = (url, init) => handler(new Request(url, init), env);
   try {
-    await import(join(dir, 'app.js'));
+    await import(pathToFileURL(join(dir, 'app.js')).href);
     await listeners.get('run-b:click')({ preventDefault() {} });
     assert.ok(seen.length > 10);
     assert.ok(seen.every(h => h === null));
