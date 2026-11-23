@@ -392,6 +392,29 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertFalse(app.navigationBars["Track tags"].exists)
         expectation(for: NSPredicate(format: "value CONTAINS %@", "Cached Test Tone"), evaluatedWith: app.buttons["deck-1-info"]); waitForExpectations(timeout: 8)
     }
+    @MainActor func testBrowseTagDisclosureEdgesAtDefaultAndLargerType() {
+        defer { captureFailure() }
+        for large in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--library-ui-fixture", "--browse-tags-fixture"] + (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] : [])
+            app.launch(); app.buttons["browser-open"].tap()
+            let disclosure = app.buttons["track-tags-1"]
+            XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+            disclosure.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)).tap()
+            XCTAssertTrue(app.navigationBars["Track tags"].waitForExistence(timeout: 5), "Bottom edge on a row without evidence must open its tags")
+            app.buttons["Done"].tap()
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = large ? "Large type measured tag rail boundaries" : "Default measured tag rail boundaries"; shot.lifetime = .keepAlways; add(shot)
+            for y in [0.2, 0.8] {
+                let start = disclosure.coordinate(withNormalizedOffset: CGVector(dx: -0.15, dy: y))
+                start.press(forDuration: 0.06, thenDragTo: start.withOffset(CGVector(dx: 115, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+                XCTAssertFalse(app.navigationBars["Track tags"].exists, "Swiping beside label must not open tags")
+                expectation(for: NSPredicate(format: "value CONTAINS %@", "Cached Test Tone"), evaluatedWith: app.buttons["deck-1-info"]); waitForExpectations(timeout: 8)
+                app.buttons["browser-open"].tap()
+                XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+            }
+            app.terminate()
+        }
+    }
     @MainActor func testLibraryFilterChipsAndBPM() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
