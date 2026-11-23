@@ -21,5 +21,14 @@ for (const [route, file, type] of entries) {
   out += `  ${JSON.stringify(route)}: [${JSON.stringify(readFileSync(here + file, 'utf8'))}, ${JSON.stringify(type)}],\n`;
 }
 out += '};\n';
-writeFileSync(here + 'browser_sources.mjs', out);
-console.log('browser_sources.mjs regenerated');
+if (process.argv.includes('--check')) {
+  const current = readFileSync(here + 'browser_sources.mjs', 'utf8');
+  if (current !== out) {
+    console.error('browser_sources.mjs is stale; run node sync_check_page.mjs');
+    process.exit(1);
+  }
+  console.log('browser_sources.mjs is fresh');
+} else {
+  writeFileSync(here + 'browser_sources.mjs', out);
+  console.log('browser_sources.mjs regenerated');
+}
