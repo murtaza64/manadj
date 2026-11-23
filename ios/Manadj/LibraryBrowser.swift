@@ -423,24 +423,28 @@ private struct TrackTagRail: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            // Compact two-line rail. The 44pt disclosure extends upward into this
-            // row's metadata area, never below the row into the next track.
+            // Reserve measured scaled line heights so tags never spill into another row.
             let visible = visibleTags(width: geometry.size.width)
             let hidden = tags.count - visible.count
-            HStack(spacing: 3) {
+            HStack(alignment: .top, spacing: 3) {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(lines(visible, width: max(0, geometry.size.width - (hidden > 0 ? disclosureWidth + 3 : 0))).enumerated()), id: \.offset) { _, row in
                         HStack(spacing: 3) { ForEach(row, id: \.id) { tag in TagBadge(tag: tag, active: selected.contains(tag.id)) } }
                     }
                 }
-                if hidden > 0 { Button("+\(hidden)") { expanded = true }.font(Ink.font(9)).frame(width: disclosureWidth, height: 44).offset(y: -9).accessibilityLabel("Show all \(tags.count) tags").accessibilityIdentifier("track-tags-\(track.id)") }
+                if hidden > 0 { Button("+\(hidden)") { expanded = true }.font(Ink.font(9)).frame(width: disclosureWidth, height: 44).offset(y: min(0, (railHeight - 44) / 2)).accessibilityLabel("Show all \(tags.count) tags").accessibilityIdentifier("track-tags-\(track.id)") }
             }
-        }.frame(minWidth: 0, maxWidth: .infinity).frame(height: 26)
+        }.frame(minWidth: 0, maxWidth: .infinity).frame(height: railHeight)
             .sheet(isPresented: $expanded) {
                 NavigationStack { List(tags, id: \.id) { tag in TagBadge(tag: tag, active: selected.contains(tag.id)).frame(minHeight: 32) }
                     .navigationTitle("Track tags").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { expanded = false } } } }
                     .presentationDetents([.medium, .large])
             }
+    }
+    private var railHeight: CGFloat {
+        let base = UIFont(name: "UbuntuMono-Regular", size: 9) ?? .monospacedSystemFont(ofSize: 9, weight: .regular)
+        let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: base)
+        return 2 * ceil(font.lineHeight + 4) + 1
     }
     private var disclosureWidth: CGFloat {
         let base = UIFont(name: "UbuntuMono-Regular", size: 9) ?? .monospacedSystemFont(ofSize: 9, weight: .regular)
