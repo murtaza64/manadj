@@ -13,11 +13,6 @@ import sqlite3
 import time
 from uuid import UUID
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
-
-from .peer_sync.group_contracts import DOMAIN, Delivery, Operation, Page, Signed, decode, unpack
-from .peer_sync.service import validate_complete
-
 SCHEMA = "manadj-library-snapshot/v1"
 MAX_PART = 250_000  # Reserve headroom for Python/JS numeric serialization differences.
 MAX_TOTAL = 63 * 1024 * 1024
@@ -50,7 +45,25 @@ def group_denied_sessions(db, existing):
     Own-issued operations verified against pinned member keys and the local
     group authority stay local; every other claim from signed bodies and
     possession proofs denies exactly its session. Unreadable evidence fails the
-    whole preparation - it never counts as local, never as empty."""
+    whole preparation - it never counts as local, never as empty.
+
+    Signed-evidence verification needs the app's crypto stack, which the
+    minimal dep-free check environment does not install. Empty evidence
+    short-circuits before those imports; non-empty evidence without the
+    stack fails the whole preparation, never a local classification."""
+    op_rows = poss_rows = 0
+    if "device_group_operations" in existing:
+        op_rows = db.execute('SELECT COUNT(*) FROM "device_group_operations"').fetchone()[0]
+    if "device_group_possessions" in existing:
+        poss_rows = db.execute('SELECT COUNT(*) FROM "device_group_possessions"').fetchone()[0]
+    if not op_rows and not poss_rows:
+        return set(), 0
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+        from .peer_sync.group_contracts import DOMAIN, Delivery, Operation, Page, Signed, decode, unpack
+        from .peer_sync.service import validate_complete
+    except ImportError:
+        fail("cloud_group_evidence_unreadable")
     groups, members, replica = {}, {}, None
     if "device_groups" in existing:
         for row in db.execute('SELECT group_id,device_id,private_seed_b64 FROM "device_groups"'):

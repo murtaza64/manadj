@@ -1,11 +1,22 @@
 """Synthetic SQLite fixtures only; no app/database initialization or real files."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
 from backend.cloud_snapshot import prepare_snapshot, PreparationError
+
+try:  # The minimal dep-free CI step runs the stdlib subset; full envs run all.
+    import cryptography, rfc8785, pydantic  # noqa: F401
+    from backend.peer_sync import group_contracts  # noqa: F401
+    HAVE_GROUP_DEPS = True
+except ImportError:
+    HAVE_GROUP_DEPS = False
+if os.environ.get("CLOUD_SNAPSHOT_REQUIRE_GROUP_DEPS") and not HAVE_GROUP_DEPS:
+    raise ImportError("group signed-evidence deps required for this run but unavailable")
+GROUP_DEPS_REASON = "group signed-evidence deps unavailable in this environment"
 
 class FrozenPreparation(unittest.TestCase):
     def setUp(self):
@@ -155,6 +166,7 @@ class FrozenPreparation(unittest.TestCase):
         self.db.execute("INSERT INTO session_chunks VALUES(4,4,0,'[{\"t\":1,\"kind\":\"load\",\"trackId\":1}]')")
         self.db.execute("INSERT INTO takes VALUES(4,'group-take',?,NULL)", (self.PEER_SESSION,))
         self.db.commit()
+    @unittest.skipUnless(HAVE_GROUP_DEPS, GROUP_DEPS_REASON)
     def test_group_signed_evidence_excludes_foreign_and_keeps_own_verified(self):
         self._enroll_group()
         own = self._signed_operation(0, self.OWN, self.OWN_SESSION, "44444444-4444-4444-8444-444444444444")
@@ -172,6 +184,7 @@ class FrozenPreparation(unittest.TestCase):
         self.assertIn("own-take", take_ids); self.assertNotIn("group-take", take_ids)
         self.assertTrue(any(x == "Own verified group-published sessions included as local: 1" for x in value["omissions"]))
         self.assertTrue(any(x == "Group-claimed sessions excluded by signed evidence: 1" for x in value["omissions"]))
+    @unittest.skipUnless(HAVE_GROUP_DEPS, GROUP_DEPS_REASON)
     def test_group_evidence_denies_even_when_signature_never_verifies(self):
         self._enroll_group()
         peer = self._signed_operation(32, self.PEER, self.PEER_SESSION, "77777777-7777-4777-8777-777777777777")
@@ -183,6 +196,7 @@ class FrozenPreparation(unittest.TestCase):
         self.db.commit()
         rows = self.rows(prepare_snapshot(self.path))
         self.assertNotIn(self.PEER_SESSION, [r["uuid"] for r in rows["sessions"]])
+    @unittest.skipUnless(HAVE_GROUP_DEPS, GROUP_DEPS_REASON)
     def test_group_possession_proof_alone_denies_its_session(self):
         self._enroll_group()
         peer = self._signed_operation(32, self.PEER, self.PEER_SESSION, "77777777-7777-4777-8777-777777777777")
@@ -196,6 +210,7 @@ class FrozenPreparation(unittest.TestCase):
         rows = self.rows(prepare_snapshot(self.path))
         self.assertNotIn(self.PEER_SESSION, [r["uuid"] for r in rows["sessions"]])
         self.assertNotIn("group-take", [r["uuid"] for r in rows["takes"]])
+    @unittest.skipUnless(HAVE_GROUP_DEPS, GROUP_DEPS_REASON)
     def test_unreadable_group_evidence_fails_visibly_never_local(self):
         self._enroll_group()
         import base64

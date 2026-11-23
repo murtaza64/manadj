@@ -71,7 +71,17 @@ jobs:
           set -euo pipefail
           python cloud/library/check_config.py
           python -m unittest discover -s cloud/library -p test_config.py
+      - name: Snapshot exporter stays importable without project dependencies
+        run: |
+          set -euo pipefail
           python -m unittest discover -s tests -p test_cloud_snapshot_unit.py
+      - uses: astral-sh/setup-uv@v6
+      - name: Locked project environment, full snapshot privacy suite with zero skips
+        run: |
+          set -euo pipefail
+          uv sync --frozen
+          CLOUD_SNAPSHOT_REQUIRE_GROUP_DEPS=1 uv run --no-sync python -m unittest discover -s tests -p test_cloud_snapshot_unit.py -v 2>&1 | tee "$RUNNER_TEMP/snapshot-unit.log"
+          ! grep -q 'skipped' "$RUNNER_TEMP/snapshot-unit.log"
       - name: Package the exact disabled Worker without deployment or credentials
         if: runner.os == 'Linux'
         working-directory: cloud/library
