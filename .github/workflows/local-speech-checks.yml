@@ -4,6 +4,8 @@ on:
     paths:
       - 'desktop/local-speech*'
       - 'scripts/release/local_speech_bundle.py'
+      - 'scripts/release/build_dmg.py'
+      - 'tests/test_local_speech_assembly.py'
       - 'tests/test_local_speech_bundle.py'
       - 'frontend/src/feedback/localDictate*'
       - '.github/workflows/local-speech-checks.yml'
@@ -42,3 +44,8 @@ jobs:
           from scripts.release.local_speech_bundle import build_local_speech
           build_local_speech(Path.cwd(), Path(os.environ['RUNNER_TEMP']) / 'local-speech-bundle', '0.0.0')
           PY
+      - name: Assemble nested helper and verify outer signature without capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_local_speech_assembly.py -v
