@@ -169,11 +169,9 @@ Before enabling personal-data upload:
 - Profile largest parts and a full ledger under Workers Free's 10ms CPU limit.
   Node elapsed times and a dry-run are not that measurement. Reduce bounded work
   or redesign visibly if needed; do not silently upgrade or raise limits.
-- Run the staged synthetic real-service check (`service_check.mjs` below): it
+- Run the staged synthetic real-service check (`service_check.mjs` above): it
   covers begin/upload/receipt/hash readback, exact retries, immutable
   rejection, and explicit deletion with verified absence on the real bucket.
-- Resolve legacy/sessionless history provenance and group signed-evidence
-  selection. The prepared exporter blocks those uncertain cases, not a fallback.
 - Keep the app default disabled until all gates pass. No personal audio/library
   files are needed for these synthetic checks. No release cut is authorized.
 
