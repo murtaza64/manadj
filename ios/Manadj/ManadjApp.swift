@@ -219,7 +219,7 @@ struct WorkspaceView: View {
             let accepted = model.load(track, deck: model.loadTarget)
             if accepted { withAnimation { browsing = false } }
             return accepted
-        })
+        }, visibleDeckIndices: [0, 1]) // Both current portrait and landscape workspaces render A/B only.
     }
     @ViewBuilder private var centerModePicker: some View {
         if ProcessInfo.processInfo.arguments.contains("--plain-center-tabs") { plainCenterTabs }

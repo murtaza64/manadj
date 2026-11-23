@@ -8,7 +8,7 @@ struct LibraryBrowser: View {
     var onDrawerPull: (CGFloat) -> Void = { _ in }
     var onDrawerRelease: (CGFloat, CGFloat) -> Void = { _, _ in }
     var onLoad: (LibraryTrack) -> Bool
-    var visibleDeckIndices = [0, 1]
+    let visibleDeckIndices: [Int]
     @FocusState private var searchFocused: Bool
     @State private var restoreSearchAfterError = false
     @State private var keyboardOpen = false
@@ -26,6 +26,7 @@ struct LibraryBrowser: View {
     @State private var tagMatch: TagMatch = .any
     @State private var playlistMenu = false
     @State private var playlistSearch = ""
+    @State private var categoryMenu = false
     @State private var followMatches: [Int: [Int]] = [:]
     private var visibleFollowDecks: [BrowseFollowPolicy.Deck] {
         visibleDeckIndices.filter { model.decks.indices.contains($0) }.map {
@@ -97,6 +98,8 @@ struct LibraryBrowser: View {
                     if tagsOpen {
                         HStack(spacing: 5) {
                             TagMatchSwitch(mode: $tagMatch)
+                            Button { categoryMenu = true } label: { Image(systemName: "folder").frame(width: 44, height: 44) }
+                                .accessibilityLabel("Browse tag categories").accessibilityIdentifier("browse-tag-categories")
                             ScrollView(.horizontal, showsIndicators: true) {
                                 HStack(spacing: 5) {
                                     ForEach(model.snapshot?.tags ?? [], id: \.id) { tag in
@@ -126,7 +129,10 @@ struct LibraryBrowser: View {
                     }
                 }
                 HStack {
-                    Text("\(rows.count) tracks · " + (followEnabled ? "Follow " + referenceDecks.map { Ink.deckName($0.index) }.joined(separator: "+") : sort.rawValue))
+                    Text("\(rows.count) \(rows.count == 1 ? "track" : "tracks") · \(model.downloaded.count) downloaded")
+                        .accessibilityIdentifier("browse-count")
+                    if followEnabled { Text("Follow " + referenceDecks.map { Ink.deckName($0.index) }.joined(separator: "+")) }
+                    if case let .tag(id) = source { Button((model.snapshot?.tags.first { $0.id == id }?.name ?? "Tag") + " ×") { navigate(.collection) }.accessibilityLabel("Clear browsed tag") }
                     Spacer()
                     if filtering || model.busy { ProgressView().controlSize(.small) }
                 }.font(Ink.font(11)).foregroundStyle(Ink.muted)
@@ -189,6 +195,7 @@ struct LibraryBrowser: View {
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardOpen = true }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardOpen = false }
             .task(id: taskId) { await filter() }
+            .sheet(isPresented: $categoryMenu) { categoryPicker }
             .onChange(of: model.error) { _, error in
                 if error == nil && restoreSearchAfterError {
                     restoreSearchAfterError = false
@@ -201,6 +208,23 @@ struct LibraryBrowser: View {
                         searchFocused = true
                     }
                 }
+            }
+        }
+        private var categoryPicker: some View {
+            NavigationStack {
+                List {
+                    Button("All tracks") { navigate(.collection); categoryMenu = false }.accessibilityIdentifier("category-all-tracks")
+                    ForEach(model.snapshot?.categories ?? [], id: \.id) { category in
+                        NavigationLink(category.name) {
+                            List((model.snapshot?.tags ?? []).filter { $0.categoryId == category.id }, id: \.id) { tag in
+                                Button { navigate(.tag(tag.id)); categoryMenu = false } label: {
+                                    HStack { TagBadge(tag: tag, active: tags.contains(tag.id)); Spacer(); Text("\(model.snapshot?.tracks.filter { $0.tagIds.contains(tag.id) }.count ?? 0)").foregroundStyle(Ink.muted) }.frame(minHeight: 44)
+                                }.accessibilityIdentifier("category-tag-\(tag.id)")
+                            }.navigationTitle(category.name)
+                        }.accessibilityIdentifier("tag-category-\(category.id)")
+                    }
+                }.navigationTitle("Tag categories")
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { categoryMenu = false } } }
             }
         }
         private var playlistPicker: some View {
