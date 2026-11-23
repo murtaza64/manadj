@@ -47,6 +47,13 @@ export class Ledger {
     }
     reject(409, 'control_busy_retry');
   }
+  // Read-only counter view for /v1/status preflight; never debits or writes.
+  // A day that moved on reads as zero, exactly what the next debit would see.
+  async usage() {
+    const { state } = await this.load();
+    if (state.day !== this.day) return { day: this.day, writes: 0, reads: 0 };
+    return { day: state.day, writes: state.writes, reads: state.reads };
+  }
   debit(s, kind) {
     if (this.day < s.day) reject(503, 'clock_invalid');
     if (this.day !== s.day) { s.day = this.day; s.writes = 0; s.reads = 0; }

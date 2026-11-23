@@ -10,8 +10,12 @@ export function createHandler({ authorize = authorizeOwner, clock = Date.now } =
       const url = new URL(request.url);
       if (url.origin !== env.LIBRARY_ORIGIN || url.search || url.hash || /%|\/\//.test(url.pathname)) reject(404, 'route_not_found');
       if (url.pathname === '/v1/status' && request.method === 'GET') {
-        await authorize(request, env);
-        return response({ authenticated: true, snapshotsEnabled: env.SNAPSHOTS_ENABLED === 'true', limits: LIMITS });
+        const owner = await authorize(request, env);
+        // Live admission counters for budget preflight. The disabled or
+        // unbound deployment never touches storage for this.
+        const usage = env.SNAPSHOTS_ENABLED === 'true' && env.LIBRARY_BUCKET
+          ? await new Ledger(env.LIBRARY_BUCKET, owner?.sub, clock()).usage() : null;
+        return response({ authenticated: true, snapshotsEnabled: env.SNAPSHOTS_ENABLED === 'true', limits: LIMITS, usage });
       }
       // Disabled preparation performs no R2 operation, key fetch or body parsing.
       if (env.SNAPSHOTS_ENABLED !== 'true') reject(503, 'snapshots_disabled');

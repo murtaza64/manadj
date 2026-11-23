@@ -3,36 +3,11 @@ import assert from 'node:assert/strict';
 import { generateKeyPair, SignJWT } from 'jose';
 import { LIMITS, SCHEMA, bytes, digest, readJSON, validateManifest, authorizeOwner } from './contracts.mjs';
 import { createHandler } from './worker.mjs';
+import { Bucket } from './test_bucket.mjs';
 import { Ledger, CONTROL_KEY, partKey } from './ledger.mjs';
 import { validatePart } from './part.mjs';
 const ORIGIN = 'https://library.example.test', ID = '12345678-1234-4234-8234-123456789012';
 const ID2 = '22345678-1234-4234-8234-123456789012', NOW = Date.parse('2026-11-22T18:00:00Z');
-class Bucket {
-  constructor() { this.objects = new Map(); this.serial = 0; this.calls = []; this.hook = null; }
-  async get(key) {
-    this.calls.push(['get', key]); await Promise.resolve();
-    const x = this.objects.get(key); if (!x) return null;
-    const copy = new Uint8Array(x.raw);
-    return { size: copy.length, etag: x.etag, customMetadata: x.customMetadata,
-      text: async () => new TextDecoder().decode(copy), arrayBuffer: async () => copy.buffer };
-  }
-  async delete(key) {
-    this.calls.push(['delete', key]); await Promise.resolve();
-    if (this.hook) await this.hook(key, undefined, { delete: true });
-    this.objects.delete(key);
-  }
-  async put(key, value, options = {}) {
-    this.calls.push(['put', key]); await Promise.resolve();
-    if (this.hook) await this.hook(key, value, options);
-    const current = this.objects.get(key), condition = options.onlyIf;
-    assert.ok(condition instanceof Headers, 'all writes are conditional');
-    if (condition.get('if-none-match') === '*' && current) return null;
-    if (condition.has('if-match') && (!current || condition.get('if-match') !== `"${current.etag}"`)) return null;
-    const raw = typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
-    const object = { raw: new Uint8Array(raw), etag: String(++this.serial), customMetadata: options.customMetadata };
-    this.objects.set(key, object); return { etag: object.etag };
-  }
-}
 function fixture() {
   const bucket = new Bucket(), env = { LIBRARY_ORIGIN: ORIGIN, SNAPSHOTS_ENABLED: 'true', LIBRARY_BUCKET: bucket };
   const handler = createHandler({ authorize: async request => {
@@ -67,7 +42,7 @@ test('default and false disabled switch never calls authorization, storage or co
 });
 test('disabled status verifies owner without touching R2', async () => {
   const f = fixture(); f.env.SNAPSHOTS_ENABLED = 'false';
-  assert.deepEqual(await (await f.call('/v1/status')).json(), { authenticated: true, snapshotsEnabled: false, limits: LIMITS });
+  assert.deepEqual(await (await f.call('/v1/status')).json(), { authenticated: true, snapshotsEnabled: false, limits: LIMITS, usage: null });
   assert.equal(f.bucket.calls.length, 0);
 });
 test('complete frozen parts, exact retry, immutable receipt and byte-identical readback', async () => {
@@ -387,4 +362,38 @@ test('deletion is owner-gated and disabled-gated like every other snapshot route
   f.env.SNAPSHOTS_ENABLED = 'false';
   assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 503);
   assert.ok(await f.bucket.get(partKey(ID, 0)));
+});
+
+test('status reports live usage when enabled and bound', async () => {
+  const f = fixture();
+  let status = await (await f.call('/v1/status')).json();
+  assert.deepEqual(status.usage, { day: '2026-11-22', writes: 0, reads: 0 });
+  await prepare(f);
+  status = await (await f.call('/v1/status')).json();
+  assert.equal(status.usage.writes, 1);
+  assert.equal(status.usage.reads, 0);
+  assert.equal(status.usage.day, '2026-11-22');
+});
+
+test('status usage is null and storage untouched when disabled or unbound', async () => {
+  for (const mutate of [env => { env.SNAPSHOTS_ENABLED = 'false'; }, env => { env.LIBRARY_BUCKET = undefined; }]) {
+    const f = fixture();
+    const real = f.env.LIBRARY_BUCKET;
+    f.env.LIBRARY_BUCKET = new Proxy({}, { get() { throw new Error('storage touched'); } });
+    mutate(f.env);
+    const status = await (await f.call('/v1/status')).json();
+    assert.equal(status.usage, null);
+    assert.equal(typeof status.authenticated, 'boolean');
+  }
+});
+
+test('status usage reads a rolled day as zero without mutating the stored counters', async () => {
+  const f = fixture();
+  await f.bucket.put(CONTROL_KEY, bytes({ version: 1, owner: 'synthetic-owner', day: '2026-11-21',
+    writes: 500, reads: 12, snapshots: [] }), { onlyIf: new Headers({ 'If-None-Match': '*' }), httpMetadata: {} });
+  const status = await (await f.call('/v1/status')).json();
+  assert.deepEqual(status.usage, { day: '2026-11-22', writes: 0, reads: 0 });
+  const stored = JSON.parse(await (await f.bucket.get(CONTROL_KEY)).text());
+  assert.equal(stored.day, '2026-11-21');
+  assert.equal(stored.writes, 500);
 });
