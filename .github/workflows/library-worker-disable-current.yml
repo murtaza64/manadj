@@ -21,7 +21,7 @@ jobs:
       - name: Check out reviewed immutable library source, never a caller-selected ref
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 277bc6cd72c36a884b7ebb646aa2bff5e1c5dd6f
+          ref: bd808f4c759a7ef4aedef20b8ae08d91969b52ca
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
