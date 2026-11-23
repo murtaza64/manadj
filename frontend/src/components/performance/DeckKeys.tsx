@@ -11,6 +11,7 @@
  * modifier chords (Cmd on macOS, Ctrl elsewhere — utils/platform).
  * Hold-style keys suppress key repeat.
  */
+import{mixReset,resetMixKey}from'../../performance/resetMix';
 import { useEffect, useRef } from 'react';
 import { useViewActive } from '../../contexts/viewActive';
 import { useDeck } from '../../hooks/useDeck';
@@ -31,6 +32,23 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
   const mixer = useMixer();
   const cueHeld = useRef(false);
   const padsHeld = useRef(new Map<number, () => void>());
+
+  useEffect(()=>{
+    if(!viewActive)return;
+    const key=resetMixKey(deck),cancel=()=>mixReset.cancel(deck);
+    const offGuard=mixReset.watchGuards(deck);
+    const down=(event:KeyboardEvent)=>{
+      if(isGuardedKeyEvent(event)||event.shiftKey||event.isComposing||event.defaultPrevented){cancel();return;}
+      if(event.key!==key)return;
+      event.preventDefault();if(event.repeat)return;
+      mixReset.begin(deck,mixer,()=>!hasKeyboardOverlay()&&!isTextEntryTarget(document.activeElement)&&!document.hidden);
+    };
+    const up=(event:KeyboardEvent)=>{if(event.key===key||event.code===(key==="'"?'Quote':'Backslash'))cancel();};
+    const visibility=()=>{if(document.hidden)cancel();};
+    document.addEventListener('keydown',down);document.addEventListener('keyup',up);
+    document.addEventListener('focusin',cancel);document.addEventListener('visibilitychange',visibility);window.addEventListener('blur',cancel);
+    return()=>{offGuard();cancel();document.removeEventListener('keydown',down);document.removeEventListener('keyup',up);document.removeEventListener('focusin',cancel);document.removeEventListener('visibilitychange',visibility);window.removeEventListener('blur',cancel);};
+  },[deck,mixer,viewActive]);
 
   // Keep gesture state independent of React/query repaint frequency. Mouse
   // deltas read current mixer values so reversing at a stop responds at once.

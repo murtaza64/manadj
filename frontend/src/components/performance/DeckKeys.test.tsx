@@ -33,7 +33,7 @@ const fixture = vi.hoisted(() => ({
 const hotCues = vi.hoisted(() => ({ enabled: true, down: vi.fn(), up: vi.fn(), walk: vi.fn(), remove: vi.fn() }));
 const syncGroup = vi.hoisted(() => ({ match: vi.fn(), toggle: vi.fn(), getSnapshot: vi.fn() }));
 const mixer = vi.hoisted(() => ({
-  getChannelState: vi.fn(), getAutomation: vi.fn(), setEq: vi.fn(), setFilter: vi.fn(), setFader: vi.fn(),
+  getChannelState: vi.fn(), getAutomation: vi.fn(), setEq: vi.fn(), setFilter: vi.fn(), setFader: vi.fn(), setTrim: vi.fn(),
 }));
 vi.mock('../../hooks/useMixer', () => ({ useMixer: () => mixer }));
 vi.mock('../../settings/persistedSettings', () => ({ writeSetting: vi.fn(), removeSetting: vi.fn() }));
@@ -890,4 +890,31 @@ describe('mouse-key gestures and cue walking', () => {
     key('a', { metaKey: true, shiftKey: true });
     expect(hotCues.walk).not.toHaveBeenCalled();
   });
+});
+
+it('reset hold respects early release, modifiers, mode changes, and physical target changes',()=>{
+ vi.useFakeTimers();const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ const render=(enabled=true)=>act(()=>root.render(<DeckKeys enabled={enabled}/>));
+ const down=(key="'",extra:KeyboardEventInit={})=>act(()=>document.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,...extra})));
+ const up=()=>act(()=>document.dispatchEvent(new KeyboardEvent('keyup',{key:"'",bubbles:true})));
+ const tick=(ms:number)=>act(()=>vi.advanceTimersByTime(ms));
+ try{render();down();tick(699);up();tick(1);expect(mixer.setTrim).not.toHaveBeenCalled();
+ down("'",{ctrlKey:true});tick(700);expect(mixer.setTrim).not.toHaveBeenCalled();
+ down();render(false);tick(700);expect(mixer.setTrim).not.toHaveBeenCalled();
+ render();down();fixture.deck='C';render();tick(700);expect(mixer.setTrim).not.toHaveBeenCalled();
+ down();down("'",{repeat:true});tick(700);expect(mixer.setTrim).toHaveBeenCalledExactlyOnceWith('C',.5);up();
+ }finally{act(()=>root.unmount());host.remove();vi.useRealTimers();}
+});
+
+it('cancels reset on focus, blur and dialogs, and never starts in typing targets',async()=>{
+ vi.useFakeTimers();const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ const down=(target:EventTarget=document)=>act(()=>target.dispatchEvent(new KeyboardEvent('keydown',{key:"'",bubbles:true})));
+ const tick=()=>act(()=>vi.advanceTimersByTime(700));
+ try{act(()=>root.render(<DeckKeys/>));
+ const input=document.createElement('input');host.append(input);down(input);tick();expect(mixer.setTrim).not.toHaveBeenCalled();
+ down();act(()=>input.focus());tick();expect(mixer.setTrim).not.toHaveBeenCalled();input.blur();
+ down();act(()=>window.dispatchEvent(new Event('blur')));tick();expect(mixer.setTrim).not.toHaveBeenCalled();
+ down();const dialog=document.createElement('div');dialog.setAttribute('aria-modal','true');
+ await act(async()=>{host.append(dialog);await Promise.resolve();});dialog.remove();tick();expect(mixer.setTrim).not.toHaveBeenCalled();
+ }finally{act(()=>root.unmount());host.remove();vi.useRealTimers();}
 });

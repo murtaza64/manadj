@@ -1,0 +1,10 @@
+.perf-zone-mix {position:relative;}
+.perf-reset-mix.player-button {position:absolute;left:-25px;top:52px;width:22px;height:20px;padding:1px;z-index:1;color:var(--subtext0);}
+.perf-reset-mix svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.4;}
+.perf-reset-mix .reset-progress{stroke-dasharray:51;stroke-dashoffset:51;}
+.perf-reset-mix.holding{color:var(--warning);border-color:var(--warning);}
+.perf-reset-mix.holding .reset-progress{animation:reset-mix-hold .7s linear forwards;}
+.perf-reset-mix.done{color:var(--success);border-color:var(--success);}
+@keyframes reset-mix-hold{to{stroke-dashoffset:0;}}
+@media(prefers-reduced-motion:reduce){.perf-reset-mix.holding .reset-progress{animation:none;stroke-dashoffset:0;}}
+.perf-deckpanel.mirrored .perf-reset-mix{left:auto;right:-25px;}

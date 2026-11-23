@@ -15,6 +15,7 @@
  */
 import {waveformFillTimeAt} from '../../performance/waveformFillView';
 import {useHeardWaveformClock} from '../../performance/useHeardWaveformClock';
+import{ResetMixButton}from'../../performance/ResetMixButton';
 import {OutputDelayCue} from '../../performance/OutputDelayCue';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -937,6 +938,7 @@ function MixZone({ track }: { track: Track | null }) {
 
   return (
     <div className="perf-zone perf-zone-mix">
+      <ResetMixButton/>
       <div className="perf-knobrow">
         {/* TRIM/EQ/FLT and PFL spread evenly across the row; PFL at the
             right end on every Deck */}
