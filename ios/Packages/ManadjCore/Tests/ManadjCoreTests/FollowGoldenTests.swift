@@ -41,6 +41,24 @@ final class FollowGoldenTests: XCTestCase {
         XCTAssertGreaterThan(count, 1500)
         print("Desktop Follow golden: \(cases.count) cases, \(count) rows")
     }
+    func testOptionalAgreementLiftStaysWithinEvidenceTiersAndDeduplicatesReferences() throws {
+        let snapshot = try snapshot()
+        let library = Library(snapshot)
+        let refs = Array(snapshot.tracks.prefix(2).map(\.id))
+        let before = library.follow(refs)
+        var params = FollowParams(); params.sharedMatchBonus = 2
+        let lifted = library.follow(refs, params: params)
+        XCTAssertEqual(Set(lifted.map(\.id)), Set(before.map(\.id)))
+        XCTAssertEqual(lifted.map { $0.known?.rawValue ?? 3 }, lifted.map { $0.known?.rawValue ?? 3 }.sorted())
+        for row in lifted {
+            XCTAssertEqual(row.score, before.first { $0.id == row.id }?.score)
+            XCTAssertEqual(Set(row.referenceMatches.map(\.referenceId)).count, row.referenceMatches.count)
+        }
+        if let ref = refs.first {
+            XCTAssertEqual(library.follow([ref, ref], params: params).map(\.id), library.follow([ref], params: params).map(\.id))
+            XCTAssertTrue(library.follow([ref, ref], params: params).allSatisfy { $0.referenceMatches.count <= 1 })
+        }
+    }
     func testReferenceEvidencePreservesBestScoreAndUnion() throws {
         let snapshot = try snapshot()
         let references = Array(snapshot.tracks.prefix(2))

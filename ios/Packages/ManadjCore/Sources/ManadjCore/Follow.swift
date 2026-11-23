@@ -6,6 +6,8 @@ public struct FollowParams: Sendable {
     public var knownOnly = false
     public var temperature = 0.0
     public var seed: UInt32 = 0
+    /// Native Browse pause-only agreement lift, off for existing callers.
+    public var sharedMatchBonus = 0.0
     public init() {}
 }
 public enum KnownKind: Int, Sendable { case favoritedTransition, linked, savedTransition }
@@ -22,6 +24,11 @@ public struct ScoreBreakdown: Sendable {
     public var affinity: Double { key + tags + artist }
     public var total: Double { affinity + energy + bpm }
 }
+public struct FollowReferenceMatch: Sendable {
+    public let referenceId: Int
+    public let known: KnownKind?
+    public let breakdown: ScoreBreakdown
+}
 public struct FollowRow: Sendable, Identifiable {
     public let track: LibraryTrack
     public let known: KnownKind?
@@ -30,6 +37,7 @@ public struct FollowRow: Sendable, Identifiable {
     public let matchedTagIds: Set<Int>
     public let sharedArtist: Bool
     public let breakdown: ScoreBreakdown?
+    public let referenceMatches: [FollowReferenceMatch]
     public var id: Int { track.id }
     public var tier: EvidenceTier { known == nil ? .compatible : .known }
     public var label: String {
@@ -161,10 +169,14 @@ public enum FollowRanker {
             var keyMatched = false
             var artist = false
             var tags = Set<Int>()
+            var matches: [FollowReferenceMatch] = []
             for r in refs {
                 let evidence = referenceEvidence(r, candidate: c, snapshot: snapshot, params: params, gate: gates[r.id]!)
                 if let k = evidence.known, known == nil || k.rawValue < known!.rawValue { known = k }
                 let b = evidence.breakdown
+                if evidence.known != nil || evidence.admitted {
+                    matches.append(FollowReferenceMatch(referenceId: r.id, known: evidence.known, breakdown: b))
+                }
                 if best == nil || b.total > best!.total { best = b }
                 if evidence.admitted { admitted = true }
                 keyMatched = keyMatched || b.keyRelation != .other
@@ -172,11 +184,12 @@ public enum FollowRanker {
                 tags.formUnion(evidence.matchedTagIds)
             }
             if known == nil && !admitted { continue }
-            rows.append(FollowRow(track: c, known: known, score: best?.total ?? 0, keyMatched: keyMatched, matchedTagIds: tags, sharedArtist: artist, breakdown: best))
+            rows.append(FollowRow(track: c, known: known, score: best?.total ?? 0, keyMatched: keyMatched, matchedTagIds: tags, sharedArtist: artist, breakdown: best, referenceMatches: matches))
         }
         let salt = "\(params.seed):\(refs.map(\.id).sorted().map(String.init).joined(separator: ","))"
         func draw(_ r: FollowRow) -> Double {
-            r.score - (r.known == nil && params.temperature > 0 ? 30 * params.temperature * log(-log(uniform("\(salt):\(r.id)"))) : 0)
+            // Small lift inside the existing evidence tier, never a both-first sort.
+            r.score + (r.referenceMatches.count > 1 ? params.sharedMatchBonus : 0) - (r.known == nil && params.temperature > 0 ? 30 * params.temperature * log(-log(uniform("\(salt):\(r.id)"))) : 0)
         }
         // Explicit input ordinal preserves Android/desktop's stable ties.
         return rows.enumerated().sorted { a, b in
