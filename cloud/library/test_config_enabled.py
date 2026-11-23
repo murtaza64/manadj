@@ -15,9 +15,8 @@ class EnabledDeployment(unittest.TestCase):
         source = Path(__file__).resolve().parent
         for name in ("wrangler.toml", "package.json", "package-lock.json"):
             shutil.copyfile(source / name, self.root / name)
-        self.replace('SNAPSHOTS_ENABLED = "false"', 'SNAPSHOTS_ENABLED = "true"')
-        with (self.root / "wrangler.toml").open("a") as file:
-            file.write(R2_BLOCK)
+        # The reviewed enablement change made the real config the enabled one;
+        # the suite copies it verbatim and mutates copies for rejections.
 
     def tearDown(self):
         self.temp.cleanup()
