@@ -341,13 +341,18 @@ struct LibraryBrowser: View {
 private struct TagBadge: View {
     let tag: LibraryTag
     var active: Bool
+    private var selectedText: Color {
+        guard let value = parseHexColor(tag.color) else { return .black }
+        let r = Double((value >> 16) & 255) / 255, g = Double((value >> 8) & 255) / 255, b = Double(value & 255) / 255
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.52 ? .black : .white
+    }
     private var color: Color {
         guard let value = parseHexColor(tag.color) else { return Ink.accent }
         return Color(red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
     }
     var body: some View {
         Text(tag.name).font(Ink.font(9, bold: active)).lineLimit(1)
-            .foregroundStyle(active ? Color.black : color.opacity(0.9))
+            .foregroundStyle(active ? selectedText : color.opacity(0.9))
             .padding(.horizontal, 4).padding(.vertical, 2)
             .background(active ? color : color.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(color.opacity(active ? 1 : 0.35), lineWidth: 0.5))
