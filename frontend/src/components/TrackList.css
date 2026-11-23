@@ -246,6 +246,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 }
 
 .follow-temperature-controls .follow-reroll {
+  background: transparent;
   display: inline-flex;
   align-items: center;
   padding: 0 var(--space-4);

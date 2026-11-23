@@ -5,6 +5,9 @@ interface LibraryCloudSummary {
     reviewID?: string; reviewedSha256?: string; expiresAt?: number };
 }
 type LibraryCloudResult = { ok: true; value: LibraryCloudSummary } | { ok: false; error: string };
+interface LibraryCloudSnapshot { snapshotId: string; state: string; bytes: number; parts: number; createdAt: string }
+type LibraryCloudSnapshotsResult = { ok: true; value: LibraryCloudSnapshot[] } | { ok: false; error: string };
+type LibraryCloudDeleteResult = { ok: true; value: { deleted: { snapshotId: string; parts: number; bytes: number }; snapshots: LibraryCloudSnapshot[] } } | { ok: false; error: string };
 interface LibraryCloudBridge {
   state(): Promise<LibraryCloudResult>;
   connect(): Promise<LibraryCloudResult>;
@@ -12,6 +15,8 @@ interface LibraryCloudBridge {
   disconnect(): Promise<LibraryCloudResult>;
   review(): Promise<LibraryCloudResult>;
   upload(review: { reviewID: string; reviewedSha256: string }): Promise<LibraryCloudResult>;
+  snapshots(): Promise<LibraryCloudSnapshotsResult>;
+  deleteSnapshot(snapshot: { snapshotId: string }): Promise<LibraryCloudDeleteResult>;
   cancel(): Promise<LibraryCloudResult>;
 }
 interface Window { manadjLibraryCloud?: LibraryCloudBridge; }

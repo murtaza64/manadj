@@ -12,17 +12,30 @@ const messages: Record<string, string> = {
   cloud_prepare_failed: 'Could not prepare a safe metadata snapshot. Your library is unchanged.',
   cloud_upload_cancelled: 'Canceled locally. An incomplete cloud reservation may remain. No cloud data was deleted.',
   cloud_operation_cancelled: 'The operation was canceled.',
+  cloud_delete_readback_failed: 'The deletion result could not be verified. Check the stored list again before assuming anything was deleted.',
+  cloud_request_invalid: 'That cloud request was not in the reviewed format.',
 };
 export default function LibraryCloudSettings() {
   const bridge = window.manadjLibraryCloud;
   const [state, setState] = useState<LibraryCloudSummary>(EMPTY);
+  const [snapshots, setSnapshots] = useState<LibraryCloudSnapshot[] | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const mounted = useRef(true), operation = useRef(0);
+  const connected = state.connection.phase === 'connected', enabled = !!bridge && state.connection.enabled;
   useEffect(() => {
     mounted.current = true;
     bridge?.state().then(result => { if (mounted.current && result.ok) setState(result.value); });
     return () => { mounted.current = false; operation.current++; void bridge?.cancel(); };
   }, [bridge]);
+  useEffect(() => {
+    if (!connected || !bridge?.snapshots) { setSnapshots(null); return; }
+    const generation = operation.current;
+    void bridge.snapshots().then(result => {
+      if (mounted.current && generation === operation.current && result.ok) setSnapshots(result.value);
+    });
+  }, [bridge, connected]);
   async function act(action: () => Promise<LibraryCloudResult>) {
     const generation = ++operation.current; setBusy(true); setError(null);
     try {
@@ -34,7 +47,16 @@ export default function LibraryCloudSettings() {
     } catch { if (mounted.current && generation === operation.current) setError('Desktop connection unavailable. Your local data is unchanged.'); }
     finally { if (mounted.current && generation === operation.current) setBusy(false); }
   }
-  const connected = state.connection.phase === 'connected', enabled = !!bridge && state.connection.enabled;
+  async function removeSnapshot(snapshotId: string) {
+    const generation = ++operation.current; setBusy(true); setError(null); setNotice(null);
+    try {
+      const result = await bridge!.deleteSnapshot({ snapshotId });
+      if (!mounted.current || generation !== operation.current) return;
+      if (result.ok) { setSnapshots(result.value.snapshots); setNotice('Deleted and verified absent from the stored list.'); }
+      else setError(messages[result.error] ?? 'Cloud deletion failed. Nothing else was changed.');
+    } catch { if (mounted.current && generation === operation.current) setError('Desktop connection unavailable. No deletion state changed.'); }
+    finally { if (mounted.current && generation === operation.current) { setBusy(false); setConfirming(null); } }
+  }
   const review = state.upload, canUpload = enabled && connected && ['review', 'failed'].includes(review.phase) && !!review.reviewID && !!review.reviewedSha256;
   return <>
     <div className="settings-section-heading"><div><h2>Private metadata snapshots</h2>
@@ -52,13 +74,27 @@ export default function LibraryCloudSettings() {
           </>}
         </div>
       </>}
+      {connected && snapshots !== null && <section aria-label="Stored cloud snapshots" className="library-cloud-review">
+        <div><strong>Stored cloud snapshots</strong>
+          {snapshots.length === 0 ? <p>None stored.</p> : <ul>{snapshots.map(snapshot => <li key={snapshot.snapshotId}>
+            {snapshot.state} · {snapshot.bytes.toLocaleString()} bytes · {snapshot.parts} parts · {new Date(snapshot.createdAt).toLocaleString()}
+            {confirming === snapshot.snapshotId ? <>
+              {' '}Delete permanently? This cannot be undone.
+              <button className="btn btn-secondary" disabled={busy} onClick={() => void removeSnapshot(snapshot.snapshotId)}>Confirm delete</button>
+              <button className="btn btn-secondary" disabled={busy} onClick={() => setConfirming(null)}>Keep</button>
+            </> : <>{' '}<button className="btn btn-secondary" disabled={busy || snapshot.state === 'deleting'} onClick={() => { setNotice(null); setConfirming(snapshot.snapshotId); }}>Delete</button></>}
+          </li>)}</ul>}
+          <p className="settings-hint">Snapshots stay until you delete them here. Deletion is verified by readback. App quotas are not a billing cap. Your SSD backup stays separate.</p>
+        </div>
+      </section>}
+      {notice && <p role="status" className="settings-hint">{notice}</p>}
       {review.snapshotId && <section aria-label="Reviewed metadata snapshot" className="library-cloud-review">
         <div><strong>{review.phase === 'verified' ? 'Uploaded and read back' : 'Frozen metadata review'}</strong>
           <p>{review.destination}</p><p>{review.bytes?.toLocaleString()} bytes · {review.partCount} parts</p>
           <p>Snapshot {review.snapshotId}</p>
           <ul>{Object.entries(review.rowCounts ?? {}).map(([table, count]) => <li key={table}>{table}: {count.toLocaleString()} rows</li>)}</ul>
           <details><summary>What stays out</summary><ul>{review.omissions?.map((text, i) => <li key={i}>{text}</li>)}</ul></details>
-          <p className="settings-hint">Manual upload only. No cloud deletion control is available yet. App quotas are not a billing cap. Your SSD backup stays separate.</p>
+          <p className="settings-hint">Manual upload only. App quotas are not a billing cap. Your SSD backup stays separate.</p>
           {review.phase === 'verified' && <p role="status">Receipt and every downloaded part matched the reviewed hashes. Local files were not changed.</p>}
         </div>
         {canUpload && <button className="btn btn-primary" disabled={busy} onClick={() => void act(() => bridge!.upload({ reviewID: review.reviewID!, reviewedSha256: review.reviewedSha256! }))}>

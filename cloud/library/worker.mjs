@@ -39,6 +39,20 @@ export function createHandler({ authorize = authorizeOwner, clock = Date.now } =
         return new Response(raw, { headers: { ...HEADERS, etag: `"${await digest(raw)}"` } });
       }
       if (index === null) {
+        if (request.method === 'DELETE') {
+          // Consistency-safe explicit owner deletion: tombstone in the ledger
+          // first, remove part objects, verify absence by readback, then
+          // release the reservation. Any interruption leaves a resumable
+          // 'deleting' state, never a readable snapshot with missing parts.
+          const started = await ledger.startDelete(id);
+          if (!started.found) return response({ snapshotId: id, deleted: true, parts: 0, bytes: 0 });
+          for (let part = 0; part < started.parts; part++) {
+            await env.LIBRARY_BUCKET.delete(partKey(id, part));
+            if (await env.LIBRARY_BUCKET.get(partKey(id, part))) reject(503, 'delete_readback_failed');
+          }
+          await ledger.finishDelete(id);
+          return response({ snapshotId: id, deleted: true, parts: started.parts, bytes: started.bytes });
+        }
         if (request.method !== 'GET') reject(405, 'method_not_allowed');
         const receipt = await ledger.read(id), raw = bytes(receipt);
         return new Response(raw, { headers: { ...HEADERS, etag: `"${await digest(raw)}"` } });

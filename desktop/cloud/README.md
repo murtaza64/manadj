@@ -39,6 +39,10 @@ or URL parameter enables it. This is not an installed feature or release cut.
   and expires after15minutes. Only an explicit reviewed Upload sends bytes.
   Partial failures keep exact bytes for explicit retry, never re-export behind
   the review. Receipt and raw downloaded parts are checked independently.
+- `snapshots.js` lists stored cloud snapshots and performs explicit owner
+  deletion through the reviewed server operation. A deletion is confirmed only
+  after an independent listing readback shows the snapshot absent. Local review
+  state is cleared on deletion but never itself claims cloud deletion.
 - `ipc.js` checks the intended main frame and exposes only verbs and safe
   summaries. Top-level cross-document navigation cancels work; same-document
   history/hash routing and subframe navigation do not. Disposal always cancels. Disconnect is local only; no claim of
@@ -69,11 +73,14 @@ schema files, not Worker auth/deployment code or test data.
 ## Still required before enablement
 
 Real owner/browser and native sign-in, refresh/cancel and wrong-account denial;
-actual per-OS encrypted persistence; real private-R2 synthetic receipt/readback,
-concurrency/partial failures; largest-part/ledger Free-tier CPU measurements;
-independent owner-browser download verification; a supported consistency-safe
-explicit deletion operation, including confirmation/readback, before promising
-retention until the owner deletes. No delete endpoint exists yet.
+actual per-OS encrypted persistence; the staged synthetic real-R2 check
+(`cloud/library/service_check.mjs`: receipt/readback, retries, concurrency/partial
+failures, largest-part/ledger shapes under the Free-tier CPU limit, deletion with
+verified absence); independent owner-browser download verification. The
+consistency-safe explicit deletion operation now exists (server tombstone plus
+verified-absent part removal, main-process client, two-step Settings control) and
+its real-service result still must be verified by that staged check before
+relying on retention-until-the-owner-deletes.
 
 Legacy/sessionless/pruned history provenance and verified group-ledger selection
 are resolved in the exporter: local classification rests on source-verified
