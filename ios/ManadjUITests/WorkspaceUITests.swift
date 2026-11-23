@@ -379,6 +379,18 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertEqual(app.buttons["Filter tag Rolling"].value as? String, "Not selected")
         app.buttons["browse-follow"].tap(); XCTAssertEqual(app.buttons["browse-follow"].value as? String, "On")
         app.buttons["browse-follow"].tap(); XCTAssertEqual(app.buttons["browse-follow"].value as? String, "Off")
+        // Title-area taps must retain row-load intent, never open the tag sheet.
+        app.staticTexts["Cached Test Tone"].tap()
+        XCTAssertFalse(app.navigationBars["Track tags"].exists)
+        XCTAssertTrue(app.buttons["deck-0-info"].waitForExistence(timeout: 8))
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "Cached Test Tone"), evaluatedWith: app.buttons["deck-0-info"]); waitForExpectations(timeout: 8)
+        app.buttons["browser-open"].tap()
+        let preview = app.descendants(matching: .any)["library-row-preview-1"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        let swipeStart = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        swipeStart.press(forDuration: 0.06, thenDragTo: swipeStart.withOffset(CGVector(dx: 115, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+        XCTAssertFalse(app.navigationBars["Track tags"].exists)
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "Cached Test Tone"), evaluatedWith: app.buttons["deck-1-info"]); waitForExpectations(timeout: 8)
     }
     @MainActor func testLibraryFilterChipsAndBPM() {
         defer { captureFailure() }
