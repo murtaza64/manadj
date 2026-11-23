@@ -134,7 +134,7 @@ export function useWaveformRendererV2({
     if (waveformData && rendererRef.current) {
       rendererRef.current.setWaveformData(waveformData);
     }
-  }, [waveformData]);
+  }, [waveformData, clock]);
 
   const draw = useCallback(() => {
     rendererRef.current?.renderFrame(clock);
@@ -146,28 +146,28 @@ export function useWaveformRendererV2({
   // (waveformData) so a fresh renderer inherits the current visibility.
   useEffect(() => {
     if (!driven) rendererRef.current?.setActive(active);
-  }, [active, driven, waveformData]);
+  }, [active, driven, waveformData, clock]);
 
   // Playing gate (performance-hardening 01): pin the loop at 60fps while the
   // deck advances; the false→true flip also wakes an idle-polling loop
   // instantly (no play hitch). Re-applied after re-init.
   useEffect(() => {
     if (!driven) rendererRef.current?.setPlaying(playing);
-  }, [playing, driven, waveformData]);
+  }, [playing, driven, waveformData, clock]);
 
   // Stem masking (stems #213): per-stem textures upload once per Load;
   // the mask callback is sampled per frame (no per-toggle work here).
   useEffect(() => {
     rendererRef.current?.setStemWaveforms(stemWaveforms);
-  }, [stemWaveforms, hasData]);
+  }, [stemWaveforms, hasData, clock]);
   useEffect(() => {
     rendererRef.current?.setStemMask(stemMaskAt, stemLobeSplit);
-  }, [stemMaskAt, stemLobeSplit, hasData]);
+  }, [stemMaskAt, stemLobeSplit, hasData, clock]);
 
   // External wake (performance-hardening 01): repaint on wakeKey change.
   useEffect(() => {
     if (wakeKey !== undefined) rendererRef.current?.markDirty();
-  }, [wakeKey]);
+  }, [wakeKey, clock]);
 
   // Push-channel wake (#155): every event on the subscribed stream (e.g. a
   // paused jog seek's transport gesture) pulls an idle-parked loop forward
@@ -176,20 +176,20 @@ export function useWaveformRendererV2({
   useEffect(() => {
     if (driven || !subscribeWake) return;
     return subscribeWake(() => rendererRef.current?.markDirty());
-  }, [subscribeWake, driven, waveformData]);
+  }, [subscribeWake, driven, waveformData, clock]);
 
   // Persisted Waveform style: applied live (also after re-init).
   useEffect(() => {
     rendererRef.current?.setStyle(slotState.styleId, slotState.params);
-  }, [slotState, waveformData]);
+  }, [slotState, waveformData, clock]);
 
   useEffect(() => {
     rendererRef.current?.setCuePoint(cuePoint);
-  }, [cuePoint, waveformData]);
+  }, [cuePoint, waveformData, clock]);
 
   useEffect(() => {
     if (hotCues) rendererRef.current?.setHotCues(hotCues);
-  }, [hotCues, waveformData]);
+  }, [hotCues, waveformData, clock]);
 
   useEffect(() => {
     if (beatgrid) {
@@ -213,19 +213,19 @@ export function useWaveformRendererV2({
       );
       rendererRef.current?.setResetMarks(resolvedMarkTimes(beatgrid, metricLadder));
     }
-  }, [beatgrid, metricLadder, waveformData, regions]);
+  }, [beatgrid, metricLadder, waveformData, regions, clock]);
 
   useEffect(() => {
     if (regions) rendererRef.current?.setRegions(regions);
-  }, [regions, waveformData]);
+  }, [regions, waveformData, clock]);
 
   useEffect(() => {
     rendererRef.current?.setDropMarks(dropMarks ?? []);
-  }, [dropMarks, waveformData]);
+  }, [dropMarks, waveformData, clock]);
 
   useEffect(() => {
     rendererRef.current?.setBeatjumpGuides(beatjumpBeats);
-  }, [beatjumpBeats, waveformData]);
+  }, [beatjumpBeats, waveformData, clock]);
 
   return { canvasRef, rendererRef, initError, draw };
 }

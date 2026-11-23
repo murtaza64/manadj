@@ -1486,6 +1486,12 @@ export class DeckEngine {
       }
       this.syncLoopToSource();
     }
+    // Silent editing has no delayed output to follow. Keep stop/release tails
+    // projected, but a later paused seek/jump/cue edit must respond immediately.
+    if (!isAudioRunning(synced) && !isAudioRunning(next) &&
+        ['seek', 'jump', 'cue-down', 'hot-cue-down'].includes(event.type)) {
+      this.heardDisplayHistory.reset();
+    }
     this.emit();
 
     // Emit one semantic symbol per accepted human entrypoint, never from

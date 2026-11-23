@@ -938,7 +938,6 @@ function MixZone({ track }: { track: Track | null }) {
 
   return (
     <div className="perf-zone perf-zone-mix">
-      <ResetMixButton/>
       <div className="perf-knobrow">
         {/* TRIM/EQ/FLT and PFL spread evenly across the row; PFL at the
             right end on every Deck */}
@@ -1017,6 +1016,8 @@ function MixZone({ track }: { track: Track | null }) {
         takeover={pitchTakeover}
       />
       <div className="perf-mix-foot">
+        <div className="perf-mode-cluster">
+        <ResetMixButton/>
         <div className="perf-mode-stack" role="group" aria-label="Deck modes">
           <button
             className={`player-button perf-mini perf-vinyl${vinylMode ? ' on' : ''}${scratching ? ' scratching' : ''}`}
@@ -1065,7 +1066,9 @@ function MixZone({ track }: { track: Track | null }) {
             />
             <rect x="3.4" y="7" width="9.2" height="6.6" rx="1.2" fill="currentColor" />
           </svg>
+          <span>KEY LOCK</span>
         </button>
+        </div>
         {/* Drift marker (key-lock 04): unlocked + |pitch| ≥ ~half a
             semitone means the sounding key is no longer the Track's Key —
             dim it and mark with ~ (no computed "actual key"; PRD). */}

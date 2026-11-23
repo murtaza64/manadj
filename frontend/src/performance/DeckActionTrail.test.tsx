@@ -62,3 +62,16 @@ it('preserves a human gesture delivered before synchronous takeover and drops ma
  expect(host.querySelector('[data-action=play]')).not.toBeNull();expect(host.querySelector('[data-action=pause]')).toBeNull();
  act(()=>root.unmount());host.remove();
 });
+
+it('anchors the mobile cue glyph throughout hold and cleans up on release or hide',()=>{
+ vi.useFakeTimers();let notify=()=>{};let snapshot={playing:false,previewing:true,hotCuePreviewSlot:null as number|null};
+ const engine={getSnapshot:()=>snapshot,subscribe:(cb:()=>void)=>{notify=cb;return()=>{}},addControlFeedbackListener:()=>()=>{},addTransportEventListener:()=>()=>{}} as unknown as DeckEngine;
+ const host=document.createElement('div');const root=createRoot(host);
+ act(()=>root.render(<DeckActionTrail engine={engine} active trackId={1}/>));
+ expect(host.querySelector('[data-held] rect')?.getAttribute('x')).toBe('3.36');
+ act(()=>vi.advanceTimersByTime(5000));expect(host.querySelectorAll('[data-held]')).toHaveLength(1);
+ act(()=>{snapshot={...snapshot,previewing:false};notify();});expect(host.querySelector('[data-held]')).toBeNull();
+ act(()=>{snapshot={...snapshot,hotCuePreviewSlot:2};notify();});expect(host.querySelector('[data-held]')).not.toBeNull();
+ act(()=>root.render(<DeckActionTrail engine={engine} active={false} trackId={1}/>));expect(host.querySelector('[data-held]')).toBeNull();
+ act(()=>root.unmount());
+});
