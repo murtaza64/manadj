@@ -399,7 +399,8 @@ private struct TrackTagRail: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            // Width-aware measured layout; disclosure reserves its own space.
+            // Compact two-line rail. The 44pt disclosure extends upward into this
+            // row's metadata area, never below the row into the next track.
             let visible = visibleTags(width: geometry.size.width)
             let hidden = tags.count - visible.count
             HStack(spacing: 3) {
@@ -408,9 +409,9 @@ private struct TrackTagRail: View {
                         HStack(spacing: 3) { ForEach(row, id: \.id) { tag in TagBadge(tag: tag, active: selected.contains(tag.id)) } }
                     }
                 }
-                if hidden > 0 { Button("+\(hidden)") { expanded = true }.font(Ink.font(9)).frame(width: disclosureWidth, height: 44).accessibilityLabel("Show all \(tags.count) tags").accessibilityIdentifier("track-tags-\(track.id)") }
+                if hidden > 0 { Button("+\(hidden)") { expanded = true }.font(Ink.font(9)).frame(width: disclosureWidth, height: 44).offset(y: -9).accessibilityLabel("Show all \(tags.count) tags").accessibilityIdentifier("track-tags-\(track.id)") }
             }
-        }.frame(minWidth: 0, maxWidth: .infinity).frame(height: 44)
+        }.frame(minWidth: 0, maxWidth: .infinity).frame(height: 26)
             .sheet(isPresented: $expanded) {
                 NavigationStack { List(tags, id: \.id) { tag in TagBadge(tag: tag, active: selected.contains(tag.id)).frame(minHeight: 32) }
                     .navigationTitle("Track tags").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { expanded = false } } } }

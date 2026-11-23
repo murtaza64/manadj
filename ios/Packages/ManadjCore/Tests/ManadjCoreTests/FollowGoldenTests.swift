@@ -49,6 +49,8 @@ final class FollowGoldenTests: XCTestCase {
         let base = library.follow([1,2], params: params)
         XCTAssertEqual(base.map(\.id), [4,3])
         XCTAssertEqual(base.map { $0.referenceMatches.count }, [1,2])
+        XCTAssertEqual(Set(base.first { $0.id == 3 }!.referenceMatches.map(\.referenceId)), Set([1,2]))
+        XCTAssertEqual(base.first { $0.id == 4 }!.referenceMatches.map(\.referenceId), [1])
         params.sharedMatchBonus = 2
         let lifted = library.follow([1,2], params: params)
         XCTAssertEqual(lifted.map(\.id), [3,4])
