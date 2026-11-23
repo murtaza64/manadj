@@ -61,6 +61,7 @@ from build_dmg import (  # noqa: E402  (shared release helpers)
     _fetch,
     build_frontend,
     copytree_pyclean,
+    copy_cloud_runtime,
     copy_license_inventory,
     export_requirements,
     pyproject_version,
@@ -187,6 +188,7 @@ def assemble_app(python_runtime: Path, ffmpeg_dir: Path, version: str) -> Path:
     pkg["version"] = version
     (app_dir / "package.json").write_text(json.dumps(pkg, indent=2) + "\n")
 
+    copy_cloud_runtime(ROOT, resources)
     backend_root = resources / "backend"
     for d in BACKEND_DIRS:
         copytree_pyclean(ROOT / d, backend_root / d)

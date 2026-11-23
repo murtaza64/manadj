@@ -64,6 +64,9 @@ def main(argv: list[str] | None = None) -> None:
     token = os.environ.get(TOKEN_ENV)
     if token:
         install_shutdown_route(app, server, token)
+        from backend.cloud_shell import install_cloud_snapshot_route
+        from backend.database import DB_PATH
+        install_cloud_snapshot_route(app, token, DB_PATH)
     if os.environ.get(LIFELINE_ENV):
         watch_lifeline(server, sys.stdin)
     server.run()

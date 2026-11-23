@@ -78,6 +78,10 @@ def test_release_generates_and_packages_offline_help(tmp_path, monkeypatch):
     (repo / "desktop").mkdir()
     for name in build_dmg.SHELL_FILES:
         shutil.copyfile(ROOT / "desktop" / name, repo / "desktop" / name)
+    shutil.copytree(ROOT / "desktop" / "cloud", repo / "desktop" / "cloud")
+    (repo / "cloud" / "library").mkdir(parents=True)
+    for name in ("fields.json", "schema.mjs", "part.mjs"):
+        shutil.copyfile(ROOT / "cloud" / "library" / name, repo / "cloud" / "library" / name)
     shutil.copyfile(fe / "public" / "logo.png", repo / "logo.png")
     runtime, ffmpeg = tmp_path / "python", tmp_path / "ffmpeg"
     runtime.mkdir()

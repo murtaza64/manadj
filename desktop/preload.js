@@ -1,5 +1,15 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+contextBridge.exposeInMainWorld("manadjLibraryCloud", {
+  state: () => ipcRenderer.invoke("library-cloud:state"),
+  connect: () => ipcRenderer.invoke("library-cloud:connect"),
+  resume: () => ipcRenderer.invoke("library-cloud:resume"),
+  disconnect: () => ipcRenderer.invoke("library-cloud:disconnect"),
+  review: () => ipcRenderer.invoke("library-cloud:review"),
+  upload: (review) => ipcRenderer.invoke("library-cloud:upload", review),
+  cancel: () => ipcRenderer.invoke("library-cloud:cancel"),
+});
+
 contextBridge.exposeInMainWorld("manadjFeedback", {
   captureScreenshot: () => ipcRenderer.invoke("feedback:capture"),
 });

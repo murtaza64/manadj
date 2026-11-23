@@ -34,7 +34,11 @@ function discovery(config, value) {
     token_endpoint_auth_methods_supported: ['none'], grant_types_supported: ['authorization_code', 'refresh_token'] })) {
     if (!Array.isArray(value[key]) || needed.some(v => !value[key].includes(v))) fail('cloud_discovery_mismatch');
   }
-  return Object.freeze({ authorization_endpoint: value.authorization_endpoint, token_endpoint: value.token_endpoint,
+  return Object.freeze({ issuer: value.issuer,
+    code_challenge_methods_supported: Object.freeze(['S256']),
+    token_endpoint_auth_methods_supported: Object.freeze(['none']),
+    grant_types_supported: Object.freeze(['authorization_code', 'refresh_token']),
+    authorization_endpoint: value.authorization_endpoint, token_endpoint: value.token_endpoint,
     registration_endpoint: value.registration_endpoint, revocation_endpoint: value.revocation_endpoint });
 }
 function nonempty(value, max = 8192) {

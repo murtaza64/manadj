@@ -8,7 +8,7 @@
 //
 // See README.md and .scratch/desktop-shell/issues/01-electron-attach-shell.md.
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, net, screen, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, net, safeStorage, screen, session, shell } = require("electron");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -16,6 +16,7 @@ const backend = require("./backend");
 const { ICON, menuTemplate, windowChromeOptions } = require("./chrome");
 const { registerRecordingIpc } = require("./recording");
 const { registerFeedbackCapture } = require("./feedback");
+const { registerCloudIpc } = require("./cloud/ipc");
 
 // The Vite dev target has no CSP, so Electron's renderer-console security
 // warning is permanent noise — especially now that renderer console is
@@ -523,6 +524,10 @@ function createWindow() {
     },
   });
   const disposeFeedback = registerFeedbackCapture({ ipcMain, webContents: win.webContents, targetUrl: TARGET });
+  const disposeCloud = registerCloudIpc({ ipcMain, webContents: win.webContents, app, safeStorage, shell,
+    getBackend: () => MANAGED ? backendHandle : null,
+    getTargetURL: () => MANAGED && backendHandle ? backendHandle.url : TARGET });
+  win.once("closed", disposeCloud);
   win.once("closed", disposeFeedback);
   // Visualizer window (realtime-visualization 01): the renderer opens it
   // via window.open('/visualizer', ...). Give it a normal native title bar

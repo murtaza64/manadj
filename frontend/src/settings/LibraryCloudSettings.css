@@ -1,0 +1,8 @@
+.library-cloud-actions { display: flex; flex-wrap: wrap; gap: var(--space-8); margin: var(--space-16) 0; }
+.library-cloud-review { padding-top: var(--space-16); border-top: 1px solid var(--surface1); overflow-wrap: anywhere; }
+.library-cloud-review p { margin-top: var(--space-8); line-height: 1.5; }
+.library-cloud-review ul { padding-left: var(--space-24); margin: var(--space-12) 0; line-height: 1.6; }
+.library-cloud-review details { margin: var(--space-12) 0; }
+.library-cloud-review summary { padding: var(--space-8) 0; cursor: pointer; }
+.library-cloud-review > button { margin-top: var(--space-16); min-height: 36px; }
+.library-cloud-destination { overflow-wrap: anywhere; }

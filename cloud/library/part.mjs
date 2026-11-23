@@ -1,5 +1,5 @@
 import fields from './fields.json' with { type: 'json' };
-import { exact, reject, integer, SCHEMA } from './contracts.mjs';
+import { exact, reject, integer, SCHEMA } from './schema.mjs';
 // This is a new bounded wire DTO, not the gzip/offline export. Unknown fields fail
 // visibly; no truncation, automatic dropping or whole-app-folder export is allowed.
 const nestedKeys = new Set(('t kind control channel value action playhead detail deltaSeconds durationSeconds filter trackDuration audioTime region start end slip trackId bpm selected target on depth beats held settings playheads edge holder outgoingChannel decks crossfader crossfaderEnabled physicalDecks outgoing incoming playing scratching slipLoopActive fader trim eq low mid high pitch assignment stems vocals drums bass other drive rate A B C D beat slot echoFeedback echoSaturation reverbDecay reverbDampingHz reverbStereoWidth flangerDelayMs flangerWidthMs flangerFeedback flangerLengthUnit lowCutEchoHz transDuty transSlopeMs rollFadeMs start_time time_signature_num bar_position time time_signature_den bar audibleGain eqKillBelow filterKillBeyond cutGapMaxS settleHorizonS entryBackdateMaxS padS idleKeepS').split(' '));

@@ -4,9 +4,11 @@ Status: disabled preparation, not a shipped cloud flow. No music or stems, no
 release/install, no personal-data upload, no browser/native sign-in proof.
 The music/stems backup MCR and independent SSD/restic backup are separate.
 
-Port: now for the shared server protocol; no platform UI is introduced here.
-Electron-only desktop primitives are in `desktop/cloud`; they are not wired into
-the app. No Android/iOS authentication or upload UI is implied.
+Port: now for the shared server protocol. The default-disabled Electron client
+and reviewed Upload UI are wired into desktop Settings. They prepare a frozen,
+selective snapshot through a shell-token-gated read-only exporter. This is local
+preparation with synthetic tests, not a proven native sign-in or upload flow.
+No Android/iOS authentication or upload UI is implied.
 
 ## First deployment
 
@@ -127,15 +129,20 @@ Before enabling personal-data upload:
 - Complete the native exact-loopback, S256, refresh, cancel/stale-generation and
   main-only OS encryption flow on a personal machine. Windows same-user threats
   and Linux plaintext/unavailable stores must remain explicit.
-- Build the shell-token-gated selective frozen exporter and destination-visible
-  reviewed Upload UI. Exclude peer/group projections and unselected data at source.
-  This DTO is stricter than the offline exporter; visible rejection must be handled.
+- Verify the prepared shell-token-gated frozen exporter and destination-visible
+  reviewed Upload UI on the packaged native path. Local tests cover exclusion of
+  peer/group projections and unselected data at source. This DTO is stricter than
+  the offline exporter; visible rejection must remain clear and non-destructive.
 - Bind only the intended private bucket in a separately reviewed change. Prove
   synthetic begin/upload/receipt/readback, retries, partial failures, concurrent
   quota admission and both owner read paths on the real service.
 - Profile largest parts and a full ledger under Workers Free's 10ms CPU limit.
   Node elapsed times and a dry-run are not that measurement. Reduce bounded work
   or redesign visibly if needed; do not silently upgrade or raise limits.
+- Provide a supported consistency-safe explicit deletion operation and verify its
+  result before enabling retention-until-user-deletes. No deletion exists yet.
+- Resolve legacy/sessionless history provenance and group signed-evidence
+  selection. The prepared exporter blocks those uncertain cases, not a fallback.
 - Keep the app default disabled until all gates pass. No personal audio/library
   files are needed for these synthetic checks. No release cut is authorized.
 

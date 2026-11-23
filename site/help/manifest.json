@@ -39,7 +39,8 @@
       "filters",
       "playlists",
       "archive",
-      "remote-preview"
+      "remote-preview",
+      "private-snapshots"
     ]
   },
   {
