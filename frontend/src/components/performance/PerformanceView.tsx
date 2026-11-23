@@ -44,6 +44,10 @@ import { focusDeck, toggleControlFocus, useControlFocus } from '../../performanc
 import { isPerfSectionShown, subscribePerfSections } from '../../performance/perfSectionsStore';
 import './PerformanceView.css';
 
+import {showLoadBlocked} from '../../performance/deckActionFeedback';
+
+import {acceptedPerformanceLoad} from '../../performance/acceptedLoad';
+
 const LOCK_HINT_MS = 1500;
 
 /** Keyboard-hint visibility, persisted; read once (same idiom as ?view=). */
@@ -106,6 +110,7 @@ export function PerformanceView() {
   // (memoized rows depend on it).
   const flashLockHint = useCallback((deck: ChannelId) => {
     setLockHint(deck);
+    showLoadBlocked(deck);
     if (lockHintTimer.current) clearTimeout(lockHintTimer.current);
     lockHintTimer.current = setTimeout(() => setLockHint(null), LOCK_HINT_MS);
   }, []);
@@ -119,6 +124,8 @@ export function PerformanceView() {
         return;
       }
       target.loadTrack(track);
+      focusDeck(deck);
+      acceptedPerformanceLoad();
     },
     [decks, deckCount, flashLockHint]
   );

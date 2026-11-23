@@ -1,3 +1,4 @@
+import {withoutControlFeedback} from '../playback/controlFeedbackOrigin';
 /**
  * Conductor (sets 04): the thin runtime driver that schedules a SetPlan
  * onto the shared Decks and Mixer — in MixPlayer's mold (ADR 0022), one
@@ -1042,7 +1043,7 @@ export class Conductor {
   private self<T>(fn: () => T): T {
     this.selfOps++;
     try {
-      return fn();
+      return withoutControlFeedback(fn);
     } finally {
       this.selfOps--;
     }

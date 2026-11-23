@@ -123,7 +123,11 @@ describe('play latch (load in flight)', () => {
     const engine = new DeckEngine(unusedPort);
     // Loading state lets play latch intent without touching audio.
     const load = engine.load({ trackId: 1, audioUrl: 'http://127.0.0.1:1/none', bpm: 128 });
-    engine.play();
+    const events: import('./DeckEngine').DeckControlFeedback[]=[];engine.addControlFeedbackListener(e=>events.push(e));
+    engine.play();engine.play();expect(events).toEqual([{kind:'pending'}]);
+    engine.togglePlay();expect(events.at(-1)?.kind).toBe('pause');
+    engine.togglePlay();expect(events.at(-1)?.kind).toBe('pending');
+    expect(engine.getSnapshot().playing).toBe(false);
     // The failing load clears the latch; the point is play() latched.
     await load;
     expect(engine.getSnapshot().loadState).toBe('error');
@@ -556,6 +560,21 @@ describe('DeckEngine cross-deck launch reference (cue-quantize-bpm 04)', () => {
     });
     return engine;
   }
+
+  it('display controls are semantic, additive, and exclude EOF/machine preview/delayed play', async () => {
+    const engine=await loadedEngine(509);const events: import('./DeckEngine').DeckControlFeedback[]=[];
+    const off=engine.addControlFeedbackListener(e=>events.push(e));
+    const capture=vi.fn();engine.setTransportEventHandler(capture);
+    engine.play();engine.pause();engine.cueDown();engine.cueUp();
+    expect(events.map(e=>e.kind)).toEqual(['play','pause','cue']);
+    events.length=0;engine.hotCueDown(2,10);engine.hotCueUp(2,10);
+    expect(events).toEqual([{kind:'hotCue',value:3}]);expect(capture).toHaveBeenCalledWith(expect.objectContaining({action:'hotCue',detail:2}));
+    events.length=0;engine.toggleLoop();engine.resizeLoop('double');engine.toggleLoop();
+    expect(events.map(e=>e.kind)).toEqual(['loop','loop','loopExit']);
+    events.length=0;engine.previewAt(12);engine.endPreview(10);
+    expect(events).toEqual([]);
+    off();engine.play();expect(events).toEqual([]);engine.dispose();
+  });
 
   it('asLaunchReference is null while paused', async () => {
     const engine = await loadedEngine(50);
@@ -1330,5 +1349,95 @@ describe('silence-loop phantom transport (gh#424)', () => {
     expect(engine.getPlayhead()).toBeCloseTo(202.5, 6);
     ctx.currentTime = 30.5; // 190 + 25 = 215 -> folded to 175
     expect(engine.getPlayhead()).toBeCloseTo(175, 6);
+  });
+});
+
+describe('heard display engine seam', () => {
+  const fakeBuffer = { duration: 180, sampleRate: 44100, numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100) } as unknown as AudioBuffer;
+  beforeEach(() => { vi.useFakeTimers(); startCalls.length = 0; });
+  afterEach(() => { vi.useRealTimers(); _clearBufferCacheForTests(); });
+  async function harness() {
+    const ctx = { currentTime: 0, state: 'running', resume: () => Promise.resolve() };
+    const engine = new DeckEngine({ ensureAudio: () => ({ ctx: ctx as unknown as AudioContext, input: {} as AudioNode }) });
+    putCachedBuffer(9911, fakeBuffer);
+    await engine.load({ trackId: 9911, audioUrl: 'http://127.0.0.1:1/none', bpm: 120,
+      beatTimes: Promise.resolve(Array.from({ length: 360 }, (_, i) => i * .5)) });
+    engine.seek(10); engine.play(); await vi.advanceTimersByTimeAsync(0);
+    return { engine, ctx };
+  }
+  it('notifies display subscribers when the first asynchronous source starts', async () => {
+    const ctx = { currentTime: 0, state: 'running', resume: () => Promise.resolve() };
+    const engine = new DeckEngine({ ensureAudio: () => ({ ctx: ctx as unknown as AudioContext, input: {} as AudioNode }) });
+    putCachedBuffer(9911, fakeBuffer);
+    await engine.load({ trackId: 9911, audioUrl: 'http://127.0.0.1:1/none', bpm: 120 });
+    const waits: number[] = [];
+    const controls: string[] = [];
+    engine.subscribe(() => waits.push(engine.getHeardDisplayWaitSeconds(.2)));
+    engine.addControlFeedbackListener(event => controls.push(event.kind));
+    engine.play();
+    expect(waits.at(-1)).toBe(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(waits.at(-1)).toBeCloseTo(.2);
+    expect(controls).toEqual(['play']);
+  });
+  it('explains only the initial output-delay interval without moving the raw clock',async()=>{
+    const{engine,ctx}=await harness();expect(engine.getHeardDisplayWaitSeconds(.2)).toBeCloseTo(.2);
+    ctx.currentTime=.1;expect(engine.getHeardDisplayWaitSeconds(.2)).toBeCloseTo(.1);
+    ctx.currentTime=.3;expect(engine.getHeardDisplayWaitSeconds(.2)).toBe(0);
+    engine.pause();expect(engine.getHeardDisplayWaitSeconds(.2)).toBe(0);
+  });
+  it('keeps raw and heard clocks separate through seek and pause', async () => {
+    const { engine, ctx } = await harness();
+    ctx.currentTime = 1;
+    expect(engine.getPlayhead()).toBeCloseTo(11);
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(10.8);
+    engine.seek(50);
+    ctx.currentTime = 1.1;
+    expect(engine.getPlayhead()).toBeCloseTo(50.1);
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(10.9);
+    ctx.currentTime = 1.3;
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(50.1);
+    engine.pause(); ctx.currentTime = 1.4;
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(50.2);
+    ctx.currentTime = 1.6;
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(50.3);
+    expect(engine.getPlayhead()).toBeCloseTo(50.3);
+  });
+  it('projects the old rate until the new rate reaches output', async () => {
+    const { engine, ctx } = await harness(); ctx.currentTime = 1; engine.setPitch(20);
+    ctx.currentTime = 1.1;
+    expect(engine.getPlayhead()).toBeCloseTo(11.12);
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(10.9);
+    ctx.currentTime = 1.4;
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(11.24);
+  });
+  it('keeps a short held CUE audible in display after release', async () => {
+    const { engine, ctx } = await harness();
+    engine.pause(); ctx.currentTime = 1; engine.seek(10); engine.cueDown(); engine.cueUp(); engine.cueDown();
+    ctx.currentTime = 1.05; engine.cueUp();
+    ctx.currentTime = 1.23;
+    expect(engine.getPlayhead()).toBeCloseTo(10);
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(10.03);
+    ctx.currentTime = 1.3;
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(10);
+  });
+  it('wraps the heard clock under the old loop before release', async () => {
+    const { engine, ctx } = await harness();
+    engine.loopPreset(4); // [10,12)
+    ctx.currentTime = 2.1;
+    expect(engine.getPlayhead()).toBeCloseTo(10.1);
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(11.9);
+    engine.loopPreset(4);
+    ctx.currentTime = 2.2;
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(10);
+    ctx.currentTime = 2.4;
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(10.2);
+  });
+  it('clears the previous source history on load', async () => {
+    const { engine, ctx } = await harness(); ctx.currentTime = 1;
+    putCachedBuffer(9912, fakeBuffer);
+    await engine.load({ trackId: 9912, audioUrl: 'http://127.0.0.1:1/none', bpm: 120 });
+    expect(engine.getHeardDisplayPlayhead(.2)).toBe(engine.getPlayhead());
   });
 });

@@ -16,6 +16,7 @@
 // Overlays (beatgrid, Main cue, Hot Cues, playhead, badge/time canvas) are a
 // separate vertex-geometry pass ported from the legacy geometry renderer.
 
+import {WARNING, hexToGlFloats} from '../theme/tokens';
 import type { PlaybackClock } from '../playback/clock';
 import { addBeats } from '../playback/quantize';
 import { MAX_LEAD_IN_SECONDS } from '../playback/DeckEngine';
@@ -1624,6 +1625,11 @@ export class WaveformRendererV2 {
     }
   }
 
+  private playheadState: 'held' | 'playing' | 'paused' | undefined;
+  setPlayheadState(value: 'held' | 'playing' | 'paused' | undefined): void {
+    this.playheadState = value; this.markDirty();
+  }
+
   private pushPlayhead(view: FrameView, verts: number[]): void {
     let x: number;
     if (this.isMinimap) {
@@ -1637,7 +1643,12 @@ export class WaveformRendererV2 {
     } else {
       x = view.w * (this.config.playMarkerPosition ?? PLAY_MARKER_FRACTION);
     }
-    pushRect(verts, x, 0, 3, view.h, ...PLAYHEAD_COLOR);
+    if (this.playheadState === 'held') {
+      for (let y = 0; y < view.h; y += 10 * view.dpr)
+        pushRect(verts, x, y, 3, Math.min(6 * view.dpr, view.h - y), ...hexToGlFloats(WARNING));
+    } else {
+      pushRect(verts, x, 0, 3, view.h, ...PLAYHEAD_COLOR);
+    }
   }
 
   private ensureOverlayContext(): CanvasRenderingContext2D | null {
