@@ -8,6 +8,7 @@ import {
   appendPoint, compositeScreenshot, normalizePoint, PEN_COLORS, PEN_WIDTH,
   renderAnnotations, type Stroke,
 } from './annotate';
+import { startLocalDictation } from './localDictate';
 import { dictationAvailable, startDictation, type Dictation } from './dictate';
 import { CaptureOverlay } from './overlay';
 import { installModalKeyGuard } from '../focus/modalKeys';
@@ -178,6 +179,7 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
   const actionLock = useRef(false);
   const dictationRef = useRef<Dictation | null>(null);
   const speechGeneration = useRef(0);
+  const speechAbort = useRef<AbortController | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const entry = useRef<HTMLSpanElement>(null);
   const id = useId();
@@ -188,14 +190,28 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
     document.documentElement.dataset.feedbackActive = 'true';
     return () => { delete document.documentElement.dataset.feedbackActive; };
   }, [overlay, page, capture, title, description, strokes.length]);
-  const canDictate = dictationAvailable();
+  const nativeSpeech = window.manadjLocalSpeech;
+  const [localSpeechAvailable, setLocalSpeechAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (nativeSpeech) nativeSpeech.capability().then(value => {
+      if (!cancelled) setLocalSpeechAvailable(value.available);
+    }).catch(() => { if (!cancelled) setLocalSpeechAvailable(false); });
+    return () => { cancelled = true; };
+  }, [nativeSpeech]);
+  const canDictate = nativeSpeech ? localSpeechAvailable : dictationAvailable();
+  const speechNotice = nativeSpeech
+    ? 'Local-only dictation on this Mac. Audio is not uploaded or saved. Transcript stays editable.'
+    : 'Start sends mic audio to the browser speech service. Transcript stays editable.';
 
   useEffect(() => installModalKeyGuard(
     () => Boolean(dialog.current?.open || (document.querySelector('.feedback-overlay') && !document.querySelector('.feedback-picker'))),
-    () => { speechGeneration.current++; dictationRef.current?.stop(); setPage(null); setOverlay(false); setDrawing(false); setPointer(null); setStrokes([]); },
+    () => { speechGeneration.current++; speechAbort.current?.abort(); dictationRef.current?.stop(); setPage(null); setOverlay(false); setDrawing(false); setPointer(null); setStrokes([]); },
   ), []);
 
   function stopDictation() {
+    speechAbort.current?.abort();
+    speechAbort.current = null;
     speechGeneration.current++;
     const previous = dictationRef.current;
     dictationRef.current = null;
@@ -205,22 +221,29 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
   useEffect(() => {
     if (!open && !overlay) stopDictation();
   }, [open, overlay]);
-  useEffect(() => () => { speechGeneration.current++; dictationRef.current?.stop(); }, []);
+  useEffect(() => () => { speechGeneration.current++; speechAbort.current?.abort(); dictationRef.current?.stop(); }, []);
 
-  function toggleDictation(field: 'title' | 'description') {
+  async function toggleDictation(field: 'title' | 'description') {
     if (dictating) { stopDictation(); if (dictating === field) return; }
     const generation = ++speechGeneration.current;
+    const abort = new AbortController(); speechAbort.current = abort;
     let ended = false;
     try {
-    const session = startDictation((text) => {
+    setDictating(field);
+    const start = nativeSpeech
+      ? (...args: Parameters<typeof startDictation>) => startLocalDictation(nativeSpeech, args[0], args[1], args[2] ?? (() => {}), abort.signal)
+      : startDictation;
+    const session = await start((text) => {
       if (!text || generation !== speechGeneration.current) return;
       if (field === 'title') setTitle((current) => `${current.replace(/\s+$/, '')}${current ? ' ' : ''}${text}`.slice(0, 200));
       else setDescription((current) => `${current.replace(/\s+$/, '')}${current ? ' ' : ''}${text}`.slice(0, 10000));
     }, () => { ended = true; if (generation !== speechGeneration.current) return; dictationRef.current = null; setDictating(null); },
     // Async service failures (denied permission, no mic, unreachable
     // service) used to reset the button silently; name the failure inline.
-    (reason) => { if (generation === speechGeneration.current) setError(dictationFailureMessage(reason)); });
-    if (session && !ended && generation === speechGeneration.current) { dictationRef.current = session; setDictating(field); }
+    (reason) => { if (generation === speechGeneration.current) setError(nativeSpeech ? 'Local dictation is unavailable or permission was denied. Type below or use system dictation.' : dictationFailureMessage(reason)); });
+    if (generation !== speechGeneration.current) { session?.stop(); return; }
+    if (session && !ended) { dictationRef.current = session; setDictating(field); }
+    else setDictating(null);
     } catch { setError("Dictation could not start. Use the keyboard or system dictation."); }
   }
 
@@ -419,7 +442,7 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
     if (!canDictate) return null;
     const active = dictating === field;
     return <button type="button" className={`btn btn-secondary btn-mini${active ? ' btn-selected' : ''}`}
-      title="Dictate with the browser speech service; audio is processed by that service, the text stays editable here"
+      title={speechNotice}
       disabled={busy || payload !== null}
       onClick={() => toggleDictation(field)}>{active ? 'Stop dictation' : 'Dictate'}</button>;
   };
@@ -432,7 +455,7 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
       <button className={`${entryClass}${page === 'review' ? ' btn-selected' : ''}`} aria-haspopup="dialog" aria-expanded={page === 'review'} title={listError || 'Reports awaiting dispatch, including pending or failed filing'} disabled={capturing || overlay} onClick={() => { setError(''); setPage('review'); }}>Queue ({pendingCount})</button>
     </span>
     {overlay && createPortal(<CaptureOverlay
-      description={description} onDescription={setDescription} canSpeak={canDictate}
+      description={description} onDescription={setDescription} canSpeak={canDictate} speechNotice={speechNotice}
       speaking={dictating === 'description'} onSpeak={() => toggleDictation('description')} speechError={error}
       drawing={drawing} strokes={strokes} pointer={pointer}
       pointerText={pointer ? pointerLabel(pointer) : null} penColor={penColor}
@@ -476,7 +499,7 @@ export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Rea
             <textarea rows={4} value={description} maxLength={10000} onChange={(e) => setDescription(e.target.value)} />
             {dictateButton('description')}
           </span></label>
-          {canDictate && <p className="feedback-metadata">Starting Dictate may send microphone audio to the browser speech service for transcription immediately. The transcript stays editable here. Filing the feedback report is a separate action.</p>}
+          {canDictate && <p className="feedback-metadata">{speechNotice} Filing the feedback report is a separate action.</p>}
           <section className="feedback-attachments" aria-label="Local attachments">
           {capture.screenshot ? <div>
             <ScreenshotCanvas image={capture.screenshot} strokes={strokes} pointer={pointer} viewport={capture.snapshot.viewport}

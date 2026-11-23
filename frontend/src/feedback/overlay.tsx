@@ -13,10 +13,10 @@ import {
 import type { PointerInfo } from './pointer';
 
 export function CaptureOverlay({ drawing, strokes, pointer, pointerText, penColor,
-  description, onDescription, canSpeak, speaking, onSpeak, speechError,
+  description, onDescription, canSpeak, speaking, onSpeak, speechError, speechNotice,
   onStroke, onToggleDraw, onPenColor, onUndo, onClear, onInvalidate, onPoint, onRemovePointer, onDone, onCancel }: {
   description: string; onDescription: (value: string) => void;
-  canSpeak: boolean; speaking: boolean; onSpeak: () => void; speechError: string;
+  speechNotice?: string; canSpeak: boolean; speaking: boolean; onSpeak: () => void; speechError: string;
   drawing: boolean;
   strokes: Stroke[];
   pointer: PointerInfo | null;
@@ -161,7 +161,7 @@ export function CaptureOverlay({ drawing, strokes, pointer, pointerText, penColo
           <p>Draw on the app. Choose Point to identify an element.</p>
         </> : <>
           {tool === 'speak' && <div className="feedback-speech-controls">
-            <span>{canSpeak ? 'Start sends mic audio to the browser speech service. Transcript stays editable.' : 'Speech is unavailable here. Type below or use system dictation.'}</span>
+            <span>{canSpeak ? (speechNotice ?? 'Start sends mic audio to the browser speech service. Transcript stays editable.') : 'Speech is unavailable here. Type below or use system dictation.'}</span>
             <button type="button" className="btn btn-secondary btn-mini" disabled={!canSpeak} onClick={onSpeak}>{speaking ? 'Stop dictation' : 'Start dictation'}</button>
           </div>}
           <label>Report notes<textarea aria-label="Report notes" rows={2} maxLength={10000} value={description} onChange={event => onDescription(event.target.value)} /></label>

@@ -12,6 +12,17 @@ contextBridge.exposeInMainWorld("manadjLibraryCloud", {
   cancel: () => ipcRenderer.invoke("library-cloud:cancel"),
 });
 
+contextBridge.exposeInMainWorld("manadjLocalSpeech", {
+  capability: () => ipcRenderer.invoke("local-speech:capability"),
+  start: () => ipcRenderer.invoke("local-speech:start"),
+  stop: () => ipcRenderer.invoke("local-speech:stop"),
+  subscribe: (listener) => {
+    const receive = (_event, value) => listener(value);
+    ipcRenderer.on("local-speech:event", receive);
+    return () => ipcRenderer.removeListener("local-speech:event", receive);
+  },
+});
+
 contextBridge.exposeInMainWorld("manadjFeedback", {
   captureScreenshot: () => ipcRenderer.invoke("feedback:capture"),
 });

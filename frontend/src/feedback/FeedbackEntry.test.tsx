@@ -673,3 +673,19 @@ it('ignores asynchronous callbacks from a replaced speech session', async()=>{
  expect(button('Stop dictation')).toBeTruthy();
  await click('Close');expect(sessions[1].stop).toHaveBeenCalledTimes(1);
 });
+
+it('native local speech stays explicit and editable, with no browser fallback', async () => {
+  let listener = (_event: {id:string;type:'text'|'end';text?:string;code?:string}) => {};
+  const start = vi.fn(async () => ({id:'local-one'})), stop = vi.fn(async () => {});
+  window.manadjLocalSpeech = {capability:async()=>({available:true,code:'local_supported'}),start,stop,
+    subscribe:cb=>{listener=cb;return()=>{}}};
+  try {
+    await act(async()=>root.render(<FeedbackEntry/>));
+    await click('Feedback');await click('Speak');
+    expect(document.body.textContent).toContain('Audio is not uploaded or saved');
+    expect(start).not.toHaveBeenCalled();await click('Start dictation');expect(start).toHaveBeenCalledOnce();
+    await act(async()=>listener({id:'local-one',type:'text',text:'local editable notes'}));
+    expect((document.querySelector('[aria-label="Report notes"]') as HTMLTextAreaElement).value).toBe('local editable notes');
+    await click('Type');expect(stop).toHaveBeenCalled();
+  } finally { delete window.manadjLocalSpeech; }
+});
