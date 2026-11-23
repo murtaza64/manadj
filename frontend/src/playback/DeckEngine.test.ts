@@ -1404,6 +1404,16 @@ describe('heard display engine seam', () => {
     expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(50.3);
     expect(engine.getPlayhead()).toBeCloseTo(50.3);
   });
+  it('shows paused beatjump and seek immediately with 200ms output delay', async () => {
+    const { engine, ctx } = await harness();
+    engine.pause(); ctx.currentTime = 1;
+    engine.jumpBeats(4);
+    expect(engine.getHeardDisplayPlayhead(.2)).toBe(engine.getPlayhead());
+    engine.seek(40);
+    expect(engine.getHeardDisplayPlayhead(.2)).toBe(40);
+    ctx.currentTime = 1.01;
+    expect(engine.getHeardDisplayPlayhead(.2)).toBe(40);
+  });
   it('projects the old rate until the new rate reaches output', async () => {
     const { engine, ctx } = await harness(); ctx.currentTime = 1; engine.setPitch(20);
     ctx.currentTime = 1.1;

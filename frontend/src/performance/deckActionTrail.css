@@ -5,10 +5,14 @@
 .deck-action-symbol:nth-last-child(2) { margin-left:64px; }
 .deck-action-symbol:nth-last-child(3) { margin-left:128px; }
 .deck-action-symbol::before { content:''; position:absolute; width:16px; height:16px; left:-36px; border:1px solid currentColor; border-radius:50%; animation:deck-action-ripple .5s ease-out both; }
-.perf-wave-row[data-playback-state="held"] { background:color-mix(in srgb,var(--warning) 10%,var(--base)); }
 .perf-wave-row[data-playback-state="held"] .deck-action-symbol { color:var(--warning); }
 @keyframes deck-action-drift { 0% { opacity:0; transform:translate(0,-50%) scale(.85); } 9%,55% { opacity:1; } 100% { opacity:0; transform:translate(24px,-50%) scale(1); } }
 @keyframes deck-action-ripple { from { opacity:.8; transform:scale(.5); } to { opacity:0; transform:scale(2.5); } }
 @media(prefers-reduced-motion:reduce) { .deck-action-symbol { animation-name:deck-action-fade; }.deck-action-symbol::before { display:none; } }
 @keyframes deck-action-fade { 0%,65% { opacity:1;transform:translateY(-50%); } 100% { opacity:0;transform:translateY(-50%); } }
-.perf-wave-row[data-playback-state="held"] .waveform-container { background:transparent; }
+
+
+.deck-action-symbol[data-held] { animation:none; opacity:1; transform:translateY(-50%); }
+.deck-action-symbol[data-held]::before { animation:none; opacity:.5; }
+
+.deck-action-symbol[data-held] { margin-left:0; }
