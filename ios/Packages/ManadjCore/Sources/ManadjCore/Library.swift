@@ -108,3 +108,36 @@ public struct Library {
         return FollowRanker.rank(pool, snapshot: snapshot, references: ids.compactMap(track), params: params ?? snapshot.performance.follow)
     }
 }
+
+/// Immutable inputs captured by the native browser before leaving the main actor.
+/// Keeps the existing query, fixed-track Follow latch and post-query tag scope.
+public struct BrowserQueryRequest: Sendable {
+    public let query: LibraryQuery
+    public let downloadedIds: Set<Int>
+    public let referenceId: Int?
+    public let sourceIsContainer: Bool
+    public let sourceTagId: Int?
+    public init(query: LibraryQuery, downloadedIds: Set<Int>, referenceId: Int?, sourceIsContainer: Bool, sourceTagId: Int?) {
+        self.query = query
+        self.downloadedIds = downloadedIds
+        self.referenceId = referenceId
+        self.sourceIsContainer = sourceIsContainer
+        self.sourceTagId = sourceTagId
+    }
+    public func evaluate(_ snapshot: Snapshot) -> BrowserQueryResult {
+        let library = Library(snapshot, downloaded: { downloadedIds.contains($0.id) })
+        if let referenceId, !sourceIsContainer {
+            let ranked = library.follow([referenceId], within: query)
+            return BrowserQueryResult(rows: ranked.map(\.track).filter(inSource),
+                followLabels: Dictionary(uniqueKeysWithValues: ranked.map { ($0.id, $0.label) }))
+        }
+        return BrowserQueryResult(rows: library.query(query).filter(inSource), followLabels: [:])
+    }
+    private func inSource(_ track: LibraryTrack) -> Bool {
+        sourceTagId.map { track.tagIds.contains($0) } ?? true
+    }
+}
+public struct BrowserQueryResult: Sendable {
+    public let rows: [LibraryTrack]
+    public let followLabels: [Int: String]
+}
