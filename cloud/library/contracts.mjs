@@ -2,13 +2,8 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 export const LIMITS = Object.freeze({ partBytes: 256 * 1024, parts: 256, snapshotBytes: 64 * 1024 * 1024,
   snapshots: 10, storedBytes: 640 * 1024 * 1024, controlBytes: 1024 * 1024, writes: 512, reads: 4096 });
-import { SCHEMA, Failure, reject, validID, validHash, integer, exact } from './schema.mjs';
-export { SCHEMA, Failure, reject, validID, validHash, integer, exact } from './schema.mjs';
-const encoder = new TextEncoder();
-export const bytes = value => encoder.encode(JSON.stringify(value));
-export async function digest(value) {
-  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', value))].map(x => x.toString(16).padStart(2, '0')).join('');
-}
+import { SCHEMA, Failure, reject, validID, validHash, integer, exact, bytes, digest } from './schema.mjs';
+export { SCHEMA, Failure, reject, validID, validHash, integer, exact, bytes, digest } from './schema.mjs';
 export async function readJSON(request, max = LIMITS.partBytes) {
   if (request.headers.get('content-type') !== 'application/json' ||
       (request.headers.has('content-encoding') && request.headers.get('content-encoding') !== 'identity')) reject(415, 'raw_json_required');

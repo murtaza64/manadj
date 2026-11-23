@@ -33,7 +33,9 @@ Never paste the token into a PR, source, issue, terminal output or conversation.
 `OWNER_EMAIL` is deliberately absent from source. Set it privately to the exact
 owner policy identity before testing `GET /v1/status`. Missing configuration fails
 closed. The auth-only route verifies the signed owner assertion and returns only
-authenticated/enabled flags and fixed limits. It does not touch R2. All snapshot
+authenticated/enabled flags, fixed limits and, once enabled and bound, the live
+UTC-day usage counters for budget preflight. Disabled, it does not touch R2.
+All snapshot
 routes return `503 snapshots_disabled` before body parsing or storage access in
 the first deployment. The upstream Access application remains required.
 
@@ -142,16 +144,57 @@ supplied through an environment variable (never on a command line):
 ```
 LIBRARY_CHECK_TOKEN=... node cloud/library/service_check.mjs \
   --origin https://manadj-private-library.murtaza-javaid.workers.dev \
-  --snapshots 2 --parts 256 --part-bytes 262144
+  --snapshots 1 --parts 256 --part-bytes 262144
+LIBRARY_CHECK_TOKEN=... node cloud/library/service_check.mjs \
+  --origin https://manadj-private-library.murtaza-javaid.workers.dev \
+  --snapshots 10 --parts 8 --part-bytes 16384
 ```
 
 The script stores only generated tracks-table rows, verifies receipts and
 SHA-256 readback of every part, probes exact retries and immutable rejection,
 then explicitly deletes each snapshot and requires an empty stored list. Worst
-shape is 256 parts of 256KiB per snapshot with up to a 10-snapshot ledger; any
-Workers Free CPU/resource failure appears as a non-2xx Worker error and fails
-the run. Node-side wall times are reported for review but are not the CPU
-measurement; the pass/fail of the real service under the worst shape is.
+shape is one snapshot of 256 parts x 256KiB plus a second run filling the
+10-snapshot ledger; any Workers Free CPU/resource failure appears as a non-2xx
+Worker error and fails the run. Node-side wall times are reported for review
+but are not the CPU measurement; the pass/fail of the real service under the
+worst shape is.
+
+### TEMPORARY owner-only browser fixture
+
+`GET /v1/service-check` serves a clearly labeled TEMPORARY staging fixture page
+to the owner behind the exact same Access authorize route as the API, with the
+same fail-closed posture: the feature disabled or the bucket unbound returns
+503, a non-owner request is rejected before any route is served, cross-origin
+posts stay rejected, and nothing runs on page load. The page has two buttons
+that drive the same fixed synthetic shapes as the CLI check above (run A: one
+snapshot of 256 parts x 256KiB, run B: 10 snapshots of 8 parts x 16KiB) through
+the same `check_core.mjs` sequence the CLI uses. There are no inputs, no token
+fields, no file pickers and no auth configuration changes: the browser sends
+its Access session cookie same-origin, never an authorization header, and
+writes happen only after a click. The routes are GET-only and never touch
+storage themselves. This fixture exists so the real-service gate can run from
+the owner's browser on a reviewed enabled staging deployment; it is not the
+user-facing feature (which stays compiled off) and it is removed by the
+separately reviewed enablement change before personal data upload. The
+browser script is generated into `browser_sources.mjs` by
+`node sync_check_page.mjs` and the freshness test fails the suite if the
+checked-in copy drifts from `browser/app.js` and `check_core.mjs`.
+
+Write admission is budgeted before anything is stored. Verified against the
+ledger, an admitted call debits once and persists; a call rejected after
+admission (the changed-manifest and changed-part immutable 409 probes) rolls
+back with its change and consumes nothing, so a run costs exactly
+`snapshots x (parts + 7)` writes: 263 for the worst single snapshot and 150
+for the full-ledger run, 413 total against the 512/UTC-day budget. `/v1/status`
+reports live `usage` counters; the check fails before any write unless the
+remaining day budget covers the plan plus reserve. Any failure after a
+reservation triggers best-effort deletion of exactly the snapshots this run
+created, with residue reported, never silently abandoned.
+
+The enabled deployment's `wrangler.toml` shape (SNAPSHOTS_ENABLED="true" plus
+exactly the `manadj-library-data` LIBRARY_BUCKET binding, nothing else) is
+verified by `check_config_enabled.py`, the enabled counterpart of
+`check_config.py`; the enablement change wires it into the same workflow step.
 
 Before enabling personal-data upload:
 - Prove auth-only owner success and unauthenticated/wrong-account denial on every
