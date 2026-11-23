@@ -393,7 +393,6 @@ final class WorkspaceUITests: XCTestCase {
         expectation(for: NSPredicate(format: "value CONTAINS %@", "Cached Test Tone"), evaluatedWith: app.buttons["deck-1-info"]); waitForExpectations(timeout: 8)
     }
     @MainActor func testBrowseTagDisclosureEdgesAtDefaultAndLargerType() {
-        defer { captureFailure() }
         for large in [false, true] {
             let app = XCUIApplication()
             app.launchArguments = ["--library-ui-fixture", "--browse-tags-fixture"] + (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] : [])
