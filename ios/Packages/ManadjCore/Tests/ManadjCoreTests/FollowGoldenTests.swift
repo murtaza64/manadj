@@ -41,6 +41,43 @@ final class FollowGoldenTests: XCTestCase {
         XCTAssertGreaterThan(count, 1500)
         print("Desktop Follow golden: \(cases.count) cases, \(count) rows")
     }
+    func testAgreementLiftIsSmallAndNotBothFirst() throws {
+        let json = #"{"version":1,"tracks":[{"id":1,"file_name":"a","title":"A","bpm":128},{"id":2,"file_name":"b","title":"B","bpm":128},{"id":4,"file_name":"single","title":"Single","bpm":128},{"id":3,"file_name":"both","title":"Both","bpm":128}],"links":[[1,3],[2,3],[1,4]],"tags":[],"tag_categories":[],"playlists":[],"settings":{}}"#
+        let snapshot = try SnapshotJson.parse(json)
+        let library = Library(snapshot)
+        var params = FollowParams()
+        let base = library.follow([1,2], params: params)
+        XCTAssertEqual(base.map(\.id), [4,3])
+        XCTAssertEqual(base.map { $0.referenceMatches.count }, [1,2])
+        XCTAssertEqual(Set(base.first { $0.id == 3 }!.referenceMatches.map(\.referenceId)), Set([1,2]))
+        XCTAssertEqual(base.first { $0.id == 4 }!.referenceMatches.map(\.referenceId), [1])
+        params.sharedMatchBonus = 2
+        let lifted = library.follow([1,2], params: params)
+        XCTAssertEqual(lifted.map(\.id), [3,4])
+        XCTAssertEqual(lifted.map(\.score), base.map(\.score))
+        let strongerSingle = json.replacingOccurrences(of: "\"title\":\"A\"", with: "\"title\":\"A\",\"artist\":\"Same producer\"")
+            .replacingOccurrences(of: "\"title\":\"Single\"", with: "\"title\":\"Single\",\"artist\":\"Same producer\"")
+        XCTAssertEqual(Library(try SnapshotJson.parse(strongerSingle)).follow([1,2], params: params).map(\.id), [4,3], "A two-point lift must not force a weaker both-match above a stronger single-match")
+        XCTAssertEqual(library.follow([1,1], params: params).map(\.id), library.follow([1], params: params).map(\.id))
+    }
+    func testOptionalAgreementLiftStaysWithinEvidenceTiersAndDeduplicatesReferences() throws {
+        let snapshot = try snapshot()
+        let library = Library(snapshot)
+        let refs = Array(snapshot.tracks.prefix(2).map(\.id))
+        let before = library.follow(refs)
+        var params = FollowParams(); params.sharedMatchBonus = 2
+        let lifted = library.follow(refs, params: params)
+        XCTAssertEqual(Set(lifted.map(\.id)), Set(before.map(\.id)))
+        XCTAssertEqual(lifted.map { $0.known?.rawValue ?? 3 }, lifted.map { $0.known?.rawValue ?? 3 }.sorted())
+        for row in lifted {
+            XCTAssertEqual(row.score, before.first { $0.id == row.id }?.score)
+            XCTAssertEqual(Set(row.referenceMatches.map(\.referenceId)).count, row.referenceMatches.count)
+        }
+        if let ref = refs.first {
+            XCTAssertEqual(library.follow([ref, ref], params: params).map(\.id), library.follow([ref], params: params).map(\.id))
+            XCTAssertTrue(library.follow([ref, ref], params: params).allSatisfy { $0.referenceMatches.count <= 1 })
+        }
+    }
     func testReferenceEvidencePreservesBestScoreAndUnion() throws {
         let snapshot = try snapshot()
         let references = Array(snapshot.tracks.prefix(2))

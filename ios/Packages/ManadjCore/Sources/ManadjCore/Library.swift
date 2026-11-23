@@ -141,3 +141,28 @@ public struct BrowserQueryResult: Sendable {
     public let rows: [LibraryTrack]
     public let followLabels: [Int: String]
 }
+
+/// Browse follows playing loaded decks; during silence, all loaded visible decks.
+/// Track identity deduplicates ranking references while deck identity stays in UI.
+public enum BrowseFollowPolicy {
+    public struct Deck: Sendable {
+        public let index: Int
+        public let trackId: Int?
+        public let playing: Bool
+        public init(index: Int, trackId: Int?, playing: Bool) {
+            self.index = index; self.trackId = trackId; self.playing = playing
+        }
+    }
+    public static func references(_ visible: [Deck]) -> [Deck] {
+        let loaded = visible.filter { $0.trackId != nil }
+        let playing = loaded.filter(\.playing)
+        return playing.isEmpty ? loaded : playing
+    }
+    public static func trackIds(_ decks: [Deck]) -> [Int] {
+        var seen = Set<Int>()
+        return decks.compactMap(\.trackId).filter { seen.insert($0).inserted }
+    }
+    public static func isPracticePause(_ visible: [Deck]) -> Bool {
+        !visible.contains(where: \.playing)
+    }
+}

@@ -338,35 +338,81 @@ final class WorkspaceUITests: XCTestCase {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
         app.buttons["browser-open"].tap()
-        let back = app.buttons["Browser back"]
-        XCTAssertTrue(back.waitForExistence(timeout: 10)); back.tap()
+        let playlists = app.buttons["browse-playlists"]
+        XCTAssertTrue(playlists.waitForExistence(timeout: 10)); playlists.tap()
         XCTAssertTrue(app.buttons["source-collection"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["source-playlists"].isHittable)
-        let root = XCTAttachment(screenshot: app.screenshot()); root.name = "Native Browse sources with transport"; root.lifetime = .keepAlways; add(root)
-        app.buttons["source-playlists"].tap()
-        XCTAssertTrue(app.buttons["source-playlist-10"].waitForExistence(timeout: 5))
+        let root = XCTAttachment(screenshot: app.screenshot()); root.name = "Full playlist menu with own search and back"; root.lifetime = .keepAlways; add(root)
         XCTAssertEqual(app.buttons["source-playlist-10"].value as? String, "2 tracks")
         XCTAssertEqual(app.buttons["source-playlist-11"].value as? String, "0 tracks")
         app.buttons["source-playlist-10"].tap()
         let cached = app.staticTexts["Cached Test Tone"], offline = app.staticTexts["Offline Test Tone"]
         XCTAssertTrue(cached.waitForExistence(timeout: 5)); XCTAssertTrue(offline.exists)
-        let playOrder = NSPredicate { _, _ in cached.frame.minY < offline.frame.minY }
-        expectation(for: playOrder, evaluatedWith: app); waitForExpectations(timeout: 5)
-        let playlist = XCTAttachment(screenshot: app.screenshot()); playlist.name = "Native playlist drilldown preserving play order"; playlist.lifetime = .keepAlways; add(playlist)
-        back.tap(); XCTAssertTrue(app.buttons["source-playlist-11"].waitForExistence(timeout: 5))
-        app.buttons["source-playlist-11"].tap()
+        expectation(for: NSPredicate { _, _ in cached.frame.minY < offline.frame.minY }, evaluatedWith: app); waitForExpectations(timeout: 5)
+        playlists.tap(); app.buttons["source-playlist-11"].tap()
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: cached); waitForExpectations(timeout: 5)
         XCTAssertTrue(app.staticTexts["0 tracks · 1 downloaded"].exists)
-        back.tap(); back.tap()
-        app.buttons["source-tags"].tap(); app.buttons["source-category-1"].tap(); app.buttons["source-tag-1"].tap()
-        XCTAssertTrue(cached.waitForExistence(timeout: 5)); XCTAssertFalse(offline.exists)
-        let tag = XCTAttachment(screenshot: app.screenshot()); tag.name = "Native tag category drilldown"; tag.lifetime = .keepAlways; add(tag)
-        back.tap(); back.tap(); back.tap()
-        app.buttons["source-collection"].tap()
+        playlists.tap(); app.buttons["Back to Browse"].tap()
+        XCTAssertTrue(playlists.waitForExistence(timeout: 5))
+        playlists.tap(); app.buttons["source-collection"].tap()
         XCTAssertTrue(offline.waitForExistence(timeout: 5)); XCTAssertTrue(cached.exists)
         XCTAssertTrue(app.buttons["A play pause"].firstMatch.isHittable); XCTAssertTrue(app.buttons["B play pause"].firstMatch.isHittable)
         XCTAssertLessThanOrEqual(app.buttons["A play pause"].firstMatch.frame.height, 44)
         XCTAssertGreaterThanOrEqual(app.buttons["A play pause"].firstMatch.frame.height, 44)
+    }
+    @MainActor func testBrowseManyTagsAnyAllAndDisclosure() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture", "--browse-tags-fixture"]; app.launch()
+        app.buttons["browser-open"].tap()
+        XCTAssertTrue(app.staticTexts["Cached Test Tone"].waitForExistence(timeout: 10))
+        let disclosure = app.buttons["track-tags-2"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5)); XCTAssertTrue(disclosure.isHittable)
+        let before = XCTAttachment(screenshot: app.screenshot()); before.name = "Native Browse 3 5 8 and 14 tag rows"; before.lifetime = .keepAlways; add(before)
+        disclosure.tap(); XCTAssertTrue(app.navigationBars["Track tags"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        app.buttons["browse-tags"].tap()
+        let mode = app.buttons["tag-match-mode"]
+        XCTAssertEqual(mode.value as? String, "Any selected tag")
+        app.buttons["Filter tag Rolling"].tap(); app.buttons["Filter tag Liquid"].tap()
+        mode.tap(); XCTAssertEqual(mode.value as? String, "All selected tags")
+        let all = XCTAttachment(screenshot: app.screenshot()); all.name = "Native glass ALL selected tags and bright matching row tags"; all.lifetime = .keepAlways; add(all)
+        app.buttons["Clear tag selections"].tap()
+        XCTAssertEqual(app.buttons["Filter tag Rolling"].value as? String, "Not selected")
+        app.buttons["browse-follow"].tap(); XCTAssertEqual(app.buttons["browse-follow"].value as? String, "On")
+        app.buttons["browse-follow"].tap(); XCTAssertEqual(app.buttons["browse-follow"].value as? String, "Off")
+        // Title-area taps must retain row-load intent, never open the tag sheet.
+        app.staticTexts["Cached Test Tone"].tap()
+        XCTAssertFalse(app.navigationBars["Track tags"].exists)
+        XCTAssertTrue(app.buttons["deck-0-info"].waitForExistence(timeout: 8))
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "Cached Test Tone"), evaluatedWith: app.buttons["deck-0-info"]); waitForExpectations(timeout: 8)
+        app.buttons["browser-open"].tap()
+        let preview = app.descendants(matching: .any)["library-row-preview-1"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        let swipeStart = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        swipeStart.press(forDuration: 0.06, thenDragTo: swipeStart.withOffset(CGVector(dx: 115, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+        XCTAssertFalse(app.navigationBars["Track tags"].exists)
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "Cached Test Tone"), evaluatedWith: app.buttons["deck-1-info"]); waitForExpectations(timeout: 8)
+    }
+    @MainActor func testBrowseTagDisclosureEdgesAtDefaultAndLargerType() {
+        for large in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--library-ui-fixture", "--browse-tags-fixture"] + (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] : [])
+            app.launch(); app.buttons["browser-open"].tap()
+            let disclosure = app.buttons["track-tags-1"]
+            XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+            disclosure.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)).tap()
+            XCTAssertTrue(app.navigationBars["Track tags"].waitForExistence(timeout: 5), "Bottom edge on a row without evidence must open its tags")
+            app.buttons["Done"].tap()
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = large ? "Large type measured tag rail boundaries" : "Default measured tag rail boundaries"; shot.lifetime = .keepAlways; add(shot)
+            for y in [0.2, 0.8] {
+                let start = disclosure.coordinate(withNormalizedOffset: CGVector(dx: -0.15, dy: y))
+                start.press(forDuration: 0.06, thenDragTo: start.withOffset(CGVector(dx: 115, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+                XCTAssertFalse(app.navigationBars["Track tags"].exists, "Swiping beside label must not open tags")
+                expectation(for: NSPredicate(format: "value CONTAINS %@", "Cached Test Tone"), evaluatedWith: app.buttons["deck-1-info"]); waitForExpectations(timeout: 8)
+                app.buttons["browser-open"].tap()
+                XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+            }
+            app.terminate()
+        }
     }
     @MainActor func testLibraryFilterChipsAndBPM() {
         defer { captureFailure() }
@@ -384,7 +430,7 @@ final class WorkspaceUITests: XCTestCase {
         let cached = app.staticTexts["Cached Test Tone"], offline = app.staticTexts["Offline Test Tone"]
         XCTAssertTrue(cached.waitForExistence(timeout: 5)); XCTAssertTrue(offline.exists)
         XCTAssertFalse(app.buttons["Filter tag Rolling"].exists)
-        filter.tap()
+        app.buttons["browse-tags"].tap()
         let rolling = app.buttons["Filter tag Rolling"], liquid = app.buttons["Filter tag Liquid"]
         XCTAssertTrue(rolling.waitForExistence(timeout: 5)); XCTAssertTrue(rolling.isHittable)
         rolling.tap()
@@ -393,7 +439,7 @@ final class WorkspaceUITests: XCTestCase {
         liquid.tap()
         XCTAssertTrue(offline.waitForExistence(timeout: 5)); XCTAssertTrue(cached.exists)
         let tags = XCTAttachment(screenshot: app.screenshot()); tags.name = "Library expanded multi-tag filters"; tags.lifetime = .keepAlways; add(tags)
-        filter.tap()
+        app.buttons["browse-tags"].tap()
         XCTAssertFalse(rolling.exists)
         XCTAssertTrue(offline.exists); XCTAssertTrue(cached.exists)
         let select = app.buttons["Select Cached Test Tone"]
@@ -409,7 +455,14 @@ final class WorkspaceUITests: XCTestCase {
         let bpm = XCTAttachment(screenshot: app.screenshot()); bpm.name = "Library BPM reference and active tags"; bpm.lifetime = .keepAlways; add(bpm)
         app.buttons["Reset library filters"].tap()
         XCTAssertTrue(offline.waitForExistence(timeout: 5)); XCTAssertTrue(cached.exists)
+        app.buttons["browse-tags"].tap()
         XCTAssertEqual(rolling.value as? String, "Not selected")
+        app.buttons["browse-tag-categories"].tap()
+        XCTAssertTrue(app.buttons["tag-category-1"].waitForExistence(timeout: 5)); app.buttons["tag-category-1"].tap()
+        app.buttons["category-tag-1"].tap()
+        XCTAssertTrue(cached.waitForExistence(timeout: 5)); XCTAssertFalse(offline.exists)
+        app.buttons["Clear browsed tag"].tap()
+        XCTAssertTrue(offline.waitForExistence(timeout: 5))
     }
     @MainActor func testLibrarySearchAcceptedAndRefusedLoads() {
         defer { captureFailure() }

@@ -57,6 +57,19 @@ extension AppModel {
                 object["tracks"] = tracks
                 savedJSON = String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
             }
+            if ProcessInfo.processInfo.arguments.contains("--browse-tags-fixture"),
+               var object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+               var tracks = object["tracks"] as? [[String: Any]] {
+                let names = ["Rolling", "Liquid", "Vocal", "Deep", "Atmospheric", "Late night", "Heavy bass", "Fast", "Very long genre name that needs disclosure", "Warm", "Groove", "Peak", "Dub", "Soul"]
+                object["tags"] = names.enumerated().map { ["id": $0.offset + 1, "name": $0.element, "category_id": 1, "color": $0.offset.isMultiple(of: 2) ? "#4a9eff" : "#ff9500"] as [String: Any] }
+                tracks[0]["tag_ids"] = Array(1...8); tracks[1]["tag_ids"] = Array(1...14)
+                for (offset, count) in [3, 5].enumerated() {
+                    var track = tracks[0]; track["id"] = offset + 3; track["title"] = "\(count) tag fixture"; track["tag_ids"] = Array(1...count)
+                    tracks.append(track)
+                }
+                object["tracks"] = tracks
+                savedJSON = String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+            }
             try store.saveSnapshot(savedJSON)
             // Row preview coverage: both tracks carry a preview blob, so the
             // browser UI tests see the same waveform path as a synced phone.
