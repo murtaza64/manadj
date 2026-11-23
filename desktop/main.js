@@ -15,6 +15,7 @@ const path = require("node:path");
 const backend = require("./backend");
 const { ICON, menuTemplate, windowChromeOptions } = require("./chrome");
 const { registerRecordingIpc } = require("./recording");
+const { registerLocalSpeechIpc } = require("./local-speech-ipc");
 const { registerFeedbackCapture } = require("./feedback");
 const { registerCloudIpc } = require("./cloud/ipc");
 
@@ -523,6 +524,9 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
+  const disposeSpeech = registerLocalSpeechIpc({ ipcMain, webContents: win.webContents, app,
+    getTargetURL: () => MANAGED && backendHandle ? backendHandle.url : TARGET });
+  win.once("closed", disposeSpeech);
   const disposeFeedback = registerFeedbackCapture({ ipcMain, webContents: win.webContents, targetUrl: TARGET });
   const disposeCloud = registerCloudIpc({ ipcMain, webContents: win.webContents, app, safeStorage, shell,
     getBackend: () => MANAGED ? backendHandle : null,
