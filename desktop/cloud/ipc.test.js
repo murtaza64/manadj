@@ -50,6 +50,16 @@ test('navigation/cancel/disposal invalidate work and remove every handler', asyn
   await f.call('cancel'); assert.deepEqual(f.events.slice(-2), ['cancelUpload', 'cancel']);
   f.dispose(); assert.equal(f.handlers.size, 0); assert.equal(f.wc.listenerCount('did-start-navigation'), 0);
 });
+test('snapshot list and deletion verbs guard connection, arguments and framing', async () => {
+  const f = fixture();
+  assert.deepEqual(await f.call('snapshots', { snapshotId: 'x' }), { ok: false, error: 'cloud_request_invalid' });
+  f.connection.publicState = () => ({ phase: 'disconnected' });
+  assert.deepEqual(await f.call('snapshots'), { ok: false, error: 'cloud_signin_required' });
+  for (const value of [{ snapshotId: 'not-a-uuid' }, { snapshotId: '12345678-1234-4234-8234-123456789012', body: 'injected' },
+    '12345678-1234-4234-8234-123456789012', null, []])
+    assert.deepEqual(await f.call('deleteSnapshot', value), { ok: false, error: 'cloud_request_invalid' });
+  assert.deepEqual(f.events, []);
+});
 test('IPC does not pass raw exceptions, provider strings or credentials to renderer', async () => {
   const f = fixture(); f.connection.connect = async () => { throw new Error('private-secret'); };
   assert.deepEqual(await f.call('connect'), { ok: false, error: 'cloud_operation_failed' });

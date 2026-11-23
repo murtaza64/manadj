@@ -93,6 +93,16 @@ wire DTO, not the earlier gzip offline-export artifact.
    only. Reads count before serving data; each part is hashed against the ledger
    before returning it. The native client must independently hash downloaded
    bytes; the assistant owner-browser download must do the same.
+6. `DELETE /v1/snapshots/{id}` is the explicit, consistency-safe owner deletion.
+   The ledger tombstones the snapshot first (state `deleting`, all other
+   operations on it rejected, retry of begin with the same ID rejected), then
+   every part object is deleted and verified absent by readback, and only then
+   is the ledger entry removed, releasing its slot and reserved bytes. An
+   interrupted deletion stays resumable: a repeated DELETE re-runs the missing
+   steps idempotently. Deleting an absent ID returns a plain confirmation, so
+   an ambiguous earlier success can be retried safely. Deletion works on
+   committed snapshots and incomplete reservations and consumes the same daily
+   write admission as other mutations.
 
 Limits: 256KiB per part, 256 parts/64MiB per snapshot, 10 snapshots/640MiB reserved
 snapshot data total, 1MiB control bookkeeping, 512 admitted mutation requests and
@@ -104,11 +114,11 @@ The single small control ledger uses R2's atomic If-Match/If-None-Match writes,
 with at most three bounded CAS attempts per update. A part uses create-once
 If-None-Match. No in-memory-only quota, object listing to estimate capacity,
 automatic expiry, cache deletion, prune, overwrite, limit expansion or silent
-history truncation exists. No DELETE endpoint is introduced: an explicit deletion
-request still needs a reviewed consistency-preserving operation, not an object
-lifecycle rule or ad hoc removal of the control ledger. External deletion or
-editing of managed objects is unsupported and readback detects missing/corrupt
-parts. Never delete the ledger to reset capacity or quota.
+history truncation exists. Deletion exists only as the reviewed explicit
+operation above: tombstone, verified-absent part removal, then ledger release.
+No object lifecycle rule or ad hoc removal of the control ledger. External
+deletion or editing of managed objects is unsupported and readback detects
+missing/corrupt parts. Never delete the ledger to reset capacity or quota.
 
 These limits are **not an account bill cap**. Authenticated retries, conditional
 writes, quota checks and rejected requests can incur operations. A read updates
@@ -122,6 +132,26 @@ Run `npm ci --ignore-scripts && npm test` in this directory, and
 `wrangler deploy --dry-run` without a credential. Local unit tests use only
 synthetic fixtures and an atomic in-memory R2 model; that is not a real R2/Access
 or Workers CPU proof.
+
+### Staged synthetic real-service check
+
+After a reviewed enabled deployment with the intended private bucket, and before
+any personal data upload, run `service_check.mjs` with an owner bearer token
+supplied through an environment variable (never on a command line):
+
+```
+LIBRARY_CHECK_TOKEN=... node cloud/library/service_check.mjs \
+  --origin https://manadj-private-library.murtaza-javaid.workers.dev \
+  --snapshots 2 --parts 256 --part-bytes 262144
+```
+
+The script stores only generated tracks-table rows, verifies receipts and
+SHA-256 readback of every part, probes exact retries and immutable rejection,
+then explicitly deletes each snapshot and requires an empty stored list. Worst
+shape is 256 parts of 256KiB per snapshot with up to a 10-snapshot ledger; any
+Workers Free CPU/resource failure appears as a non-2xx Worker error and fails
+the run. Node-side wall times are reported for review but are not the CPU
+measurement; the pass/fail of the real service under the worst shape is.
 
 Before enabling personal-data upload:
 - Prove auth-only owner success and unauthenticated/wrong-account denial on every
@@ -139,8 +169,9 @@ Before enabling personal-data upload:
 - Profile largest parts and a full ledger under Workers Free's 10ms CPU limit.
   Node elapsed times and a dry-run are not that measurement. Reduce bounded work
   or redesign visibly if needed; do not silently upgrade or raise limits.
-- Provide a supported consistency-safe explicit deletion operation and verify its
-  result before enabling retention-until-user-deletes. No deletion exists yet.
+- Run the staged synthetic real-service check (`service_check.mjs` below): it
+  covers begin/upload/receipt/hash readback, exact retries, immutable
+  rejection, and explicit deletion with verified absence on the real bucket.
 - Resolve legacy/sessionless history provenance and group signed-evidence
   selection. The prepared exporter blocks those uncertain cases, not a fallback.
 - Keep the app default disabled until all gates pass. No personal audio/library
