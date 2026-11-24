@@ -1422,13 +1422,14 @@ describe('heard display engine seam', () => {
     ctx.currentTime = 1.4;
     expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(11.24);
   });
-  it('keeps a short held CUE audible in display after release', async () => {
+  it('snaps a short held CUE return immediately without waiting for Heard latency', async () => {
     const { engine, ctx } = await harness();
     engine.pause(); ctx.currentTime = 1; engine.seek(10); engine.cueDown(); engine.cueUp(); engine.cueDown();
     ctx.currentTime = 1.05; engine.cueUp();
-    ctx.currentTime = 1.23;
     expect(engine.getPlayhead()).toBeCloseTo(10);
-    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(10.03);
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(10);
+    ctx.currentTime = 1.23;
+    expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(10);
     ctx.currentTime = 1.3;
     expect(engine.getHeardDisplayPlayhead(.2)).toBeCloseTo(10);
   });

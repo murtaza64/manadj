@@ -1488,8 +1488,12 @@ export class DeckEngine {
     }
     // Silent editing has no delayed output to follow. Keep stop/release tails
     // projected, but a later paused seek/jump/cue edit must respond immediately.
-    if (!isAudioRunning(synced) && !isAudioRunning(next) &&
-        ['seek', 'jump', 'cue-down', 'hot-cue-down'].includes(event.type)) {
+    // A momentary cue release is direct manipulation: return immediately,
+    // even when Heard compensates ordinary playback/pause by output latency.
+    const cueReturn = (event.type === 'cue-up' || event.type === 'hot-cue-up') &&
+      (synced.previewing || synced.hotCuePreviewSlot !== null) && !isAudioRunning(next);
+    if (cueReturn || (!isAudioRunning(synced) && !isAudioRunning(next) &&
+        ['seek', 'jump', 'cue-down', 'hot-cue-down'].includes(event.type))) {
       this.heardDisplayHistory.reset();
     }
     this.emit();
@@ -1970,4 +1974,4 @@ export class DeckEngine {
     this.snapshot = this.buildSnapshot();
     for (const listener of this.listeners) listener();
   }
-}
+      }
