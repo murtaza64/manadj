@@ -1,5 +1,6 @@
 .deck-action-trail { position:absolute; inset:0; pointer-events:none; z-index:4; overflow:hidden; }
-.deck-action-symbol { position:absolute; left:calc(25% + 32px); top:50%; display:flex; align-items:center; gap:3px; color:var(--text); animation:deck-action-drift 1.1s ease-out both; }
+.deck-action-symbol { position:absolute; left:0; transition:margin-left 180ms ease-out; top:50%; display:flex; align-items:center; gap:3px; color:var(--text); animation:deck-action-drift 1.1s ease-out both; }
+.deck-action-symbol[data-direction="backward"] svg { transform:scaleX(-1); }
 .deck-action-symbol svg { width:24px; height:24px; padding:3px; box-sizing:content-box; border-radius:50%; background:var(--crust); }
 .deck-action-symbol small { font-size:12px; font-weight:700; background:var(--crust); padding:2px 4px; border-radius:4px; }
 .deck-action-symbol:nth-last-child(2) { margin-left:64px; }
@@ -8,7 +9,7 @@
 .perf-wave-row[data-playback-state="held"] .deck-action-symbol { color:var(--warning); }
 @keyframes deck-action-drift { 0% { opacity:0; transform:translate(0,-50%) scale(.85); } 9%,55% { opacity:1; } 100% { opacity:0; transform:translate(24px,-50%) scale(1); } }
 @keyframes deck-action-ripple { from { opacity:.8; transform:scale(.5); } to { opacity:0; transform:scale(2.5); } }
-@media(prefers-reduced-motion:reduce) { .deck-action-symbol { animation-name:deck-action-fade; }.deck-action-symbol::before { display:none; } }
+@media(prefers-reduced-motion:reduce) { .deck-action-symbol { animation-name:deck-action-fade; transition:none; }.deck-action-symbol::before { display:none; } }
 @keyframes deck-action-fade { 0%,65% { opacity:1;transform:translateY(-50%); } 100% { opacity:0;transform:translateY(-50%); } }
 
 
@@ -16,3 +17,9 @@
 .deck-action-symbol[data-held]::before { animation:none; opacity:.5; }
 
 .deck-action-symbol[data-held] { margin-left:0; }
+
+/* Cue spam stays anchored at the cue point. Release fades, never bubbles right. */
+.deck-action-symbol[data-action="cue"] { animation-name:deck-cue-release-fade; margin-left:0; }
+.deck-action-symbol[data-action="cue"]::before { display:none; }
+@keyframes deck-cue-release-fade { from { opacity:1;transform:translateY(-50%); } to { opacity:0;transform:translateY(-50%); } }
+.deck-action-symbol[data-action="cue"][data-held] { animation:none;opacity:1; }

@@ -1,5 +1,6 @@
 /** Display-only feedback. No reducer calls, clock changes or input interception. */
 import {useEffect, useRef, useState} from 'react';
+import {PLAY_MARKER_FRACTION} from '../utils/waveformZoom';
 import {machineControlFeedback} from '../playback/controlFeedbackOrigin';
 import {audibleHolder,subscribeAudible} from '../playback/audibleSurface';
 import type {DeckEngine} from '../playback/DeckEngine';
@@ -10,12 +11,20 @@ export type PlaybackVisualState = 'held' | 'playing' | 'paused';
 export function playbackVisualState(s: {playing:boolean;previewing:boolean;hotCuePreviewSlot:number|null}): PlaybackVisualState {
   return s.playing ? 'playing' : s.previewing || s.hotCuePreviewSlot !== null ? 'held' : 'paused';
 }
-type Action = {id:number;kind:'play'|'pause'|'cue'|'hotCue'|'loop'|'loopExit'|'jump'|'seek'|'eq'|'filter'|'fader'|'trim'|'blocked'|'pending';value?:number};
+type Action = {id:number;kind:'play'|'pause'|'cue'|'hotCue'|'loop'|'loopExit'|'jump'|'seek'|'blocked'|'pending';value?:number};
 export function DeckActionTrail({engine, mixer, deck, active, trackId}: {engine:DeckEngine;mixer?:Mixer;deck?:ChannelId;active:boolean;trackId:number|null}) {
   const [actions,setActions]=useState<Action[]>([]),next=useRef(0);
   const [held,setHeld]=useState(false);
+  const releaseCue=useRef<(()=>void)|null>(null);
   useEffect(()=>{
-    const update=()=>setHeld(active && trackId!==null && playbackVisualState(engine.getSnapshot())==='held');
+    let wasHeld=false;
+    const update=()=>{
+      const snapshot=engine.getSnapshot();
+      const nowHeld=active && trackId!==null && playbackVisualState(snapshot)==='held';
+      setHeld(nowHeld);
+      if(wasHeld && !nowHeld && !snapshot.playing)releaseCue.current?.();
+      wasHeld=nowHeld;
+    };
     if(!engine.subscribe)return;
     update();return engine.subscribe(update);
   },[engine,active,trackId]);
@@ -38,20 +47,11 @@ export function DeckActionTrail({engine, mixer, deck, active, trackId}: {engine:
     };
     const surface=subscribeAudible(()=>setActions([]));
     const blocked=subscribeLoadBlocked(d=>{if(d===deck)add('blocked');});
-    let previous=mixer&&deck?mixer.getChannelState(deck):undefined;
-    const mixerLast=new Map<string,number>();
-    const mix=mixer&&deck?mixer.subscribe(changed=>{
-      const state=mixer.getChannelState(deck),old=previous;previous=state;
-      if(changed!==deck||!old||machineControlFeedback())return;
-      const kinds:Action['kind'][]=[];
-      if(state.fader!==old.fader)kinds.push('fader');
-      if(state.filter!==old.filter)kinds.push('filter');
-      if(state.trim!==old.trim)kinds.push('trim');
-      if(state.eq.low!==old.eq.low||state.eq.mid!==old.eq.mid||state.eq.high!==old.eq.high)kinds.push('eq');
-      for(const kind of kinds){const now=performance.now();if(now-(mixerLast.get(kind)??-Infinity)>=350){mixerLast.set(kind,now);accepted(kind);}}
-    }):()=>{};
+    // Continuous mixer moves change the audio/waveform, not discrete action trails.
     let lastSeek = -Infinity;
+    releaseCue.current=()=>accepted('cue');
     const stop=engine.addControlFeedbackListener(e=>{
+      if(e.kind==='cue' && playbackVisualState(engine.getSnapshot())==='held')return;
       accepted(e.kind,e.value);
     });
     const gesture=engine.addTransportEventListener(e=>{
@@ -59,15 +59,12 @@ export function DeckActionTrail({engine, mixer, deck, active, trackId}: {engine:
       if(e.action==='jumpBeats')accepted('jump',e.detail);
       else if(e.action==='seek' && performance.now()-lastSeek>=500){lastSeek=performance.now();accepted('seek');}
     });
-    return()=>{disposed=true;stop();gesture();surface();blocked();mix();timers.forEach(clearTimeout);};
+    return()=>{disposed=true;stop();gesture();surface();blocked();releaseCue.current=null;timers.forEach(clearTimeout);};
   },[engine,mixer,deck,active,trackId]);
-  return <div className="deck-action-trail" aria-hidden="true">{[...(held ? [{id:-1,kind:'cue' as const}] : []),...actions.filter(a=>!held || (a.kind!=='cue' && a.kind!=='hotCue'))].map(a=><span key={a.id} className="deck-action-symbol" data-action={a.kind} data-held={a.id===-1 || undefined}>
+  return <div className="deck-action-trail" aria-hidden="true" style={{left:`${(1-PLAY_MARKER_FRACTION)*100}%`}}>{[...(held ? [{id:-1,kind:'cue' as const}] : []),...actions.filter(a=>!held || (a.kind!=='cue' && a.kind!=='hotCue'))].map(a=><span key={a.id} className="deck-action-symbol" data-action={a.kind} data-held={a.id===-1 || undefined} data-direction={a.kind==='jump' && (a.value??0)<0 ? 'backward' : undefined}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
       {a.kind==='pending'?<><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 3"/></>:
        a.kind==='blocked'?<><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></>:
-       a.kind==='eq'?<><path d="M5 3v18M12 3v18M19 3v18M2 8h6M9 16h6M16 10h6" strokeWidth="2.5"/></>:
-       a.kind==='filter'?<path d="M3 4h18l-7 9v7l-4-2v-5z"/>:
-       (a.kind==='fader'||a.kind==='trim')?<><path d="M12 2v20M6 7h12v6H6z"/></>:
        a.kind==='play'?<path d="M7 4v16l13-8z" fill="currentColor" stroke="none"/>:
        a.kind==='pause'?<path d="M8 4v16M16 4v16" strokeWidth="4"/>:
        (a.kind==='loop'||a.kind==='loopExit')?<><path d="M20 9a8 8 0 0 0-14-3M4 15a8 8 0 0 0 14 3"/><path d="M14 5h6v6M10 19H4v-6"/>{a.kind==='loopExit'&&<path d="M3 3l18 18" strokeWidth="3"/>}</>:

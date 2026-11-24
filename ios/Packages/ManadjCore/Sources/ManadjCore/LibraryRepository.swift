@@ -1,7 +1,7 @@
 import Foundation
 
 public struct LibrarySyncProgress: Sendable, Equatable {
-    public enum Phase: Sendable, Equatable { case library, previews, audio }
+    public enum Phase: Sendable, Equatable { case library, previews, details, audio }
     public let phase: Phase
     public let completed: Int
     public let total: Int
@@ -52,6 +52,20 @@ public actor LibraryRepository {
             try Task.checkCancellation()
             for track in batch { if let blob = pack[track.id] { try store.savePreview(blob, track: track) } }
             await progress?(.init(phase: .previews, completed: min(start + batch.count, missing.count), total: missing.count))
+        }
+        // Full-resolution, revision-keyed detail belongs in library sync too.
+        // Sequential requests bound memory and preserve complete cached files
+        // when the network fails or the user cancels mid-sync.
+        let detailed = next.tracks.filter { $0.waveformRev != nil }
+        var detailsReady = detailed.filter { store.detail($0) != nil }.count
+        await progress?(.init(phase: .details, completed: detailsReady, total: detailed.count))
+        for track in detailed where store.detail(track) == nil {
+            try Task.checkCancellation()
+            do { _ = try await detail(track, connection: connection) }
+            catch is CancellationError { throw CancellationError() }
+            catch { if Task.isCancelled { throw CancellationError() }; throw SyncError("Full waveform for track \(track.id): \(error.localizedDescription)") }
+            detailsReady += 1
+            await progress?(.init(phase: .details, completed: detailsReady, total: detailed.count))
         }
         if allAudio {
             let eligible = next.tracks.filter { $0.audioRev != nil }

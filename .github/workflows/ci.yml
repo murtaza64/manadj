@@ -40,10 +40,23 @@ jobs:
         run: |
           case "$RUNNER_OS" in
             Linux) sudo apt-get update -q && sudo apt-get install -yq ffmpeg ;;
-            Windows) choco install ffmpeg -y --no-progress ;;
+            Windows)
+              if ! command -v ffmpeg; then
+                for attempt in 1 2 3; do
+                  if choco install ffmpeg -y --no-progress; then
+                    echo "Chocolatey attempt ${attempt} completed"
+                  else
+                    echo "Chocolatey attempt ${attempt} failed" >&2
+                  fi
+                  if command -v ffmpeg; then break; fi
+                  if [ "$attempt" -lt 3 ]; then sleep "$((attempt * 10))"; fi
+                done
+              fi
+              ;;
             macOS) brew install ffmpeg ;;
           esac
-          ffmpeg -version | head -1
+          # Exercise the real executable; never let an install retry mask failure.
+          ffmpeg -version
 
       - name: uv sync
         run: uv sync --frozen

@@ -16,12 +16,13 @@ it('PLAY takes priority over preview until cue release, including hotcue hold',(
 });
 it('bounds short-lived symbols and removes subscriptions/timers when hidden',async()=>{
  vi.useFakeTimers();let control=(_e:DeckControlFeedback)=>{},gesture=(_e:DeckTransportGesture)=>{};
- const snapshot={playing:false,previewing:false,loop:null};const stop=vi.fn(),off=vi.fn();
+ const snapshot={playing:false,previewing:false,hotCuePreviewSlot:null,loop:null};const stop=vi.fn(),off=vi.fn();
  const engine={getSnapshot:()=>snapshot,addControlFeedbackListener:(cb:typeof control)=>{control=cb;return stop;},addTransportEventListener:(cb:typeof gesture)=>{gesture=cb;return off;}} as unknown as DeckEngine;
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
  act(()=>root.render(<DeckActionTrail engine={engine} active trackId={1}/>));
  act(()=>{control({kind:'cue'});});expect(host.querySelector('[data-action=cue]')).not.toBeNull();
  act(()=>{control({kind:'play'});});expect(host.querySelector('[data-action=play]')).not.toBeNull();
+ act(()=>gesture({action:'jumpBeats',playhead:0,detail:-4}));expect(host.querySelector('[data-direction=backward] small')?.textContent).toBe('-4');
  act(()=>{for(let i=0;i<9;i++)gesture({action:'jumpBeats',playhead:0,detail:4});});
  expect(host.querySelectorAll('.deck-action-symbol')).toHaveLength(3);
  act(()=>{registerSurface('replay',{transport:{togglePlay:()=>{}},silence:()=>{}});claimAudible('replay');});
@@ -36,25 +37,25 @@ it('bounds short-lived symbols and removes subscriptions/timers when hidden',asy
  act(()=>root.unmount());host.remove();
 });
 
-it('mixer displays only changed base controls and bounded load refusals with teardown',()=>{
+it('continuous mixer moves emit no trail while discrete load refusals remain bounded',()=>{
  vi.useFakeTimers();let mix=(_d?:ChannelId)=>{};
  let state={fader:1,filter:0,trim:0,eq:{low:.5,mid:.5,high:.5}};
  const off=vi.fn();const mixer={getChannelState:()=>state,subscribe:(cb:typeof mix)=>{mix=cb;return off;}}as unknown as Mixer;
- const engine={addControlFeedbackListener:()=>()=>{},addTransportEventListener:()=>()=>{}}as unknown as DeckEngine;
+ const engine={getSnapshot:()=>({playing:false,previewing:false,hotCuePreviewSlot:null}),addControlFeedbackListener:()=>()=>{},addTransportEventListener:()=>()=>{}}as unknown as DeckEngine;
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
  act(()=>root.render(<DeckActionTrail engine={engine} mixer={mixer} deck="A" active trackId={1}/>));
  act(()=>{mix('A');});expect(host.querySelectorAll('.deck-action-symbol')).toHaveLength(0);
- act(()=>{state={...state,fader:.3};mix('A');});expect(host.querySelector('[data-action=fader]')).not.toBeNull();
- act(()=>{state={...state,eq:{...state.eq,low:0}};mix('A');});expect(host.querySelector('[data-action=eq]')).not.toBeNull();
+ act(()=>{state={...state,fader:.3};mix('A');});expect(host.querySelector('[data-action=fader]')).toBeNull();
+ act(()=>{state={...state,eq:{...state.eq,low:0}};mix('A');});expect(host.querySelector('[data-action=eq]')).toBeNull();
  act(()=>{showLoadBlocked('B');});expect(host.querySelector('[data-action=blocked]')).toBeNull();
  act(()=>{showLoadBlocked('A');});expect(host.querySelector('[data-action=blocked]')).not.toBeNull();
- act(()=>root.render(<DeckActionTrail engine={engine} mixer={mixer} deck="A" active={false} trackId={1}/>));expect(off).toHaveBeenCalled();
+ act(()=>root.render(<DeckActionTrail engine={engine} mixer={mixer} deck="A" active={false} trackId={1}/>));expect(off).not.toHaveBeenCalled();
  act(()=>{showLoadBlocked('A');});expect(host.querySelectorAll('.deck-action-symbol')).toHaveLength(0);
  act(()=>root.unmount());host.remove();
 });
 
 it('preserves a human gesture delivered before synchronous takeover and drops machine syncs',async()=>{
- let control=(_e:DeckControlFeedback)=>{};const engine={addControlFeedbackListener:(cb:typeof control)=>{control=cb;return()=>{}},addTransportEventListener:()=>()=>{}}as unknown as DeckEngine;
+ let control=(_e:DeckControlFeedback)=>{};const engine={getSnapshot:()=>({playing:false,previewing:false,hotCuePreviewSlot:null}),addControlFeedbackListener:(cb:typeof control)=>{control=cb;return()=>{}},addTransportEventListener:()=>()=>{}}as unknown as DeckEngine;
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
  act(()=>root.render(<DeckActionTrail engine={engine} active trackId={1}/>));
  act(()=>{registerSurface('replay',{transport:{togglePlay:()=>{}},silence:()=>{}});claimAudible('replay');});
@@ -63,14 +64,15 @@ it('preserves a human gesture delivered before synchronous takeover and drops ma
  act(()=>root.unmount());host.remove();
 });
 
-it('anchors the mobile cue glyph throughout hold and cleans up on release or hide',()=>{
+it('anchors the desktop cue glyph throughout hold and cleans up on release or hide',()=>{
  vi.useFakeTimers();let notify=()=>{};let snapshot={playing:false,previewing:true,hotCuePreviewSlot:null as number|null};
  const engine={getSnapshot:()=>snapshot,subscribe:(cb:()=>void)=>{notify=cb;return()=>{}},addControlFeedbackListener:()=>()=>{},addTransportEventListener:()=>()=>{}} as unknown as DeckEngine;
  const host=document.createElement('div');const root=createRoot(host);
  act(()=>root.render(<DeckActionTrail engine={engine} active trackId={1}/>));
  expect(host.querySelector('[data-held] rect')?.getAttribute('x')).toBe('3.36');
  act(()=>vi.advanceTimersByTime(5000));expect(host.querySelectorAll('[data-held]')).toHaveLength(1);
- act(()=>{snapshot={...snapshot,previewing:false};notify();});expect(host.querySelector('[data-held]')).toBeNull();
+ act(()=>{snapshot={...snapshot,previewing:false};notify();});expect(host.querySelector('[data-held]')).toBeNull();expect(host.querySelectorAll('[data-action=cue]')).toHaveLength(1);
+ act(()=>vi.advanceTimersByTime(1101));expect(host.querySelectorAll('[data-action=cue]')).toHaveLength(0);
  act(()=>{snapshot={...snapshot,hotCuePreviewSlot:2};notify();});expect(host.querySelector('[data-held]')).not.toBeNull();
  act(()=>root.render(<DeckActionTrail engine={engine} active={false} trackId={1}/>));expect(host.querySelector('[data-held]')).toBeNull();
  act(()=>root.unmount());
