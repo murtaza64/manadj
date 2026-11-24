@@ -89,6 +89,24 @@ final class SyncIntegrationTests: XCTestCase, @unchecked Sendable {
         do { _ = try await repository.detail(changed, connection: connection); XCTFail("Must reject stale full wave revision") }
         catch { XCTAssertTrue(error.localizedDescription.contains("revision changed")) }
     }
+    func testNormalSyncTransfersFullWaveformsAndReusesCacheOffline() async throws {
+        let fixture = try Fixture()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = try LibraryRepository(root: root)
+        let connection = try DesktopConnection(url: fixture.url, deviceToken: "fixture-not-a-real-token")
+        let progress = ProgressLog()
+        let snapshot = try await repository.sync(connection) { await progress.record($0) }
+        let events = await progress.items
+        XCTAssertEqual(events.filter { $0.phase == .details }, [.init(phase: .details, completed: 0, total: 1), .init(phase: .details, completed: 1, total: 1)])
+        let reopened = try LibraryRepository(root: root)
+        let offline = try await reopened.detail(snapshot.tracks[0], connection: nil)
+        XCTAssertEqual(offline?.bandFrames, 2048)
+        _ = try await repository.sync(connection)
+        let (data, _) = try await URLSession.shared.data(from: fixture.url.appendingPathComponent("stats"))
+        let counts = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Int])
+        XCTAssertEqual(counts["details"], 1, "Second sync must reuse the validated revision, not fetch again")
+    }
     func testRepositoryBulkSyncSkipsUnavailableTracksAndPreservesOfflineAudio() async throws {
         let fixture = try Fixture()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
