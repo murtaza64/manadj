@@ -43,13 +43,16 @@ struct SettingsView: View {
                             if progress.total > 0 { ProgressView(value: Double(progress.completed), total: Double(progress.total)).accessibilityLabel("Audio files ready") }
                             Text("Audio: \(progress.completed) of \(progress.total) files ready").accessibilityIdentifier("sync-audio-progress")
                             Text("Completed files, not bytes. Already cached files count as ready.")
-                        } else { Text(progress.phase == .library ? "Fetching library…" : "Caching waveforms…") }
+                        } else if progress.phase == .details {
+                            if progress.total > 0 { ProgressView(value: Double(progress.completed), total: Double(progress.total)).accessibilityLabel("Full waveforms ready") }
+                            Text("Full waveforms: \(progress.completed) of \(progress.total) ready").accessibilityIdentifier("sync-detail-progress")
+                        } else { Text(progress.phase == .library ? "Fetching library…" : "Caching browser previews…") }
                         Text("Screen stays awake during foreground sync. Keep manaDJ open; locking or leaving the app may interrupt it. Retry keeps complete cached files.")
                     }.font(Ink.font(11)).foregroundStyle(Ink.muted)
                 }
                 if model.snapshot?.schemaStale == true { Text("This desktop snapshot is older than the current sync schema. Update manaDJ desktop and sync again.").font(Ink.font(12)).foregroundStyle(Ink.warning) }
                 Button("SYNC + ALL AUDIO") { bulkConfirmation = true }.buttonStyle(FlatButtonStyle()).disabled(model.busy || model.pairedOrigin == nil)
-                Text("Normal sync caches the library and previews. Audio downloads when loaded. All audio can use substantial storage. This slice does not automatically remove old revisions.").font(Ink.font(11)).foregroundStyle(Ink.muted)
+                Text("Normal sync caches the library, browser previews and full waveforms. Audio downloads when loaded. All audio can use substantial storage. This slice does not automatically remove old revisions.").font(Ink.font(11)).foregroundStyle(Ink.muted)
                 if model.pairedOrigin != nil { Button("FORGET DESKTOP") { forgetConfirmation = true }.buttonStyle(FlatButtonStyle(color: Ink.danger)).disabled(model.busy) }
                 if !syncOnly {
                 Divider().overlay(Ink.edge)

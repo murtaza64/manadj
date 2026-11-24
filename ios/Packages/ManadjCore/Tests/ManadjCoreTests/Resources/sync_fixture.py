@@ -17,6 +17,7 @@ DETAIL=mwf(2048)
 PREVIEW=mwf(256)
 class Handler(BaseHTTPRequestHandler):
     captures = 0
+    details = 0
     def log_message(self, *args): pass
     def respond(self, code, body=b"", headers=None):
         self.send_response(code)
@@ -26,7 +27,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
     def do_GET(self):
         if self.path == '/stats':
-            return self.respond(200,json.dumps({'captures':Handler.captures}).encode())
+            return self.respond(200,json.dumps({'captures':Handler.captures,'details':Handler.details}).encode())
         if self.path == '/capture':
             Handler.captures += 1
             return self.respond(200,b'not audio')
@@ -38,6 +39,7 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(0.05)
             return self.respond(200,json.dumps(SNAPSHOT).encode())
         if self.path.endswith('/tracks/1/waveform'):
+            Handler.details += 1
             return self.respond(200,DETAIL,{'X-Waveform-Rev':'detail-revision'})
         if self.path.endswith('/tracks/1/audio'):
             return self.respond(200,AUDIO,{'X-Audio-Rev':'fixture-revision'})

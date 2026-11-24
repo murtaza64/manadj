@@ -228,12 +228,14 @@ struct DeckViewState {
                 try Task.checkCancellation()
                 self.snapshot = refreshed
                 while !Task.isCancelled && self.liveListening {
-                    let sent = ProcessInfo.processInfo.systemUptime
-                    let envelope = try await client.liveState()
+                    let (envelope, sent) = try await self.pollLocalLiveState { try await client.liveState() }
                     try Task.checkCancellation()
                     let received = ProcessInfo.processInfo.systemUptime
                     let rtt = received - sent
                     self.liveRoundTrip = rtt
+                    if try self.deferLocalLiveForRoundTrip(rtt) {
+                        try await Task.sleep(for: .milliseconds(100)); continue
+                    }
                     guard envelope.state == "live", let anchor = envelope.anchor else {
                         self.pauseLocalLive("Desktop is not live · paused")
                         try await Task.sleep(for: .milliseconds(200)); continue
@@ -265,8 +267,41 @@ struct DeckViewState {
                 // A stopped/replaced listener must never overwrite STOP or pause its successor.
                 guard !Task.isCancelled else { return }
                 self.pauseLocalLive(error.localizedDescription)
+                self.liveListening = false
             }
         }
+    }
+    // Only recover transport failures from the live-state GET. Authentication,
+    // parsing, track preparation and other permanent failures still end the task.
+    func pollLocalLiveState(_ fetch: () async throws -> LiveEnvelope) async throws -> (LiveEnvelope, Double) {
+        while true {
+            try Task.checkCancellation()
+            guard liveListening else { throw CancellationError() }
+            do {
+                let sent = ProcessInfo.processInfo.systemUptime
+                let envelope = try await fetch()
+                try Task.checkCancellation()
+                guard liveListening else { throw CancellationError() }
+                return (envelope, sent)
+            } catch {
+                try Task.checkCancellation()
+                guard liveListening else { throw CancellationError() }
+                guard let transport = error as? URLError,
+                      transport.code == .timedOut || transport.code == .networkConnectionLost else { throw error }
+                pauseLocalLive("Connection interrupted · waiting for fresh desktop state · paused")
+                try await Task.sleep(for: .milliseconds(500))
+            }
+        }
+    }
+    // Slow measurements are not safe sounding frames, but do not end the
+    // listener. Do not advance sequence or freshness until a fresh poll arrives.
+    func deferLocalLiveForRoundTrip(_ rtt: Double) throws -> Bool {
+        guard rtt.isFinite, rtt >= 0 else { throw SyncError("Invalid live round-trip measurement") }
+        guard rtt <= 1 else {
+            pauseLocalLive("Waiting for fresh desktop state · paused")
+            return true
+        }
+        return false
     }
     private func pauseLocalLive(_ reason: String) {
         liveWatchdogPaused = true
