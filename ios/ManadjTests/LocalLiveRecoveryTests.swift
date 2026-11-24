@@ -35,6 +35,21 @@ final class LocalLiveRecoveryTests: XCTestCase {
         }
         XCTAssertEqual(calls, 2)
         XCTAssertEqual(envelope.state, "offline")
+        // Same strict one-second bound as LiveDeckAnchor.target. A slow frame
+        // pauses native sound and returns to polling rather than escaping it.
+        audio.send(MDJPlay, deck: 0)
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertTrue(audio.state(0).playing)
+        XCTAssertTrue(try model.deferLocalLiveForRoundTrip(1.1409725833333368))
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertFalse(audio.state(0).playing)
+        XCTAssertTrue(model.liveListening)
+        XCTAssertTrue(model.liveStatus.hasPrefix("Waiting for fresh"))
+        XCTAssertFalse(try model.deferLocalLiveForRoundTrip(0.05))
+        XCTAssertFalse(try model.deferLocalLiveForRoundTrip(1))
+        for invalid in [-1.0, Double.infinity, Double.nan] {
+            XCTAssertThrowsError(try model.deferLocalLiveForRoundTrip(invalid))
+        }
         model.stopLocalLive()
     }
 
