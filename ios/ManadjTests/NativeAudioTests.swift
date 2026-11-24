@@ -550,7 +550,7 @@ final class NativeAudioTests: XCTestCase {
         XCTAssertFalse(model.decks[0].loading)
         XCTAssertTrue(model.load(cached, deck: 0), model.error ?? "Load refused without a reason")
         XCTAssertTrue(model.decks[0].loading)
-        XCTAssertFalse(model.load(cached, deck: 0)) // duplicate request is refused synchronously
+        XCTAssertTrue(model.load(cached, deck: 0), "A new request replaces the in-flight load")
         for _ in 0..<150 {
             if !model.decks[0].loading { break }
             try await Task.sleep(for: .milliseconds(20))
@@ -558,6 +558,34 @@ final class NativeAudioTests: XCTestCase {
         XCTAssertFalse(model.decks[0].loading)
         XCTAssertEqual(model.decks[0].track?.id, cached.id)
         XCTAssertTrue(model.audio?.state(0).ready == true)
+    }
+    @MainActor func testOverlappingDifferentTrackLoadsKeepLastSelection() async throws {
+        let root = try XCTUnwrap(AppModel.makePerformanceUIFixture())
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(storageRoot: root)
+        for _ in 0..<150 {
+            if model.snapshot != nil && model.downloaded.count == 2 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let tracks = try XCTUnwrap(model.snapshot).tracks
+        let first = try XCTUnwrap(tracks.first { $0.id == 1 })
+        let last = try XCTUnwrap(tracks.first { $0.id == 2 })
+        XCTAssertTrue(model.load(first, deck: 0))
+        XCTAssertTrue(model.decks[0].loading)
+        XCTAssertTrue(model.load(last, deck: 0), "Different-track replacement must not be refused")
+        for _ in 0..<300 {
+            if !model.decks[0].loading && model.decks[0].waveform != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(model.decks[0].loading)
+        XCTAssertEqual(model.decks[0].track?.id, last.id)
+        XCTAssertEqual(model.decks[0].title, last.title)
+        XCTAssertTrue(model.audio?.state(0).ready == true)
+        XCTAssertNotNil(model.decks[0].waveform)
+        // Give a superseded task another turn; it must not restore the first row.
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(model.decks[0].track?.id, last.id)
+        XCTAssertNil(model.error)
     }
     @MainActor func testLocalLiveRealPairedSyntheticHostAndNativeTakeover() async throws {
         let fixture = try XCTUnwrap(Bundle.main.url(forResource: "lan-fixture", withExtension: "json"))
