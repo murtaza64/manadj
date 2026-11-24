@@ -23,6 +23,9 @@ struct CloudFeedbackReview: View {
         NavigationStack {
             Form {
                 Section("Private cloud feedback") {
+                    // Keep delivery state visible before optional, potentially tall evidence.
+                    Text(status).font(.caption).textSelection(.enabled)
+                        .accessibilityIdentifier("feedback-cloud-delivery-status")
                     Text("Only you can access this report. Access ends 30 days after its first receipt. Storage cleanup may happen later.")
                     Text("Destination: manadj-private-feedback.murtaza-javaid.workers.dev").font(.caption)
                     Text(FeedbackScrub.text(draft.title)).font(.headline)
@@ -53,7 +56,6 @@ struct CloudFeedbackReview: View {
                         Button("Start a new report from this review") { newReportID = UUID(); frozen = nil; received = false; status = "New report identity. Review selections before Send." }
                     }
                     Button("Sign out") { run { let revoked = try await auth.signOut(); status = revoked ? "Signed out and remote session revoked." : "Signed out locally. Remote revocation was not confirmed." } }
-                    Text(status).font(.caption).textSelection(.enabled)
                     if busy { ProgressView("Working, report stays saved until a matching receipt") }
                 }.disabled(busy)
                 Section("Saved frozen reports") {
