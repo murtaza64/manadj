@@ -132,7 +132,10 @@ struct LiveFeedbackToolbar: View {
                 Button("REVIEW") { session.stopVoice(); session.mode = "USE APP"; session.reviewing = true }.buttonStyle(PerformanceKeyStyle(color: Ink.play)).accessibilityIdentifier("feedback-review-open")
             }.frame(height: 44).disabled(session.sending)
             if session.sending {
-                HStack { ProgressView().controlSize(.small); Text("SENDING TO DESKTOP…").font(Ink.font(9)) }.accessibilityElement(children: .contain).accessibilityIdentifier("feedback-center-sending")
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack { ProgressView().controlSize(.small); Text("SENDING TO DESKTOP…").font(Ink.font(9)) }
+                    Text(model.syncConnection?.baseURL.absoluteString ?? "No desktop paired").font(Ink.font(8)).lineLimit(1)
+                }.accessibilityElement(children: .contain).accessibilityIdentifier("feedback-center-sending")
             } else if let status = session.deliveryStatus {
                 Text(status).font(Ink.font(9)).foregroundStyle(Ink.warning).accessibilityIdentifier("feedback-center-delivery")
             }
@@ -204,7 +207,7 @@ struct FeedbackReporter: ViewModifier {
                             session.deliveryStatus = "NOT RECEIVED · Review report to retry"
                         }
                         return result
-                    }, queueDirectory: model.feedbackQueueRoot, queueConnection: model.syncConnection, voice: capturedVoice, voiceURL: capturedVoiceURL, initialComment: capturedTranscript, initialStrokes: session.strokes, initialPoint: session.selectedPoint, initialTarget: session.selectedTarget, onClose: { session.reviewing = false; self.capture = nil })
+                    }, queueDirectory: model.feedbackQueueRoot, queueConnection: model.syncConnection, cloudAllowed: !settings, voice: capturedVoice, voiceURL: capturedVoiceURL, initialComment: capturedTranscript, initialStrokes: session.strokes, initialPoint: session.selectedPoint, initialTarget: session.selectedTarget, onClose: { session.reviewing = false; self.capture = nil })
                         .opacity(session.reviewing ? 1 : 0).allowsHitTesting(session.reviewing).accessibilityHidden(!session.reviewing)
                 }
             }

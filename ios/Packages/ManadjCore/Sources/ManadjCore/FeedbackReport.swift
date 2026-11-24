@@ -308,9 +308,14 @@ extension SyncClient {
             func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                             newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) { completionHandler(nil) }
         }
-        let session = URLSession(configuration: .ephemeral, delegate: NoRedirect(), delegateQueue: nil)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 20
+        configuration.timeoutIntervalForResource = 30
+        let session = URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
-        let (data, response) = try await session.data(for: connection.request(path: "/feedback", method: "POST", body: payload))
+        var request = connection.request(path: "/feedback", method: "POST", body: payload)
+        request.timeoutInterval = 20
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw SyncError("Invalid desktop response") }
         if http.statusCode == 401 { throw SyncError("Not paired, or this phone was unpaired on the desktop. Pair again.", status: 401) }
         guard (200..<300).contains(http.statusCode) else {
@@ -359,6 +364,17 @@ public final class FeedbackQueue: Sendable {
 
     public func save(_ payload: [String: Any], id: String, origin: String?) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // Repeated attempts preserve the same immutable report and destination.
+        // Never enqueue two copies or replace reviewed bytes behind their ID.
+        let payloadData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        for file in try pendingFiles() where file.deletingPathExtension().lastPathComponent.hasSuffix(id) {
+            guard let existing = try? JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any],
+                  let oldPayload = existing["payload"] as? [String: Any],
+                  (existing["origin"] as? String) == origin,
+                  try JSONSerialization.data(withJSONObject: oldPayload, options: [.sortedKeys]) == payloadData
+            else { throw FeedbackFailure("This saved report ID already belongs to different reviewed content or a different desktop. Nothing was replaced.") }
+            return
+        }
         guard try pendingFiles().count < Self.capacity else {
             throw FeedbackFailure(
                 "\(Self.capacity) reports are already waiting for the desktop. Nothing was saved; review and send or discard saved reports before queueing more.")
@@ -406,8 +422,12 @@ public final class FeedbackQueue: Sendable {
 
 @MainActor
 public final class FeedbackSubmitter {
+    public typealias Transport = @MainActor (Data, DesktopConnection) async throws -> FeedbackFiling
     private let queue: FeedbackQueue
-    public init(queue: FeedbackQueue) { self.queue = queue }
+    private let transport: Transport
+    public init(queue: FeedbackQueue, transport: @escaping Transport = { data, connection in
+        try await SyncClient(connection).submitFeedback(data)
+    }) { self.queue = queue; self.transport = transport }
 
     /// Explicit local preservation after a server refusal, without another
     /// network request. Keep the reviewed destination binding intact.
@@ -441,17 +461,26 @@ public final class FeedbackSubmitter {
         let body: Data
         do { body = try JSONSerialization.data(withJSONObject: payload) }
         catch { return .rejected(reason: "The report could not be prepared") }
+        // Durability precedes the first network byte. A killed app, changed IP,
+        // timeout or ambiguous response cannot make a reviewed report disappear.
+        do { try queue.save(payload, id: id, origin: origin) }
+        catch let failure as FeedbackFailure { return .saveFailed(reason: failure.message) }
+        catch { return .saveFailed(reason: "Could not save the report on this iPhone. Nothing was sent.") }
         do {
-            let filing = try await SyncClient(connection).submitFeedback(body)
+            let filing = try await transport(body, connection)
+            guard filing.id.lowercased() == id, ["pending", "filed", "filing", "filing_failed", "filing_uncertain", "saved"].contains(filing.status) else {
+                return .queuedLocally(reason: "The desktop returned a receipt that does not confirm this report. Your reviewed report stays on this iPhone; inspect it before retrying.")
+            }
+            queue.remove(id: id)
             if filing.status == "filed" {
                 return .filed(issueURL: filing.issueURL)
             }
             return .savedOnDesktop(status: filing.status, detail: filing.detail)
         } catch let error as SyncError where error.status != nil && (400..<500).contains(error.status!) && error.status != 401 {
-            // A validation refusal will never succeed; do not queue it.
-            return .rejected(reason: error.message)
+            // Keep the already-reviewed local copy on every refusal; no automatic retry.
+            return .queuedLocally(reason: "The desktop refused this attempt. Your reviewed report is saved on this iPhone. Review it before retrying. " + error.message)
         } catch {
-            return keepLocally("The desktop is unreachable. Saved on this iPhone; open REVIEW SAVED REPORTS to inspect it and approve sending when the desktop is reachable.")
+            return .queuedLocally(reason: "No confirmed desktop receipt. Saved on this iPhone; open REVIEW SAVED REPORTS to inspect it and approve sending when the desktop is reachable.")
         }
     }
 

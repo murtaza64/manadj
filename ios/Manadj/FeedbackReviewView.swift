@@ -10,6 +10,8 @@ struct FeedbackReviewView: View {
     let targets: [FeedbackTarget]
     let onSubmit: @MainActor (FeedbackDraft) async -> FeedbackOutcome
     let queueDirectory: URL?
+    let cloudAllowed: Bool
+    @State private var cloudDraft: FeedbackDraft?
     let queueConnection: DesktopConnection?
     @State private var showOutbox = false
 
@@ -38,6 +40,7 @@ struct FeedbackReviewView: View {
         onSubmit: @escaping @MainActor (FeedbackDraft) async -> FeedbackOutcome,
         queueDirectory: URL? = nil,
         queueConnection: DesktopConnection? = nil,
+        cloudAllowed: Bool = false,
         voice: FeedbackVoice? = nil,
         voiceURL: URL? = nil,
         initialComment: String = "",
@@ -52,6 +55,7 @@ struct FeedbackReviewView: View {
         self.onSubmit = onSubmit
         self.queueDirectory = queueDirectory
         self.queueConnection = queueConnection
+        self.cloudAllowed = cloudAllowed
         self.onClose = onClose
         _strokes = State(initialValue: initialStrokes)
         _selectedPoint = State(initialValue: initialPoint)
@@ -196,6 +200,7 @@ struct FeedbackReviewView: View {
                                 }.frame(maxHeight: min(210, geometry.size.height * 0.3))
                             }
                         }
+                        if cloudAllowed, queueDirectory != nil { Button("REVIEW PRIVATE CLOUD SEND") { editing = false; cloudDraft = makeDraft() }.font(Ink.font(10)).disabled(submitting || trimmedTitle.isEmpty) }
                         HStack {
                             if queueDirectory != nil { Button("SAVED") { editing = false; showOutbox = true }.font(Ink.font(10)).accessibilityIdentifier("feedback-open-outbox") }
                             Spacer()
@@ -216,6 +221,7 @@ struct FeedbackReviewView: View {
                 .accessibilityElement(children: .contain).accessibilityIdentifier("feedback-comment-card")
             }
         }
+        .sheet(isPresented: Binding(get: { cloudDraft != nil }, set: { if !$0 { cloudDraft = nil } })) { if let cloudDraft, let queueDirectory { CloudFeedbackReview(draft: cloudDraft, directory: queueDirectory.appendingPathComponent("cloud-v2")) } }
         .sheet(isPresented: $showOutbox) { if let queueDirectory { FeedbackOutboxView(directory: queueDirectory, connection: queueConnection) } }
         .accessibilityElement(children: .contain).accessibilityIdentifier("feedback-review")
         .onDisappear { player?.stop() }

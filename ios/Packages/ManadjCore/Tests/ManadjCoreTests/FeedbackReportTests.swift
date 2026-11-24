@@ -289,4 +289,72 @@ final class FeedbackReportTests: XCTestCase {
         XCTAssertEqual(payload["id"] as? String, report.id.uuidString.lowercased())
     }
 
+    func testSameReviewedReportIsQueuedOnceAndImmutable() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let queue = FeedbackQueue(directory: directory), id = UUID().uuidString.lowercased()
+        try queue.save(["id": id, "title": "same"], id: id, origin: "http://192.168.1.20:48127")
+        try queue.save(["title": "same", "id": id], id: id, origin: "http://192.168.1.20:48127")
+        XCTAssertEqual(queue.pending().count, 1)
+        XCTAssertThrowsError(try queue.save(["id": id, "title": "changed"], id: id, origin: "http://192.168.1.20:48127"))
+        XCTAssertThrowsError(try queue.save(["id": id, "title": "same"], id: id, origin: "http://10.0.0.5:48127"))
+        XCTAssertEqual(queue.pending().count, 1)
+    }
+
+    @MainActor func testReviewedReportIsSavedBeforeTransportAndRemovedOnlyOnReceipt() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let queue = FeedbackQueue(directory: directory), report = draft()
+        let id = report.id.uuidString.lowercased()
+        let connection = try DesktopConnection(url: URL(string: "http://192.168.1.20:48127")!)
+        let submitter = FeedbackSubmitter(queue: queue, transport: { _, destination in
+            XCTAssertEqual(queue.pending().map { $0.id }, [id])
+            XCTAssertEqual(queue.pending().first?.origin, destination.baseURL.absoluteString)
+            return FeedbackFiling(id: id, status: "filed", issueURL: nil, detail: nil)
+        })
+        let result = await submitter.submit(report, via: connection)
+        guard case .filed = result else { return XCTFail("expected matching receipt") }
+        XCTAssertTrue(queue.pending().isEmpty)
+    }
+
+    @MainActor func testTimeoutOrRefusalPreservesReviewedReportWithoutDuplicate() async throws {
+        for status in [nil, 401, 422] as [Int?] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let queue = FeedbackQueue(directory: directory), report = draft()
+            let connection = try DesktopConnection(url: URL(string: "http://192.168.1.20:48127")!)
+            let submitter = FeedbackSubmitter(queue: queue, transport: { _, _ in throw SyncError("synthetic failure", status: status) })
+            for _ in 0..<2 {
+                let result = await submitter.submit(report, via: connection)
+                guard case .queuedLocally = result else { return XCTFail("reviewed report must survive failure") }
+            }
+            XCTAssertEqual(queue.pending().count, 1)
+        }
+    }
+
+    @MainActor func testMismatchedReceiptNeverRemovesReport() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let queue = FeedbackQueue(directory: directory)
+        let connection = try DesktopConnection(url: URL(string: "http://192.168.1.20:48127")!)
+        let submitter = FeedbackSubmitter(queue: queue, transport: { _, _ in FeedbackFiling(id: UUID().uuidString.lowercased(), status: "filed", issueURL: nil, detail: nil) })
+        let result = await submitter.submit(draft(), via: connection)
+        guard case .queuedLocally = result else { return XCTFail("mismatched receipt is not success") }
+        XCTAssertEqual(queue.pending().count, 1)
+    }
+
+    @MainActor func testStorageFailurePreventsTransport() async throws {
+        let blocker = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data().write(to: blocker)
+        defer { try? FileManager.default.removeItem(at: blocker) }
+        let queue = FeedbackQueue(directory: blocker.appendingPathComponent("queue"))
+        let connection = try DesktopConnection(url: URL(string: "http://192.168.1.20:48127")!)
+        let submitter = FeedbackSubmitter(queue: queue, transport: { _, _ in
+            XCTFail("must not send when local preservation failed")
+            throw SyncError("unexpected transport")
+        })
+        let result = await submitter.submit(draft(), via: connection)
+        guard case .saveFailed = result else { return XCTFail("expected truthful local-save failure") }
+    }
+
 }
