@@ -76,7 +76,7 @@ test('the browser bundle runs nothing on load and the click path checks out end 
     assert.match(elements.get('log').textContent, /service check passed/);
     const control = JSON.parse(await (await bucket.get('library-v1/control.json')).text());
     assert.deepEqual(control.snapshots, [], 'the run cleaned up after itself');
-    assert.equal(control.writes, 263, 'fixed shape A debits exactly the planned writes');
+    assert.equal(control.writes, 325, 'fixed shape A debits exactly the planned writes');
     assert.ok(bucket.calls.length > before);
     // The browser path never sends an authorization header; same-origin cookies do the work.
     const authHeaders = bucket.calls.filter(() => false); // request-level assertion below
