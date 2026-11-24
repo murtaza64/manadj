@@ -1,0 +1,18 @@
+name = "manadj-private-feedback"
+main = "worker.mjs"
+compatibility_date = "2026-11-01"
+keep_vars = true
+preview_urls = false
+
+[vars]
+UPLOADS_ENABLED = "false"
+ACCESS_ISSUER = "https://frosty-pond-8fd5.cloudflareaccess.com"
+ACCESS_AUD = "528ca9eaf75cc99a684676a2600683cedabf4e9d4f2a2921ba830779c197fced"
+
+# Bind only during reviewed deployment. Owner email remains an encrypted secret.
+# [[r2_buckets]]
+# binding = "FEEDBACK_BUCKET"
+# bucket_name = "manadj-private-feedback"
+
+[observability]
+enabled = false
