@@ -228,8 +228,7 @@ struct DeckViewState {
                 try Task.checkCancellation()
                 self.snapshot = refreshed
                 while !Task.isCancelled && self.liveListening {
-                    let sent = ProcessInfo.processInfo.systemUptime
-                    let envelope = try await client.liveState()
+                    let (envelope, sent) = try await self.pollLocalLiveState { try await client.liveState() }
                     try Task.checkCancellation()
                     let received = ProcessInfo.processInfo.systemUptime
                     let rtt = received - sent
@@ -265,6 +264,29 @@ struct DeckViewState {
                 // A stopped/replaced listener must never overwrite STOP or pause its successor.
                 guard !Task.isCancelled else { return }
                 self.pauseLocalLive(error.localizedDescription)
+                self.liveListening = false
+            }
+        }
+    }
+    // Only recover transport failures from the live-state GET. Authentication,
+    // parsing, track preparation and other permanent failures still end the task.
+    func pollLocalLiveState(_ fetch: () async throws -> LiveEnvelope) async throws -> (LiveEnvelope, Double) {
+        while true {
+            try Task.checkCancellation()
+            guard liveListening else { throw CancellationError() }
+            do {
+                let sent = ProcessInfo.processInfo.systemUptime
+                let envelope = try await fetch()
+                try Task.checkCancellation()
+                guard liveListening else { throw CancellationError() }
+                return (envelope, sent)
+            } catch {
+                try Task.checkCancellation()
+                guard liveListening else { throw CancellationError() }
+                guard let transport = error as? URLError,
+                      transport.code == .timedOut || transport.code == .networkConnectionLost else { throw error }
+                pauseLocalLive("Connection interrupted · waiting for fresh desktop state · paused")
+                try await Task.sleep(for: .milliseconds(500))
             }
         }
     }
