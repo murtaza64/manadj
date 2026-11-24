@@ -150,9 +150,15 @@ struct FeedbackReviewView: View {
                         if let outcome { outcomeView(outcome) }
                         else {
                             HStack(spacing: 8) {
-                                Button(picking ? "TAP A CONTROL" : "POINT") { editing = false; picking.toggle() }.accessibilityIdentifier("feedback-pick-element")
-                                Button("DRAW") { editing = false; picking = false }
-                                Button("UNDO") { if !strokes.isEmpty { strokes.removeLast() } }.disabled(strokes.isEmpty)
+                                Button { editing = false; picking.toggle() } label: {
+                                    Text(picking ? "TAP A CONTROL" : "POINT").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                                }.accessibilityIdentifier("feedback-pick-element")
+                                Button { editing = false; picking = false } label: {
+                                    Text("DRAW").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                                }
+                                Button { if !strokes.isEmpty { strokes.removeLast() } } label: {
+                                    Text("UNDO").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                                }.disabled(strokes.isEmpty)
                                 Spacer()
                                 Button { reviewingDetails.toggle(); editing = false } label: { Image(systemName: "info.circle") }.accessibilityLabel("Review what will be sent").accessibilityIdentifier("feedback-show-details")
                             }.font(Ink.font(11, bold: true)).buttonStyle(.plain).foregroundStyle(Ink.accent)

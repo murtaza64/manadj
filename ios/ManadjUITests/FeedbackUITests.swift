@@ -42,7 +42,14 @@ final class FeedbackUITests: XCTestCase {
         let card = app.otherElements["feedback-comment-card"]; XCTAssertTrue(card.exists)
         XCTAssertLessThan(card.frame.height, screen.height * 0.5, "Initial feedback must be a small card, not a new screen")
         capture("Inline feedback small comment card over captured workspace", app: app)
-        app.buttons["feedback-pick-element"].tap()
+        let pointButton = app.buttons["feedback-pick-element"]
+        XCTAssertGreaterThanOrEqual(pointButton.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(pointButton.frame.height, 44)
+        pointButton.tap()
+        let picking = NSPredicate(format: "label == %@", "TAP A CONTROL")
+        let pickingReady = XCTNSPredicateExpectation(predicate: picking, object: pointButton)
+        XCTAssertEqual(XCTWaiter.wait(for: [pickingReady], timeout: 5), .completed, "POINT must enter picking mode before the frozen canvas tap")
+        capture("POINT picking mode before frozen canvas tap", app: app)
         // Frozen full-screen pointing never presses the real deck control.
         app.coordinate(withNormalizedOffset: CGVector(dx: deck.midX / screen.width, dy: deck.midY / screen.height)).tap()
         let target = app.staticTexts["feedback-selected-target"]
