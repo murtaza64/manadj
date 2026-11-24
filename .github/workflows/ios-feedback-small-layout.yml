@@ -1,0 +1,55 @@
+name: iOS feedback smallest phone layout
+on:
+  push:
+    branches: ["instinct/ios-feedback-small-layout-proof"]
+    paths: [".github/workflows/ios-feedback-small-layout.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: ios-feedback-small-proof
+  cancel-in-progress: true
+jobs:
+  feedback-small-layout:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: 4fa960d47e38bed67fd18fafe3e52d8e202e52c3
+      - name: Select production Xcode and exact smallest phone
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_*.app' ! -iname '*beta*' | sort -V | tail -1)
+          test -n "$XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          xcrun simctl list --json > "$RUNNER_TEMP/simulators.json"
+          RUNTIME=$(python3 -c 'import json,sys; r=[r for r in json.load(open(sys.argv[1]))["runtimes"] if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")]; assert r,"No available iOS runtime"; print(max(r,key=lambda r:tuple(map(int,r["version"].split("."))))["identifier"])' "$RUNNER_TEMP/simulators.json")
+          DEVICE=$(xcrun simctl create 'Feedback smallest phone' com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation "$RUNTIME")
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          echo "Small-layout target: iPhone SE third generation, 375x667 points; runtime=$RUNTIME"
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+      - name: Verify full hit targets, mode entry, draw and cancel on smallest phone
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ios/.feedback-small
+          xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath "$RUNNER_TEMP/feedback-small" -parallel-testing-enabled NO -only-testing:ManadjUITests/FeedbackUITests/testExplicitButtonPicksTargetDrawsAndCancelsWithoutFiling -resultBundlePath ios/.feedback-small/Feedback.xcresult CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$(uname -m)" test 2>&1 | tee ios/.feedback-small/test.log
+      - name: Export smallest-phone evidence
+        if: always()
+        shell: bash
+        run: |
+          if [ -d ios/.feedback-small/Feedback.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path ios/.feedback-small/Feedback.xcresult > ios/.feedback-small/summary.json
+            xcrun xcresulttool export attachments --path ios/.feedback-small/Feedback.xcresult --output-path ios/.feedback-small/attachments
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ios-feedback-small-layout
+          path: ios/.feedback-small/
+          include-hidden-files: true
+          retention-days: 3
