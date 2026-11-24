@@ -357,4 +357,25 @@ final class FeedbackReportTests: XCTestCase {
         guard case .saveFailed = result else { return XCTFail("expected truthful local-save failure") }
     }
 
+    @MainActor func testOutboxRetryKeepsEveryUnconfirmedReceiptAndDeletesOnlySupportedMatch() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let queue = FeedbackQueue(directory: directory), report = draft()
+        let id = report.id.uuidString.lowercased()
+        let connection = try DesktopConnection(url: URL(string: "http://192.168.1.20:48127")!)
+        try queue.save(report.validatedPayload(), id: id, origin: nil)
+        let original = try XCTUnwrap(queue.pending().first)
+        for filing in [FeedbackFiling(id: UUID().uuidString.lowercased(), status: "filed", issueURL: nil, detail: nil), FeedbackFiling(id: id, status: "saved", issueURL: nil, detail: nil)] {
+            let result = await FeedbackSubmitter(queue: queue, transport: { data, _ in
+                XCTAssertEqual(data, original.payload)
+                return filing
+            }).retryReviewed(id: id, payload: original.payload, via: connection)
+            guard case .queuedLocally = result else { return XCTFail("unconfirmed retry must retain report") }
+            XCTAssertEqual(queue.pending().count, 1)
+        }
+        let result = await FeedbackSubmitter(queue: queue, transport: { _, _ in FeedbackFiling(id: id, status: "pending", issueURL: nil, detail: nil) }).retryReviewed(id: id, payload: original.payload, via: connection)
+        guard case .savedOnDesktop = result else { return XCTFail("supported receipt expected") }
+        XCTAssertTrue(queue.pending().isEmpty)
+    }
+
 }

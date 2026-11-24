@@ -15,6 +15,7 @@ struct CloudFeedbackReview: View {
     @State private var saved: [CloudFeedbackOutbox.Entry] = []
     @State private var busy = false
     @State private var received = false
+    @State private var newReportID: UUID?
     @State private var status = "Not uploaded. Raw voice, music and app context stay local."
     @Environment(\.dismiss) private var dismiss
     private var store: CloudFeedbackOutbox { CloudFeedbackOutbox(directory: directory) }
@@ -48,6 +49,9 @@ struct CloudFeedbackReview: View {
                         frozen = nil; received = true; try reload()
                     } }
                     .disabled(received)
+                    if received {
+                        Button("Start a new report from this review") { newReportID = UUID(); frozen = nil; received = false; status = "New report identity. Review selections before Send." }
+                    }
                     Button("Sign out") { run { let revoked = try await auth.signOut(); status = revoked ? "Signed out and remote session revoked." : "Signed out locally. Remote revocation was not confirmed." } }
                     Text(status).font(.caption).textSelection(.enabled)
                     if busy { ProgressView("Working, report stays saved until a matching receipt") }
@@ -87,6 +91,7 @@ struct CloudFeedbackReview: View {
     private func freeze() throws -> CloudFeedbackOutbox.Entry {
         if let frozen { return frozen }
         var selected = draft
+        if let newReportID { selected.id = newReportID }
         if !includeScreen { selected.screenshot = nil }
         return try store.freeze(CloudFeedbackReport(reviewed: selected, includeTranscript: includeTranscript))
     }

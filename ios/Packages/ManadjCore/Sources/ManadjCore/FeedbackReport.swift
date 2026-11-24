@@ -429,6 +429,23 @@ public final class FeedbackSubmitter {
         try await SyncClient(connection).submitFeedback(data)
     }) { self.queue = queue; self.transport = transport }
 
+    /// Only the saved-report review UI calls this after naming the destination.
+    /// Existing disk copy is never overwritten/rebound; delete only on the same
+    /// receipt validation used by the first send.
+    public func retryReviewed(id: String, payload: Data, via connection: DesktopConnection) async -> FeedbackOutcome {
+        guard let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+              object["id"] as? String == id else { return .rejected(reason: "Saved report identity is invalid; nothing sent") }
+        do {
+            let filing = try await transport(payload, connection)
+            guard Self.confirms(filing, id: id) else { return .queuedLocally(reason: "No matching desktop receipt. Saved report kept on this iPhone") }
+            queue.remove(id: id)
+            return filing.status == "filed" ? .filed(issueURL: filing.issueURL) : .savedOnDesktop(status: filing.status, detail: filing.detail)
+        } catch { return .queuedLocally(reason: "No confirmed desktop receipt. Saved report kept on this iPhone") }
+    }
+    private static func confirms(_ filing: FeedbackFiling, id: String) -> Bool {
+        filing.id.lowercased() == id && ["pending", "filed", "filing", "filing_failed", "filing_uncertain"].contains(filing.status)
+    }
+
     /// Explicit local preservation after a server refusal, without another
     /// network request. Keep the reviewed destination binding intact.
     public func saveReviewed(_ draft: FeedbackDraft, origin: String?) -> FeedbackOutcome {
@@ -468,7 +485,7 @@ public final class FeedbackSubmitter {
         catch { return .saveFailed(reason: "Could not save the report on this iPhone. Nothing was sent.") }
         do {
             let filing = try await transport(body, connection)
-            guard filing.id.lowercased() == id, ["pending", "filed", "filing", "filing_failed", "filing_uncertain", "saved"].contains(filing.status) else {
+            guard Self.confirms(filing, id: id) else {
                 return .queuedLocally(reason: "The desktop returned a receipt that does not confirm this report. Your reviewed report stays on this iPhone; inspect it before retrying.")
             }
             queue.remove(id: id)
