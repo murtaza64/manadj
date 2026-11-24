@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import ManadjCore
 
 /// Separate destination and disclosure review. Never inherits the LAN report's
@@ -25,7 +26,12 @@ struct CloudFeedbackReview: View {
                     Text("Destination: manadj-private-feedback.murtaza-javaid.workers.dev").font(.caption)
                     Text(FeedbackScrub.text(draft.title)).font(.headline)
                     Text(FeedbackScrub.text(draft.description))
-                    if draft.screenshot != nil { Toggle("Include reviewed marked screenshot", isOn: $includeScreen).disabled(frozen != nil || busy) }
+                    if let screen = draft.screenshot {
+                        Toggle("Include reviewed marked screenshot", isOn: $includeScreen).disabled(frozen != nil || busy)
+                        if let data = Data(base64Encoded: String(screen.dropFirst(FeedbackLimits.pngPrefix.count))), let image = UIImage(data: data) {
+                            Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("Reviewed marked screenshot")
+                        }
+                    }
                     if let transcript = draft.voice?.transcript, !transcript.isEmpty {
                         Toggle("Include this transcript", isOn: $includeTranscript).disabled(frozen != nil || busy)
                         Text(FeedbackScrub.text(transcript)).font(.caption)
