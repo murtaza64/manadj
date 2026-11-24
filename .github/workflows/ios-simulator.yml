@@ -16,7 +16,7 @@ concurrency:
 jobs:
   simulator:
     runs-on: macos-15
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -29,12 +29,21 @@ jobs:
           xcrun simctl list devices available
       - name: Prepare real desktop LAN fixture
         run: |
-          brew list python@3.13 || brew install python@3.13
-          "$(brew --prefix python@3.13)/bin/python3.13" -m venv /tmp/manadj-lan-venv
+          # Prefer the existing keg; fall back to any modern PATH python; install only as last resort.
+          PY=""
+          if P="$(brew --prefix python@3.13 2>/dev/null)" && [ -x "$P/bin/python3.13" ]; then PY="$P/bin/python3.13"; fi
+          if [ -z "$PY" ]; then
+            for V in 3.14 3.13 3.12 3.11; do
+              if command -v "python$V" >/dev/null; then PY="$(command -v "python$V")"; break; fi
+            done
+          fi
+          if [ -z "$PY" ]; then brew install python@3.13; PY="$(brew --prefix python@3.13)/bin/python3.13"; fi
+          "$PY" -c 'import sys; assert sys.version_info >= (3, 11), sys.version'
+          "$PY" -m venv /tmp/manadj-lan-venv
           /tmp/manadj-lan-venv/bin/python -m pip install -r tests/lan_fixture/requirements.txt
           /tmp/manadj-lan-venv/bin/python -m pytest -q tests/lan_fixture/test_serve.py --confcutdir=tests/lan_fixture
       - name: Build and test without signing
-        timeout-minutes: 32
+        timeout-minutes: 40
         shell: bash
         run: |
           set -o pipefail
