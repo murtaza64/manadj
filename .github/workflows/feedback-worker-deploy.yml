@@ -1,0 +1,69 @@
+name: Deploy reviewed disabled private feedback Worker
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: private-feedback-worker-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.repository == 'murtaza64/manadj'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cloud/feedback
+        shell: bash
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - name: Check out immutable reviewed source, never caller-selected code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ebfa0a76d6e4fbb52ca78b6c48ed6ee635157ade
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13'
+      - name: Verify reviewed bytes, disabled switch, no storage bindings or public routes
+        run: |
+          set -euo pipefail
+          echo "08c4e53c3c3364425b1bd9fd74d5be9a1ab5a5b0b8b450f5ac2231be274d0db3  worker.mjs" | sha256sum --check --status
+          echo "4d4ce6fe32189df6a5d9006456c7afd693185a0cc59a2c733b9a02f80a63214c  auth.mjs" | sha256sum --check --status
+          echo "7b5ccd2bbd6498d82665368850e38597220a0f6404e03cb18304ff4c03aa2674  worker.test.mjs" | sha256sum --check --status
+          echo "d7d3c1daaf70099aba4e11c629df6d650215e1b2e2b4c9fc98dbcb7e410d7312  package.json" | sha256sum --check --status
+          echo "fb90e115285ed576c17f0cec4d61a0e1809230cbc9a59fd51a367798b7b68357  package-lock.json" | sha256sum --check --status
+          echo "470c7f28f43c561850f49d7289f0fb094774be10ddd250d9ad48d88ac6b3ab8e  wrangler.toml" | sha256sum --check --status
+          python - <<'PYCONFIG'
+          import pathlib, tomllib
+          c = tomllib.loads(pathlib.Path('wrangler.toml').read_text())
+          assert set(c) == {'name','main','compatibility_date','keep_vars','preview_urls','vars','observability'}
+          assert c['name'] == 'manadj-private-feedback'
+          assert c['main'] == 'worker.mjs'
+          assert c['keep_vars'] is True
+          assert c['preview_urls'] is False
+          assert c['observability'] == {'enabled': False}
+          assert c['vars'] == {
+              'UPLOADS_ENABLED': 'false',
+              'ACCESS_ISSUER': 'https://frosty-pond-8fd5.cloudflareaccess.com',
+              'ACCESS_AUD': '528ca9eaf75cc99a684676a2600683cedabf4e9d4f2a2921ba830779c197fced',
+          }
+          PYCONFIG
+      - name: Locked install, synthetic tests and credential-free packaging
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+          npx --no-install wrangler deploy --dry-run --outdir "$RUNNER_TEMP/feedback-worker-bundle"
+      - name: Deploy only existing feedback Worker with uploads disabled and no bucket
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_FEEDBACK_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: a4f837dfdb11165a1c1cbbf676db0684
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing scoped feedback deployment credential'; exit 1; }
+          npm run deploy
