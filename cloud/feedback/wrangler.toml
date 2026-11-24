@@ -1,0 +1,8 @@
+name = "manadj-private-feedback"
+main = "worker.mjs"
+compatibility_date = "2026-11-01"
+keep_vars = true
+preview_urls = false
+
+[vars]
+UPLOADS_ENABLED = "false"

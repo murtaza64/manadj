@@ -1,0 +1,53 @@
+name: Deploy owner-only feedback Worker
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: owner-only-feedback-worker-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.repository == 'murtaza64/manadj'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cloud/feedback
+        shell: bash
+    steps:
+      - name: Check out reviewed immutable Worker source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 0f1d6a56ed57b0f98761606c72c83f3e0a454fc8
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install locked dependencies and test synthetic auth cases
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm test
+      - name: Verify deployment target and disabled upload switch
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import tomllib
+          with open('wrangler.toml', 'rb') as f:
+              config = tomllib.load(f)
+          assert config['name'] == 'manadj-private-feedback'
+          assert config['main'] == 'worker.mjs'
+          assert config['vars']['UPLOADS_ENABLED'] == 'false'
+          assert config['preview_urls'] is False
+          assert not any(config.get(k) for k in ['r2_buckets', 'routes', 'route', 'services', 'kv_namespaces', 'env'])
+          PY
+      - name: Deploy existing protected Worker with uploads disabled
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_FEEDBACK_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: a4f837dfdb11165a1c1cbbf676db0684
+          WRANGLER_SEND_METRICS: 'false'
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing scoped feedback deployment credential'; exit 1; }
+          npm run deploy

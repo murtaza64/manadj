@@ -41,3 +41,5 @@ artwork/
 
 # Synthetic runtime descriptor, ephemeral host loopback port only.
 ios/Manadj/Resources/lan-fixture.json
+
+cloud/feedback/node_modules/
