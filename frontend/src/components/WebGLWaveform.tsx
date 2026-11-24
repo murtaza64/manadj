@@ -143,21 +143,21 @@ export default function WebGLWaveform({
     subscribeWake,
   });
 
-  useEffect(() => { rendererRef.current?.setPlayheadState(playheadState); }, [playheadState, waveformData]);
+  useEffect(() => { rendererRef.current?.setPlayheadState(playheadState); }, [playheadState, waveformData, clock]);
 
   // Apply the shared time-zoom (also after re-init when new data lands).
   useEffect(() => {
     if (visibleSeconds !== undefined) {
       rendererRef.current?.setVisibleSeconds(visibleSeconds);
     }
-  }, [visibleSeconds, waveformData, rendererRef]);
+  }, [visibleSeconds, waveformData, rendererRef, clock]);
 
   // Modulation passthrough (also re-applied after re-init on new data).
   useEffect(() => {
     rendererRef.current?.setModulation(modulation);
     rendererRef.current?.setModulationSplit(modulationSplit);
     rendererRef.current?.setSlipReturnPlayhead(getSlipReturnPlayhead);
-  }, [modulation, modulationSplit, getSlipReturnPlayhead, waveformData, rendererRef]);
+  }, [modulation, modulationSplit, getSlipReturnPlayhead, waveformData, rendererRef, clock]);
 
   // Drag-to-scrub: REAL seeks per pointer move (silent — the deck pauses
   // for the drag's duration). The playhead is then always where the view
