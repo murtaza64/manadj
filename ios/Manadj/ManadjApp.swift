@@ -219,7 +219,11 @@ struct WorkspaceView: View {
             #if DEBUG
             print("BROWSE_ACTION end count=\(browseActionCount) browsing=\(browsing) settings=\(settings) uptime=\(ProcessInfo.processInfo.systemUptime)")
             #endif
-        }.accessibilityIdentifier("browser-open").buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing)).feedbackTarget("Browse library")
+        }
+        #if DEBUG
+        .accessibilityValue("actions=\(browseActionCount);browsing=\(browsing);settings=\(settings)")
+        #endif
+        .accessibilityIdentifier("browser-open").buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing)).feedbackTarget("Browse library")
     }
     private var library: some View {
         LibraryBrowser(onClose: { withAnimation { browsing = false } }, onDrawerPull: { distance in
