@@ -233,6 +233,9 @@ struct DeckViewState {
                     let received = ProcessInfo.processInfo.systemUptime
                     let rtt = received - sent
                     self.liveRoundTrip = rtt
+                    if try self.deferLocalLiveForRoundTrip(rtt) {
+                        try await Task.sleep(for: .milliseconds(100)); continue
+                    }
                     guard envelope.state == "live", let anchor = envelope.anchor else {
                         self.pauseLocalLive("Desktop is not live · paused")
                         try await Task.sleep(for: .milliseconds(200)); continue
@@ -289,6 +292,16 @@ struct DeckViewState {
                 try await Task.sleep(for: .milliseconds(500))
             }
         }
+    }
+    // Slow measurements are not safe sounding frames, but do not end the
+    // listener. Do not advance sequence or freshness until a fresh poll arrives.
+    func deferLocalLiveForRoundTrip(_ rtt: Double) throws -> Bool {
+        guard rtt.isFinite, rtt >= 0 else { throw SyncError("Invalid live round-trip measurement") }
+        guard rtt <= 1 else {
+            pauseLocalLive("Waiting for fresh desktop state · paused")
+            return true
+        }
+        return false
     }
     private func pauseLocalLive(_ reason: String) {
         liveWatchdogPaused = true
