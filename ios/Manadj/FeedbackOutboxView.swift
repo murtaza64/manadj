@@ -99,12 +99,11 @@ struct FeedbackOutboxView: View {
         player?.stop()
         busy = true
         Task {
-            do {
-                let result = try await SyncClient(connection).submitFeedback(entry.payload)
-                FeedbackQueue(directory: directory).remove(id: entry.id)
-                status = result.status == "filed" ? "Filed. \(result.issueURL ?? "")" : "Saved on desktop. GitHub filing status: \(result.status)."
-            } catch {
-                status = "Not sent. The saved report is still here. \(error.localizedDescription)"
+            let result = await FeedbackSubmitter(queue: FeedbackQueue(directory: directory)).retryReviewed(id: entry.id, payload: entry.payload, via: connection)
+            switch result {
+            case .filed(let url): status = "Filed. " + (url ?? "")
+            case .savedOnDesktop(let value, _): status = "Saved on desktop. GitHub filing status: " + value
+            case .queuedLocally(let reason), .rejected(let reason), .saveFailed(let reason): status = reason
             }
             reload()
             busy = false

@@ -10,6 +10,8 @@ struct FeedbackReviewView: View {
     let targets: [FeedbackTarget]
     let onSubmit: @MainActor (FeedbackDraft) async -> FeedbackOutcome
     let queueDirectory: URL?
+    let cloudAllowed: Bool
+    @State private var cloudDraft: FeedbackDraft?
     let queueConnection: DesktopConnection?
     @State private var showOutbox = false
 
@@ -19,6 +21,7 @@ struct FeedbackReviewView: View {
     @State private var voicePlaybackError: String?
     let voice: FeedbackVoice?
     let voiceURL: URL?
+    @State private var draftID = UUID()
     @State private var kind = FeedbackKind.bug
     @State private var title = ""
     @State private var details = ""
@@ -38,6 +41,7 @@ struct FeedbackReviewView: View {
         onSubmit: @escaping @MainActor (FeedbackDraft) async -> FeedbackOutcome,
         queueDirectory: URL? = nil,
         queueConnection: DesktopConnection? = nil,
+        cloudAllowed: Bool = false,
         voice: FeedbackVoice? = nil,
         voiceURL: URL? = nil,
         initialComment: String = "",
@@ -52,6 +56,7 @@ struct FeedbackReviewView: View {
         self.onSubmit = onSubmit
         self.queueDirectory = queueDirectory
         self.queueConnection = queueConnection
+        self.cloudAllowed = cloudAllowed
         self.onClose = onClose
         _strokes = State(initialValue: initialStrokes)
         _selectedPoint = State(initialValue: initialPoint)
@@ -101,7 +106,7 @@ struct FeedbackReviewView: View {
             }
         }
         return FeedbackDraft(
-            kind: kind, title: title, description: details + targetDescription,
+            id: draftID, kind: kind, title: title, description: details + targetDescription,
             snapshot: snapshot, screenshot: screenshot, captureWarnings: warnings, voice: includeVoice ? voice : nil)
     }
 
@@ -145,9 +150,15 @@ struct FeedbackReviewView: View {
                         if let outcome { outcomeView(outcome) }
                         else {
                             HStack(spacing: 8) {
-                                Button(picking ? "TAP A CONTROL" : "POINT") { editing = false; picking.toggle() }.accessibilityIdentifier("feedback-pick-element")
-                                Button("DRAW") { editing = false; picking = false }
-                                Button("UNDO") { if !strokes.isEmpty { strokes.removeLast() } }.disabled(strokes.isEmpty)
+                                Button { editing = false; picking.toggle() } label: {
+                                    Text(picking ? "TAP A CONTROL" : "POINT").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                                }.accessibilityIdentifier("feedback-pick-element")
+                                Button { editing = false; picking = false } label: {
+                                    Text("DRAW").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                                }
+                                Button { if !strokes.isEmpty { strokes.removeLast() } } label: {
+                                    Text("UNDO").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                                }.disabled(strokes.isEmpty)
                                 Spacer()
                                 Button { reviewingDetails.toggle(); editing = false } label: { Image(systemName: "info.circle") }.accessibilityLabel("Review what will be sent").accessibilityIdentifier("feedback-show-details")
                             }.font(Ink.font(11, bold: true)).buttonStyle(.plain).foregroundStyle(Ink.accent)
@@ -196,6 +207,7 @@ struct FeedbackReviewView: View {
                                 }.frame(maxHeight: min(210, geometry.size.height * 0.3))
                             }
                         }
+                        if cloudAllowed, queueDirectory != nil { Button("REVIEW PRIVATE CLOUD SEND") { editing = false; cloudDraft = makeDraft() }.font(Ink.font(10)).disabled(submitting || trimmedTitle.isEmpty) }
                         HStack {
                             if queueDirectory != nil { Button("SAVED") { editing = false; showOutbox = true }.font(Ink.font(10)).accessibilityIdentifier("feedback-open-outbox") }
                             Spacer()
@@ -216,6 +228,7 @@ struct FeedbackReviewView: View {
                 .accessibilityElement(children: .contain).accessibilityIdentifier("feedback-comment-card")
             }
         }
+        .sheet(isPresented: Binding(get: { cloudDraft != nil }, set: { if !$0 { cloudDraft = nil } })) { if let cloudDraft, let queueDirectory { CloudFeedbackReview(draft: cloudDraft, directory: queueDirectory.appendingPathComponent("cloud-v2")) } }
         .sheet(isPresented: $showOutbox) { if let queueDirectory { FeedbackOutboxView(directory: queueDirectory, connection: queueConnection) } }
         .accessibilityElement(children: .contain).accessibilityIdentifier("feedback-review")
         .onDisappear { player?.stop() }

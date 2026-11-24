@@ -5,6 +5,23 @@ final class FeedbackUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
     @MainActor private func field(_ app: XCUIApplication) -> XCUIElement { app.descendants(matching: .any).matching(identifier: "feedback-title").firstMatch }
+    @MainActor func testPrivateCloudReviewIsOptInAndDoesNotUploadOnOpen() {
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        XCTAssertTrue(app.buttons["feedback-open"].waitForExistence(timeout: 15))
+        app.buttons["feedback-open"].tap(); app.buttons["feedback-review-open"].tap()
+        let comment = field(app); XCTAssertTrue(comment.waitForExistence(timeout: 10))
+        comment.tap(); comment.typeText("Synthetic cloud review only")
+        app.buttons["feedback-hide-keyboard"].tap()
+        let cloud = app.buttons["REVIEW PRIVATE CLOUD SEND"]
+        XCTAssertTrue(cloud.waitForExistence(timeout: 5)); cloud.tap()
+        XCTAssertTrue(app.staticTexts["Review private report"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Not uploaded. Raw voice, music and app context stay local."].exists)
+        let screen = app.switches["Include reviewed marked screenshot"]
+        if screen.exists { XCTAssertEqual(screen.value as? String, "0") }
+        capture("Private cloud opt-in review before sign-in or Send, screenshot off", app: app)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.otherElements["feedback-review"].waitForExistence(timeout: 5))
+    }
     @MainActor func testExplicitButtonPicksTargetDrawsAndCancelsWithoutFiling() {
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
         let open = app.buttons["feedback-open"]; XCTAssertTrue(open.waitForExistence(timeout: 15))
@@ -25,7 +42,14 @@ final class FeedbackUITests: XCTestCase {
         let card = app.otherElements["feedback-comment-card"]; XCTAssertTrue(card.exists)
         XCTAssertLessThan(card.frame.height, screen.height * 0.5, "Initial feedback must be a small card, not a new screen")
         capture("Inline feedback small comment card over captured workspace", app: app)
-        app.buttons["feedback-pick-element"].tap()
+        let pointButton = app.buttons["feedback-pick-element"]
+        XCTAssertGreaterThanOrEqual(pointButton.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(pointButton.frame.height, 44)
+        pointButton.tap()
+        let picking = NSPredicate(format: "label == %@", "TAP A CONTROL")
+        let pickingReady = XCTNSPredicateExpectation(predicate: picking, object: pointButton)
+        XCTAssertEqual(XCTWaiter.wait(for: [pickingReady], timeout: 5), .completed, "POINT must enter picking mode before the frozen canvas tap")
+        capture("POINT picking mode before frozen canvas tap", app: app)
         // Frozen full-screen pointing never presses the real deck control.
         app.coordinate(withNormalizedOffset: CGVector(dx: deck.midX / screen.width, dy: deck.midY / screen.height)).tap()
         let target = app.staticTexts["feedback-selected-target"]

@@ -31,6 +31,9 @@ struct WorkspaceView: View {
     @StateObject private var feedback = LiveFeedbackSession()
     @State private var outputRoute = AVAudioSession.sharedInstance().currentRoute
     @State private var browsing = false
+    #if DEBUG
+    @State private var browseActionCount = 0
+    #endif
     @State private var browserDrag: CGFloat = 0
     @State private var browserHandleDiagnostic = "not started"
     @State private var feedbackRequested = false
@@ -72,7 +75,12 @@ struct WorkspaceView: View {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in outputRoute = AVAudioSession.sharedInstance().currentRoute }
-        .onChange(of: browsing) { _, value in model.noteFeedbackAction(value ? "browser-open" : "browser-close") }
+        .onChange(of: browsing) { old, value in
+            #if DEBUG
+            print("BROWSE_STATE actionCount=\(browseActionCount) old=\(old) new=\(value) uptime=\(ProcessInfo.processInfo.systemUptime)")
+            #endif
+            model.noteFeedbackAction(value ? "browser-open" : "browser-close")
+        }
         .onChange(of: settings) { _, value in model.noteFeedbackAction(value ? "settings-open" : "settings-close") }
         .onPreferenceChange(FeedbackTargetPreference.self) { feedbackTargets = $0 }
         .feedbackReporter(model: model, session: feedback, browsing: browsing, settings: settings, requested: $feedbackRequested, targets: feedbackTargets,
@@ -203,10 +211,19 @@ struct WorkspaceView: View {
     private var browseKey: some View {
         Button("BROWSE") {
             #if DEBUG
+            browseActionCount += 1
+            print("BROWSE_ACTION begin count=\(browseActionCount) browsing=\(browsing) settings=\(settings) uptime=\(ProcessInfo.processInfo.systemUptime)")
             if !browsing { model.browserOpenStarted = ProcessInfo.processInfo.systemUptime }
             #endif
             withAnimation { settings = false; browsing.toggle() }
-        }.accessibilityIdentifier("browser-open").buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing)).feedbackTarget("Browse library")
+            #if DEBUG
+            print("BROWSE_ACTION end count=\(browseActionCount) browsing=\(browsing) settings=\(settings) uptime=\(ProcessInfo.processInfo.systemUptime)")
+            #endif
+        }
+        #if DEBUG
+        .accessibilityValue("actions=\(browseActionCount);browsing=\(browsing);settings=\(settings)")
+        #endif
+        .accessibilityIdentifier("browser-open").buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing)).feedbackTarget("Browse library")
     }
     private var library: some View {
         LibraryBrowser(onClose: { withAnimation { browsing = false } }, onDrawerPull: { distance in
