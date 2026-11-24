@@ -21,6 +21,7 @@ struct FeedbackReviewView: View {
     @State private var voicePlaybackError: String?
     let voice: FeedbackVoice?
     let voiceURL: URL?
+    @State private var draftID = UUID()
     @State private var kind = FeedbackKind.bug
     @State private var title = ""
     @State private var details = ""
@@ -105,7 +106,7 @@ struct FeedbackReviewView: View {
             }
         }
         return FeedbackDraft(
-            kind: kind, title: title, description: details + targetDescription,
+            id: draftID, kind: kind, title: title, description: details + targetDescription,
             snapshot: snapshot, screenshot: screenshot, captureWarnings: warnings, voice: includeVoice ? voice : nil)
     }
 
