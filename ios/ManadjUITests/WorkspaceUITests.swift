@@ -337,9 +337,19 @@ final class WorkspaceUITests: XCTestCase {
     @MainActor func testLibrarySourceNavigationAndBack() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
-        app.buttons["browser-open"].tap()
+        let browse = app.buttons["browser-open"]
+        let before = browse.value as? String ?? "<unavailable>"
+        print("BROWSE_AX beforeTap value=\(before)")
+        let beforeAttachment = XCTAttachment(string: before)
+        beforeAttachment.name = "Browse action diagnostic before tap"; beforeAttachment.lifetime = .keepAlways; add(beforeAttachment)
+        browse.tap()
         let playlists = app.buttons["browse-playlists"]
-        XCTAssertTrue(playlists.waitForExistence(timeout: 10)); playlists.tap()
+        let playlistsExists = playlists.waitForExistence(timeout: 10)
+        let after = browse.exists ? (browse.value as? String ?? "<unavailable>") : "<element absent>"
+        print("BROWSE_AX afterExistingWait playlistsExists=\(playlistsExists) value=\(after)")
+        let afterAttachment = XCTAttachment(string: after)
+        afterAttachment.name = "Browse action diagnostic after existing wait"; afterAttachment.lifetime = .keepAlways; add(afterAttachment)
+        XCTAssertTrue(playlistsExists); playlists.tap()
         XCTAssertTrue(app.buttons["source-collection"].waitForExistence(timeout: 5))
         let root = XCTAttachment(screenshot: app.screenshot()); root.name = "Full playlist menu with own search and back"; root.lifetime = .keepAlways; add(root)
         XCTAssertEqual(app.buttons["source-playlist-10"].value as? String, "2 tracks")
