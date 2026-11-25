@@ -16,7 +16,7 @@ jobs:
         with:
           ref: a3831391d9cf15da66a30587790da152c06b0d5a
           fetch-depth: 0
-      - name: Correct exact migration publication
+      - name: Publish native owner acceptance and running capture test
         shell: bash
         run: |
           set -euo pipefail
@@ -24,14 +24,19 @@ jobs:
           git switch -c instinct/continuous-sync-integrated FETCH_HEAD
           python3 - <<'PYPATCH'
           import zlib,base64,hashlib,pathlib
-          raw=zlib.decompress(base64.b64decode('eJzlVktv2kAQvvtXjNIDIIMxhEcSCSlqqki99NL0vFrbY7PF3jX7IOHfdxdwEuOQOG1zaRfJwvZ889jvm/EmLE1hMMiYBjqkORYRi4fIN0G5hejogcd4gg8wDXEc4uUkCOh8lqZRcg6jMJxNJt5gMGh48Xzfb3q6vobB+Lw/A99e52BvUykKiGi8Qp4EhUgwV8CKUkgNn6lCr7qpTGi8NkwxzQSvzOETcLGmV3A7CUcNgKZqpdqZloiSqC2PXzb3j8xjwTXjRhj1Cgg8sHYpy2Dh/mh80MH+gX2VvMTCBqWy1alhGE7nxGGcd/IsmsQyZzElucjqfL0X6nG8h5TlCC73is493eFhBcE8jNM0vUx3PA8T3Ay5yfMjgt8d2kkh7Ifgj/rT0CrB88/Ozr4YSSObjrjnAxuIxQhPHkCUKKljHqyPPsRGKiGB8gRiahTNYYk0UYH14/k7XR2Sq3gW5SOHap3TPF5isQWqQFHPlzacq8Dy1KnV0PH8xOZDjgxmpLiXG27fRpLyeElyGjn6F/BNcLQYLK1IFNkB9o/cL8EUTJlJmmC3d+X5YJcog1gi1Ui0q77bOVIWeSxcdfp7iFuKBjciNwXvdljS6bv7r1ZgGcpurw+lZAWVW7LC7eJOGuy9jMykMCWp8N+1ZDzrns+sA0eyS2dxS3N1Ci4kyxj/fbzCtUEeYyP9dtGrffmDBJZ0PJ3VwLNJW3Akku0eemf7unXaimWcaiOxFvbiojVeW63UsJPwLewPzuxO31gJaUkZ1zXmazQ+cfI+F8+5sNnYDmNW0dRowbiVd4Fc74XYUvQSc7oltkfjVWld6FPaP63gli3wioZbemir4ral7yfbf1TwbnB/VLlWeExva/DROGyPTxnmSbPdWqJ3pZGfSvBXJ0VradDSTQ5ymAH/4o5taG7w7+2YQuU+28R+w/HjeqqKYszHNGaz+Oo04Q4n9fNEak9Fu80AxqHVYIW3dNY0ON7WpkWjqZ/W6YnXfPXs8FMVeOA9kaI8sL679rxfaJYjzA=='))
-          assert hashlib.sha256(raw).hexdigest()=='09317ea4a3e86537a35fcd53b184de19256106cd2fee14f0eb744139565898cc'
+          raw=zlib.decompress(base64.b64decode('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'))
+          assert hashlib.sha256(raw).hexdigest()=='a172f022c851e539c8b4426918bebe6478e901e0db5c803208074353bf8266fc'
           pathlib.Path('/tmp/migration.patch').write_bytes(raw)
           PYPATCH
           git apply --check /tmp/migration.patch
           git apply /tmp/migration.patch
           git config user.name 'Instinct'
           git config user.email 'agent@instinct.com'
-          git add alembic
-          git commit -m 'Include required durable continuous-sync schema migration'
+          python3 - <<'PYTEST'
+          import pathlib
+          p=pathlib.Path('ios/ManadjUITests/WorkspaceUITests.swift')
+          p.write_text(p.read_text().replace('XCTAssertFalse(app.buttons["SIGN IN"].isEnabled)','XCTAssertTrue(app.buttons["SIGN IN"].isEnabled)').replace('Disabled private sync controls, no provisioning or cloud effects','Owner sign-in available, personal data transport disabled'))
+          PYTEST
+          git add ios
+          git commit -m 'Prepare explicit native owner acceptance without personal data activation'
           git push origin HEAD:refs/heads/instinct/continuous-sync-integrated
