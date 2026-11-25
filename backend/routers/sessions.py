@@ -127,7 +127,10 @@ def recover_open_sessions(db: Session = Depends(get_db)) -> dict:
     """
     closed = 0
     deleted = 0
+    from backend.continuous_sync.provenance import received
     for s in db.query(models.Session).all():
+        if received(db, s.uuid):
+            continue  # Another device may still be recording. Never recover its log.
         if _is_silent(s):
             _drop_routine_candidates(db, s.uuid)
             db.delete(s)

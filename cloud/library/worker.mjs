@@ -1,3 +1,6 @@
+import { HTML as SYNC_CHECK_HTML, JS as SYNC_CHECK_JS } from './sync_check_ui.mjs';
+import { createHandler as createSyncHandler } from './sync.mjs';
+export { SyncGroup } from './sync.mjs';
 import { LIMITS, Failure, authorizeOwner, bytes, digest, reject, readJSON, validateManifest, validID, integer } from './contracts.mjs';
 import { Ledger, partKey, DELETE_BATCH_PARTS } from './ledger.mjs';
 import { validatePart } from './part.mjs';
@@ -15,6 +18,18 @@ export function createHandler({ authorize = authorizeOwner, clock = Date.now } =
   return async function handle(request, env) {
     try {
       const url = new URL(request.url);
+      if (url.pathname.startsWith('/v1/sync-check')) {
+        if (url.origin !== env.LIBRARY_ORIGIN || url.search || url.hash || request.method !== 'GET') reject(404, 'route_not_found');
+        const owner = await authorize(request, env);
+        if (!owner?.sub) reject(401, 'owner_required');
+        if (url.pathname === '/v1/sync-check/identity') return response({ authenticated: true, subject: owner.sub });
+        if (url.pathname === '/v1/sync-check') return new Response(SYNC_CHECK_HTML, {headers: {...CHECK_PAGE_HEADERS, 'content-security-policy': "default-src 'none'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"}});
+        if (url.pathname === '/v1/sync-check/app.js') return new Response(SYNC_CHECK_JS, {headers: {...HEADERS, 'content-type': 'text/javascript; charset=utf-8'}});
+        reject(404, 'route_not_found');
+      }
+      // Dispatch sync before the legacy snapshot query/feature gate. Each
+      // protocol has its own disabled flag, auth and bounded contract.
+      if (url.pathname.startsWith('/v1/sync/')) return createSyncHandler(authorize)(request, env);
       if (url.origin !== env.LIBRARY_ORIGIN || url.search || url.hash || /%|\/\//.test(url.pathname)) reject(404, 'route_not_found');
       if (url.pathname === '/v1/status' && request.method === 'GET') {
         const owner = await authorize(request, env);

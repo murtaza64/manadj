@@ -18,6 +18,7 @@ const messages: Record<string, string> = {
 export default function LibraryCloudSettings() {
   const bridge = window.manadjLibraryCloud;
   const [state, setState] = useState<LibraryCloudSummary>(EMPTY);
+  const [group, setGroup] = useState('');
   const [snapshots, setSnapshots] = useState<LibraryCloudSnapshot[] | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -36,6 +37,11 @@ export default function LibraryCloudSettings() {
       if (mounted.current && generation === operation.current && result.ok) setSnapshots(result.value);
     });
   }, [bridge, connected]);
+  useEffect(() => {
+    if (!state.continuous?.running || !bridge) return;
+    const timer = setInterval(() => { void bridge.state().then(result => { if (mounted.current && result.ok) setState(result.value); }); }, 1000);
+    return () => clearInterval(timer);
+  }, [bridge, state.continuous?.running]);
   async function act(action: () => Promise<LibraryCloudResult>) {
     const generation = ++operation.current; setBusy(true); setError(null);
     try {
@@ -74,6 +80,16 @@ export default function LibraryCloudSettings() {
           </>}
         </div>
       </>}
+      {bridge?.continuousStart && <section aria-label="Continuous own-device test" className="library-cloud-review">
+        <h3>Continuous own-device test</h3>
+        <p>Selected pinned group only. Foreground four-hour test, 30-second cycles. No cloud audio or remote session replay. Pending changes stay durable when stopped.</p>
+        {!state.continuous?.enabled ? <p>Test activation is disabled in this build.</p> : <>
+          <div className="library-cloud-actions"><label>Locally provisioned group UUID <input value={group} onChange={event => setGroup(event.target.value)} disabled={state.continuous.running || busy} /></label>
+          <button className="btn btn-secondary" disabled={busy || !connected || !group || state.continuous.running} onClick={() => void act(() => bridge.continuousStart!(group))}>Start continuous test</button>
+          <button className="btn btn-secondary" disabled={busy || !state.continuous.running} onClick={() => void act(() => bridge.continuousStop!())}>Stop continuous test</button></div>
+          <p role="status">{state.continuous.running ? 'Running' : 'Stopped'} · sent {state.continuous.sent}, received {state.continuous.received}, requests {state.continuous.requests}/1800{state.continuous.error ? ' · paused or retrying' : ''}</p>
+        </>}
+      </section>}
       {connected && snapshots !== null && <section aria-label="Stored cloud snapshots" className="library-cloud-review">
         <div><strong>Stored cloud snapshots</strong>
           {snapshots.length === 0 ? <p>None stored.</p> : <ul>{snapshots.map(snapshot => <li key={snapshot.snapshotId}>

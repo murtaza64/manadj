@@ -3,6 +3,7 @@ import AVFoundation
 import Accelerate
 import CEngine
 import Foundation
+import ManadjCore
 
 /// Owned by callback and workers. Destruction happens only after both have released it.
 final class EngineHandle: @unchecked Sendable {
@@ -67,6 +68,13 @@ private final class NotificationTokens: @unchecked Sendable {
     private let graph = AVAudioEngine()
     private let node: AVAudioSourceNode
     private var sequence: UInt64 = 0
+    private var captureLoads = SessionCaptureLoads()
+    private var captureConsumed: UInt64 = 0
+    private var captureLastFrame: UInt64 = 0
+    private var captureRuntime: SessionCaptureRuntime?
+    private var captureTask: Task<Void, Error>?
+    private var captureFailure: String?
+    public var onCaptureFailure: ((String) -> Void)?
     private let workers = (0..<4).map { DispatchQueue(label: "dev.manadj.decode.\($0)", qos: .userInitiated) }
     private let observers = NotificationTokens()
     private var requiresRebuild = false
@@ -120,6 +128,7 @@ private final class NotificationTokens: @unchecked Sendable {
         send(MDJHeardLatency, value: session.outputLatency + session.ioBufferDuration)
     }
     private func interrupt(_ reason: String) {
+        stopSessionCapture(incomplete: true)
         for deck in 0..<4 { send(MDJPause, deck: deck); send(MDJBend, deck: deck, value: 0); send(MDJCueUp, deck: deck); for slot in 0..<8 { send(MDJHotCueUp, deck: deck, slot: slot) } }
         // Output stops immediately. Queued pauses apply at restart, before samples.
         graph.stop(); running = false
@@ -128,6 +137,89 @@ private final class NotificationTokens: @unchecked Sendable {
     }
     @discardableResult public func send(_ op: MDJOp, deck: Int = 0, value: Double = 0, slot: Int = 0) -> Bool {
         mdj_submit(handle.raw, op, Int32(deck), value, Int32(slot)) != 0
+    }
+    // No app caller invokes this candidate entry point. Explicit arming is
+    // unavailable until Apple and storage/service acceptance is complete.
+    public func prepareSessionCapture(journal: SessionEventJournal, libraryIdentity: String) throws {
+        guard captureRuntime == nil, captureTask == nil, captureFailure == nil,
+              !libraryIdentity.isEmpty else { throw AudioFailure("Capture epoch unavailable. Reopen the app before another capture.") }
+        for deck in 0..<4 {
+            let token = mdj_deck(handle.raw, Int32(deck)).load
+            guard token == 0 || captureLoads.resolve(deck: deck, token: token) != nil else { throw AudioFailure("Reload imported tracks from the library before capture") }
+        }
+        captureRuntime = SessionCaptureRuntime(journal: journal, libraryIdentity: libraryIdentity)
+        // Deliberately OFF. Candidate compiles host ownership without collecting.
+        mdj_capture_enable(handle.raw, false)
+    }
+    /// Host must gate this explicit test arm behind its disabled-by-default
+    /// activation flag and own a frequent single-consumer drain task.
+    public func armPreparedSessionCapture() throws {
+        guard captureRuntime != nil, captureTask == nil, captureFailure == nil else { throw AudioFailure("Session capture is not prepared") }
+        mdj_capture_enable(handle.raw, true)
+    }
+    public var sessionCaptureIsPrepared: Bool { captureRuntime != nil }
+    @discardableResult public func stopSessionCapture(incomplete: Bool = true) -> Task<Void, Never>? {
+        let token = mdj_capture_request_stop(handle.raw)
+        let prior = captureTask
+        guard let runtime = captureRuntime else { return nil }
+        captureRuntime = nil
+        captureFailure = "Capture epoch ended. Reopen the app before another capture."
+        let engine = handle
+        return Task { [self] in
+            var gap = incomplete
+            do {
+                try await prior?.value
+                let deadline = Date().addingTimeInterval(1)
+                var ack = MDJCaptureStop()
+                while true {
+                    let segments = try SessionCaptureDrain.read(engine: engine.raw, loads: captureLoads)
+                    for segment in segments {
+                        try await runtime.observe(segment, wallTime: Date())
+                        captureConsumed += 1; captureLastFrame = segment.endFrame
+                    }
+                    let state = token == 0 ? -1 : mdj_capture_stop_poll(engine.raw, token, &ack)
+                    if state == 1 {
+                        // Poll only after draining, then drain once more if an in-flight
+                        // callback committed between the drain and acknowledgment.
+                        if captureConsumed == ack.published {
+                            gap = gap || ack.gap || captureLastFrame != ack.finalFrame
+                            break
+                        }
+                    } else if state < 0 { gap = true; break }
+                    if Date() >= deadline { gap = true; break }
+                    try await Task.sleep(for: .milliseconds(5))
+                }
+                try await runtime.stop(at: Date(), incomplete: gap)
+                if gap { onCaptureFailure?("Session evidence is incomplete") }
+            } catch {
+                try? await runtime.stop(at: Date(), incomplete: true)
+                onCaptureFailure?("Session evidence is incomplete: \(error.localizedDescription)")
+            }
+        }
+    }
+    /// Drain is called only by a future single-consumer owner, never UI polling.
+    public func drainPreparedSessionCapture() async throws {
+        guard captureTask == nil, let runtime = captureRuntime else { return }
+        let loads = captureLoads
+        do {
+            let segments = try SessionCaptureDrain.read(engine: handle.raw, loads: loads)
+            let work = Task {
+                for segment in segments { try await runtime.observe(segment, wallTime: Date()) }
+                self.captureConsumed += UInt64(segments.count)
+                if let last = segments.last { self.captureLastFrame = last.endFrame }
+            }
+            captureTask = work
+            defer { captureTask = nil }
+            try await work.value
+        } catch {
+            stopSessionCapture(incomplete: true)
+            onCaptureFailure?("Session evidence is incomplete: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    public func captureSnapshot() -> MDJCaptureSnapshot? {
+        var value = MDJCaptureSnapshot()
+        return mdj_capture_snapshot(handle.raw, &value) ? value : nil
     }
     public var renderedFrames: UInt64 { mdj_frames(handle.raw) }
     public var starvedFrames: UInt64 { mdj_starved_frames(handle.raw) }
@@ -144,11 +236,20 @@ private final class NotificationTokens: @unchecked Sendable {
     }
     public func stopRecording() { mdj_record_stop(handle.raw, false) }
 
-    public func load(_ url: URL, deck: Int) async throws -> Double {
+    public func load(_ url: URL, deck: Int, libraryTrackID: Int? = nil) async throws -> Double {
         guard (0..<4).contains(deck) else { throw AudioFailure("Invalid deck") }
         try start()
         sequence += 1
         let load = sequence, engine = handle
+        if let libraryTrackID {
+            do { try captureLoads.register(deck: deck, token: load, trackID: libraryTrackID) }
+            catch { stopSessionCapture(incomplete: true); throw error }
+        } else if captureRuntime != nil {
+            do {
+                stopSessionCapture(incomplete: true)
+                throw AudioFailure("Imported audio has no library identity for session capture")
+            }
+        }
         guard mdj_prepare(engine.raw, Int32(deck), load) != 0 else { throw AudioFailure("Audio command queue is full") }
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Double, Error>) in
             workers[deck].async {

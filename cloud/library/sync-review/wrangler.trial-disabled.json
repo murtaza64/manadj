@@ -1,0 +1,41 @@
+{
+  "name": "manadj-private-library",
+  "account_id": "a4f837dfdb11165a1c1cbbf676db0684",
+  "main": "../worker.mjs",
+  "compatibility_date": "2026-11-01",
+  "keep_vars": true,
+  "preview_urls": false,
+  "vars": {
+    "SNAPSHOTS_ENABLED": "false",
+    "LIBRARY_ORIGIN": "https://manadj-private-library.murtaza-javaid.workers.dev",
+    "ACCESS_ISSUER": "https://frosty-pond-8fd5.cloudflareaccess.com",
+    "ACCESS_AUD": "4477365ee11d6199eef6bb54ab6e92622fe56ec039bc7d61ea05ef6b1b857b8f",
+    "SYNC_ENABLED": "false"
+  },
+  "observability": {
+    "enabled": false
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SYNC_GROUPS",
+        "class_name": "SyncGroup"
+      }
+    ]
+  },
+  "exports": {
+    "SyncGroup": {
+      "type": "durable-object",
+      "state": "created",
+      "storage": "sqlite"
+    }
+  },
+  "secrets": {
+    "required": [
+      "OWNER_EMAIL"
+    ]
+  },
+  "workers_dev": true,
+  "logpush": false,
+  "compatibility_flags": []
+}

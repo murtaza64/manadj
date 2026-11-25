@@ -1,3 +1,4 @@
+#include <cstring>
 #include "Engine.h"
 #include <algorithm>
 
@@ -969,6 +970,7 @@ void Engine::cancelScheduledNow(const Command& c) noexcept {
 void Engine::render(float* output, int frames, int channels) noexcept {
     const auto start = outputFrames_.load(kRelaxed);
     renderFrame_ = static_cast<int64_t>(start);
+    captureStep(); // honour a stop requested between callbacks, even for a zero-frame call
     while (queueRead_.load(kRelaxed) != queueWrite_.load(kAcquire)) {
         const auto read = queueRead_.load(kRelaxed);
         const Command& c = commands_[read % kQueueSize];
@@ -991,6 +993,9 @@ void Engine::render(float* output, int frames, int channels) noexcept {
             scheduleHead_ = (scheduleHead_ + 1) % kScheduleSize;
             scheduleCount_.store(scheduleCount_.load(kRelaxed) - 1, kRelaxed);
         }
+        std::array<double, kDeckCount> capturePositions{};
+        const bool capturing = captureStep();
+        if (capturing) for (int i = 0; i < kDeckCount; ++i) capturePositions[i] = decks_[i].position.load(kRelaxed);
         renderBuses(n, static_cast<int64_t>(now));
         // Record the logical stereo Master, never the physical cue-routing
         // buffer. Fixed stack scratch; worker owns conversion and disk IO.
@@ -1019,9 +1024,108 @@ void Engine::render(float* output, int frames, int channels) noexcept {
         }
         if (captureMaster) masterRecorder.push(recorded.data(), n, outputRate_.load(kRelaxed), captureMaster);
         done += n;
+        if (capturing) publishCapture(now, start + done, capturePositions);
     }
+    captureStep(); // all of this call's segments are published; ack a stop that arrived mid-call
     if (clicksLeft_ > 0) renderClicks(output, frames, channels, start);
     outputFrames_.fetch_add(frames, kRelease);
+}
+
+bool Engine::captureStep() noexcept {
+    const auto req = stopRequest_.load(kAcquire);
+    if (req != stopAck_.load(kRelaxed)) {
+        captureEnabled_.store(false, kRelaxed);
+        stopFinalFrame_.store(lastCaptureFrame_, kRelaxed);
+        stopPublished_.store(captureWrite_.load(kRelaxed), kRelaxed);
+        stopGap_.store(captureGap_.load(kAcquire), kRelaxed);
+        stopAck_.store(req, kRelease);
+    }
+    return captureEnabled_.load(kRelaxed);
+}
+
+void Engine::enableCapture(bool enabled) noexcept {
+    if (!enabled) { requestCaptureStop(); return; }
+    if (stopRequest_.load(kAcquire) != 0) return;
+    captureEnabled_.store(true);
+}
+
+uint64_t Engine::requestCaptureStop() noexcept {
+    uint64_t cur = stopRequest_.load(kAcquire);
+    if (!captureEnabled_.load(kAcquire) && cur == stopAck_.load(kAcquire)) return cur; // never armed (0) or already acked
+    while (cur == stopAck_.load(kAcquire)) {
+        if (stopRequest_.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel)) return cur + 1;
+    }
+    return stopRequest_.load(kAcquire);
+}
+
+int Engine::pollCaptureStop(uint64_t token, CaptureStop& result) const noexcept {
+    if (token == 0 || token > stopRequest_.load(kAcquire)) return -1;
+    const auto ack = stopAck_.load(kAcquire);
+    if (ack < token) return 0;
+    result.token = ack;
+    result.finalFrame = stopFinalFrame_.load(kRelaxed);
+    result.published = stopPublished_.load(kRelaxed);
+    result.gap = stopGap_.load(kRelaxed);
+    const auto read = captureRead_.load(kAcquire);
+    result.remaining = result.published > read ? result.published - read : 0;
+    return 1;
+}
+
+void Engine::publishCapture(uint64_t start, uint64_t frame, const std::array<double, kDeckCount>& positions) noexcept {
+    CaptureSnapshot snap{};
+    snap.frame = frame; snap.segmentStart = start; snap.sampleRate = outputRate(); snap.crossfade = crossfade();
+    snap.fxEffect = fxEffect(); snap.fxTarget = fxTarget(); snap.fxHeld = fxHeld();
+    snap.fxOn = fxOn(); snap.fxDepth = fxDepth(); snap.fxBeats = fxBeats();
+    for (int i = 0; i < kDeckCount; ++i) {
+        const auto& d = decks_[i]; auto& c = snap.decks[i];
+        c.load = d.loadId.load(); c.transport = d.transport.load(); c.launchFrame = d.launchAt.load();
+        c.position = d.position.load(); c.startPosition = positions[i]; c.bpm = d.bpm.load();
+        c.loopStart = d.loopStart.load(); c.loopEnd = d.loopEnd.load();
+        c.fader = d.fader.load(); c.trim = d.trim.load(); c.pitch = d.pitch.load(); c.bend = d.bend.load(); c.filter = d.filter.load();
+        c.previewSlot = d.previewSlot.load(); c.playing = d.playing.load(); c.preview = d.preview.load();
+        c.scratching = d.scratching.load(); c.loop = d.loopActive.load(); c.pfl = d.pfl.load();
+        const auto status = d.status.load();
+        c.ready = c.load != 0 && (status & 3) == kReady && (status >> 2) == c.load && (d.ring.load() == c.transport || d.inTrack.load());
+        for (int k = 0; k < 3; ++k) c.eq[k] = d.eq[k].load();
+        for (int k = 0; k < kStems; ++k) c.stems[k] = d.stemTarget[k].load();
+    }
+    // SPSC queue slots are owned by producer until release-published and by
+    // consumer until release-consumed. No overwrite and no callback waiting.
+    lastCaptureFrame_ = frame;
+    const auto write = captureWrite_.load(kRelaxed);
+    if (write - captureRead_.load(kAcquire) >= kCaptureQueue) captureGap_.store(true, kRelease);
+    else if (!captureGap_.load(kRelaxed)) {
+        captureQueue_[write % kCaptureQueue] = snap;
+        captureWrite_.store(write + 1, kRelease);
+    }
+    std::array<uint64_t, kCaptureWords> words{};
+    std::memcpy(words.data(), &snap, sizeof(snap));
+    captureRevision_.fetch_add(1); // odd, published bytes are changing
+    for (size_t i = 0; i < kCaptureWords; ++i) captureWords_[i].store(words[i]);
+    captureRevision_.fetch_add(1); // even, complete frame/mixer/deck snapshot
+}
+
+int Engine::popCapture(CaptureSnapshot& result) noexcept {
+    if (captureGap_.load(kAcquire)) return -1;
+    const auto read = captureRead_.load(kRelaxed);
+    if (read == captureWrite_.load(kAcquire)) return 0;
+    result = captureQueue_[read % kCaptureQueue];
+    captureRead_.store(read + 1, kRelease);
+    return captureGap_.load(kAcquire) ? -1 : 1;
+}
+
+bool Engine::captureSnapshot(CaptureSnapshot& result) const noexcept {
+    if (!captureEnabled_.load() || stopRequest_.load() != stopAck_.load()) return false;
+    std::array<uint64_t, kCaptureWords> words{};
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        const auto before = captureRevision_.load();
+        if (!before || (before & 1)) continue;
+        for (size_t i = 0; i < kCaptureWords; ++i) words[i] = captureWords_[i].load();
+        if (captureRevision_.load() != before) continue;
+        std::memcpy(&result, words.data(), sizeof(result));
+        return true;
+    }
+    return false;
 }
 
 // Crossfade tail of whatever was heard before the last relocation/stop. Returns whether it wrote.

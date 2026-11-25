@@ -1,0 +1,23 @@
+# Independent continuous-sync hosting qualification reference
+
+Local-only engineering packet. No deploy config, credentials, account mutations or personal data. Production integration belongs to the publisher. Run from cloud/library with existing dependencies:
+
+    node --test sync-review/worker.test.mjs
+
+worker.mjs is the reviewed reference; fixture-entry.mjs is TEST ONLY and MUST NOT be deployed. It deliberately exposes revoke/race controls solely inside the local emulator. The production reference has no enrollment/admin HTTP route. It relies on the existing exact-owner Access assertion validator in ../contracts.mjs, so copy this directory into cloud/library on the reviewed checkout. The test uses esbuild, miniflare and jose from that checkout.
+
+Local evidence: actual workerd SQLite, not a fake bucket/SQL stub. Eight concurrent exact retries; conflicting bytes at the same origin/sequence; group-wide reused UUID; forged signature; unsigned/wrong-owner/wrong-audience JWT; unknown group; persistence across emulator restart; aggregate page cap; body rejection; byte/count/daily admission rejection; revoke after signature verification but before transaction; stale bootstrap cannot un-revoke across restart. The generated JWT test injects a local public-key resolver, not a production identity bypass. Local execution does not prove Cloudflare Access edge/native login or remote JWKS behavior.
+
+The reference deliberately caps 1 group before obtaining a DO stub; bootstrap <=3 public device keys; 248KiB request/packet; 240KiB signed body; 256KiB response; 32 packets per page; 64 retained operations; 1MiB retained canonical packet bytes; 256 admitted membership-authorized requests per UTC day. These are qualification limits, NOT useful production capacity. Two 150KiB chunks cannot fit into one response; pages do not truncate packets. Quota/count checks and insertion are one transaction. No destructive pruning.
+
+Signature verification awaits WebCrypto, then transactionSync rechecks subject, public key, generation and revoked state before checking exact retry, expected predecessor, UUID and retention limits and appending. Head is derived from committed rows. It never publishes a separate ahead-of-data head. Failed append cannot advance it. Ed25519 public keys only are bootstrapped. Device private keys never enter hosted config. Canonical output sorts UTF-16 keys directly, including numeric-looking object keys, rather than relying on JSON.stringify object property insertion order. Final production integration should use the project's audited RFC8785 implementation and cross-language vectors.
+
+Open production work: integrate existing Worker routing; verify generated Python packets through this JS HTTP entrypoint; include new Electron adapter and actual Managed OAuth path; trusted bootstrap/revocation management; dedicated namespace class migration/config; provider quotas/headroom and CPU evidence; production request/journal budgets/retention. No claim of whole-library/audio/session playback readiness.
+
+## Proposed small generated hosted check, not authorized or run
+
+One new dedicated SQLite DO namespace/class bound to the existing private-library Worker, one random generated qualification group, two generated device public keys pinned to the verified owner's Access subject. No R2 binding/bucket, no COBIS access, no snapshot/audio enabling, no plan upgrade, no Access policy expansion. Start SYNC_ENABLED=false with fixed group/bootstrap configuration. Enable only for a bounded generated check after specific approval.
+
+Run at most 32 edge requests: unauthenticated, wrong-owner when a real independent session is available, wrong group/origin and forged signature denial; two origins append 4 generated packets total <=16KiB; exact retry; conflict; read paged committed history; independent process/restart readback and preserved UUID/sequence checks; disable and verify disabled denial. Store/response byte counts and actual DO/Worker CPU metrics. A wrong-owner test cannot be called passed with a fabricated JWT alone; local synthetic JWT rejection is separate evidence. Native OAuth authorization/refresh/cancellation must be tested on the actual app path, not inferred from browser cookies.
+
+Disabling/unbinding does not delete namespace storage or revoke old deployed code. Cleanup must have an explicit supported provider path, name/ID target checks, disable/quiesce, delete only generated qualification state, verify absence and remove binding. Namespace deletion and class migration rollback effects require current provider qualification before execution. No blanket deletion approval is implied by test approval. Do not reuse a namespace that may contain COBIS or user state.

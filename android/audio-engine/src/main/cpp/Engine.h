@@ -250,9 +250,47 @@ struct Deck {
     float tailCueGain = 0;
 };
 
+// Callback-published capture state. Reader never assembles live deck atomics.
+// No allocation/lock on callback; bounded reader may skip a busy sample.
+static_assert(std::atomic<uint64_t>::is_always_lock_free, "Capture publication requires lock-free words");
+struct CaptureDeck {
+    uint64_t load = 0, transport = 0, launchFrame = 0;
+    double position = 0, startPosition = 0, bpm = 0, loopStart = 0, loopEnd = 0;
+    float fader = 0, trim = 0, pitch = 0, bend = 0, filter = 0;
+    std::array<float, 3> eq{};
+    std::array<float, 4> stems{};
+    int previewSlot = -1;
+    bool playing = false, preview = false, scratching = false, loop = false, pfl = false, ready = false;
+};
+struct CaptureSnapshot {
+    uint64_t frame = 0, segmentStart = 0;
+    int sampleRate = 0;
+    float crossfade = 0;
+    int fxEffect = 0, fxTarget = 0, fxHeld = 0;
+    bool fxOn = false;
+    double fxDepth = 0, fxBeats = 0;
+    std::array<CaptureDeck, kDeckCount> decks{};
+};
+
 class Engine {
 public:
     MasterRecorder masterRecorder;
+    bool captureSnapshot(CaptureSnapshot& result) const noexcept;
+    // Single consumer only. 1=frame, 0=empty, -1=overflow: recording must
+    // stop/report incomplete evidence rather than silently skip heard changes.
+    int popCapture(CaptureSnapshot& result) noexcept;
+    struct CaptureStop { uint64_t token = 0, finalFrame = 0, published = 0, remaining = 0; bool gap = false; };
+    // Arm one capture epoch. Ignored after any stop was requested: an epoch is never
+    // re-armed and the queue/overflow latch is never reset.
+    void enableCapture(bool enabled) noexcept;
+    // Any single control thread, nonblocking. Returns a monotonic nonzero token for
+    // this epoch's stop (same token if one is already pending/acked), or 0 if capture
+    // was never armed. Snapshots published by the render callback up to the ack remain
+    // queued; none are published after the ack.
+    uint64_t requestCaptureStop() noexcept;
+    // 1 = render thread acknowledged token (result filled), 0 = pending (callbacks not
+    // yet observed it; if they stopped, caller times out as incomplete), -1 = bad token.
+    int pollCaptureStop(uint64_t token, CaptureStop& result) const noexcept;
     explicit Engine(int outputRate = 48000);
     // Any thread; one producer lock, never taken on the callback. Returns 0 if full.
     uint64_t submit(Op op, int deck, double value = 0, uint64_t load = 0, int slot = 0, const double* aux = nullptr);
@@ -351,6 +389,24 @@ public:
     bool trackCovers(const Deck& d, double seconds, double spanFrames) const noexcept;
 
 private:
+    // Atomic byte representation avoids the C++ data race of a plain-data
+    // seqlock. Fixed size, one writer (callback), any number of readers.
+    static constexpr size_t kCaptureWords = (sizeof(CaptureSnapshot) + 7) / 8;
+    std::array<std::atomic<uint64_t>, kCaptureWords> captureWords_{};
+    std::atomic<uint64_t> captureRevision_{0};
+    std::atomic<bool> captureEnabled_{false};
+    // Stop fence. stopRequest_ is the monotonic token (control side); stopAck_ is
+    // written only by the render thread after it commits its last publication and
+    // sets captureEnabled_ false. The stop* fields are release-published by stopAck_.
+    std::atomic<uint64_t> stopRequest_{0}, stopAck_{0}, stopFinalFrame_{0}, stopPublished_{0};
+    std::atomic<bool> stopGap_{false};
+    uint64_t lastCaptureFrame_ = 0; // render thread only
+    bool captureStep() noexcept;    // render thread: apply pending stop, return whether capturing
+    static constexpr uint64_t kCaptureQueue = 128;
+    std::array<CaptureSnapshot, kCaptureQueue> captureQueue_{};
+    std::atomic<uint64_t> captureWrite_{0}, captureRead_{0};
+    std::atomic<bool> captureGap_{false};
+    void publishCapture(uint64_t start, uint64_t frame, const std::array<double, kDeckCount>& positions) noexcept;
     std::array<Deck, kDeckCount> decks_{};
     std::array<Command, kQueueSize> commands_{};
     std::atomic<uint64_t> lateOps_{0};

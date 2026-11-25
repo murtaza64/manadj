@@ -6,3 +6,5 @@
 .library-cloud-review summary { padding: var(--space-8) 0; cursor: pointer; }
 .library-cloud-review > button { margin-top: var(--space-16); min-height: 36px; }
 .library-cloud-destination { overflow-wrap: anywhere; }
+.library-cloud-actions label { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); }
+.library-cloud-actions input { min-width: 280px; padding: var(--space-8); border: 1px solid var(--surface1); }

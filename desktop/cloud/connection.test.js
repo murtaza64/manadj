@@ -164,3 +164,29 @@ test('external cancellation aborts active request and rejects even a noncooperat
   await entered.promise; controller.abort(); gate.resolve();
   await assert.rejects(work, { code: 'cloud_operation_cancelled' });
 });
+
+test('sync transport keeps fixed origin bounded routing and native-only tokens', async () => {
+  const f = fixture(); await f.connection.connect();
+  const group = '11111111-1111-4111-8111-111111111111', origin = '22222222-2222-4222-8222-222222222222';
+  const packet = { body: { group_id: group, origin_id: origin, sequence: 1 }, signature: 'fixture' };
+  await f.connection.syncAuthenticated(group, origin, 'head');
+  await f.connection.syncAuthenticated(group, origin, 'read', { after: 7, limit: 8 });
+  await f.connection.syncAuthenticated(group, origin, 'publish', { sequence: 1, packet });
+  const calls = f.calls.filter(c => c.url.includes('/v1/sync/'));
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0].url, `${config.resource}/v1/sync/${group}/origins/${origin}/head`);
+  assert.equal(calls[1].url, `${config.resource}/v1/sync/${group}/origins/${origin}/operations?after=7&limit=8`);
+  assert.deepEqual(JSON.parse(calls[2].options.body), { expectedPreviousSequence: 0, packet });
+  assert.equal(calls[2].options.headers.authorization, 'Bearer oauth:synthetic-access-0');
+  for (const operation of [
+    () => f.connection.syncAuthenticated('https://outside.invalid', origin, 'head'),
+    () => f.connection.syncAuthenticated(group, origin, 'read', { after: -1 }),
+    () => f.connection.syncAuthenticated(group, origin, 'read', { limit: 33 }),
+    () => f.connection.syncAuthenticated(group, origin, 'publish', { sequence: 2, packet }),
+    () => f.connection.syncAuthenticated(group, origin, 'publish', { sequence: 1, packet: { ...packet, padding: 'x'.repeat(248 * 1024) } }),
+    () => f.connection.syncAuthenticated(group, origin, 'delete'),
+  ]) await assert.rejects(operation, { code: 'cloud_request_invalid' });
+  assert.equal(f.calls.filter(c => c.url.includes('/v1/sync/')).length, 3);
+  await f.connection.disconnect();
+  await assert.rejects(f.connection.syncAuthenticated(group, origin, 'head'), { code: 'cloud_signin_required' });
+});

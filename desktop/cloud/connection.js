@@ -168,6 +168,34 @@ class CloudConnection {
       headers: { authorization: `Bearer ${access}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
       ...(body === undefined ? {} : { body }) }, generation, 15000, signal, withBytes);
   }
+  // Main-process-only continuous-sync transport. Does not enable the feature,
+  // enroll devices, sign packets, or expose owner tokens to the renderer.
+  async syncAuthenticated(group, origin, operation, { sequence, after = 0, limit = 8, packet, signal } = {}) {
+    const id = x => typeof x === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(x);
+    const integer = x => Number.isSafeInteger(x) && x >= 0;
+    if (!id(group) || !id(origin) || !['head', 'read', 'publish'].includes(operation)) fail('cloud_request_invalid');
+    let path = `/v1/sync/${group}/origins/${origin}`, method = 'GET', body;
+    if (operation === 'head') path += '/head';
+    if (operation === 'read') {
+      if (!integer(after) || !integer(limit) || limit < 1 || limit > 32) fail('cloud_request_invalid');
+      path += `/operations?after=${after}&limit=${limit}`;
+    }
+    if (operation === 'publish') {
+      if (!integer(sequence) || sequence < 1 || !packet || packet.body?.group_id !== group ||
+          packet.body?.origin_id !== origin || packet.body?.sequence !== sequence ||
+          Buffer.byteLength(JSON.stringify(packet)) > 248 * 1024) fail('cloud_request_invalid');
+      path += `/operations/${sequence}`; method = 'PUT';
+      body = JSON.stringify({ expectedPreviousSequence: sequence - 1, packet });
+    }
+    const generation = this.generation; this.active(generation);
+    if (signal?.aborted) fail('cloud_operation_cancelled');
+    if (!this.tokens) fail('cloud_signin_required');
+    if (this.tokens.expiresAt - this.clock() < 30000) await this.refresh(generation);
+    this.active(generation);
+    return this.request(`${this.config.resource}${path}`, { method,
+      headers: { authorization: `Bearer ${this.tokens.access}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+      ...(body === undefined ? {} : { body }) }, generation, 15000, signal);
+  }
   cancel() { this.restart(this.config ? 'disconnected' : 'disabled'); return this.publicState(); }
   async disconnect() {
     const generation = this.restart(this.config ? 'disconnected' : 'disabled');

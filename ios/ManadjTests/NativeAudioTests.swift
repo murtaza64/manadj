@@ -663,3 +663,20 @@ final class NativeAudioTests: XCTestCase {
     }
 
 }
+
+extension NativeAudioTests {
+    @MainActor func testSessionCaptureCandidateRemainsDisabledAndLifecycleCloses() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let journal = try SessionEventJournal(file: root.appendingPathComponent("manifest.json"))
+        let audio = try NativeAudio()
+        try audio.prepareSessionCapture(journal: journal, libraryIdentity: "generated-apple-host")
+        XCTAssertTrue(audio.sessionCaptureIsPrepared)
+        XCTAssertNil(audio.captureSnapshot(), "Preparing host ownership never enables capture")
+        try await audio.drainPreparedSessionCapture()
+        let sessions = await journal.all(); XCTAssertTrue(sessions.isEmpty)
+        audio.stopSessionCapture(incomplete: true)
+        XCTAssertFalse(audio.sessionCaptureIsPrepared)
+        XCTAssertThrowsError(try audio.prepareSessionCapture(journal: journal, libraryIdentity: "generated-apple-host"))
+    }
+}

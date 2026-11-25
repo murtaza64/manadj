@@ -67,6 +67,9 @@ def main(argv: list[str] | None = None) -> None:
         from backend.cloud_shell import install_cloud_snapshot_route
         from backend.database import DB_PATH
         install_cloud_snapshot_route(app, token, DB_PATH)
+        from backend.continuous_sync.shell import install as install_continuous_sync
+        from backend.database import SessionLocal
+        install_continuous_sync(app, token, SessionLocal)
     if os.environ.get(LIFELINE_ENV):
         watch_lifeline(server, sys.stdin)
     server.run()
