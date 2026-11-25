@@ -162,11 +162,14 @@ function placementTime(time: number, ctx: TransportContext): number {
  * (cue-quantize-bpm 04). With Quantize on and another deck audibly playing
  * with a grid (ctx.launchReference), the launch aligns to that reference
  * deck's nearest beat: it either defers the start or enters ahead of the
- * launch point. Otherwise — Quantize off, no playing peer, or no reference
- * grid — it starts immediately at `at`.
+ * launch point. With Quantize off, Heard still advances entry by L × rate when a playing
+ * peer exists. Without a playing peer, entry remains exactly `at`.
  */
 function launchStart(at: number, ctx: TransportContext): AudioEffect {
-  if (!ctx.quantize || !ctx.launchReference) return { type: 'start', at };
+  if (!ctx.launchReference) return { type: 'start', at };
+  // Heard is independent of grid snapping, matching Android's launch path.
+  // Treat a press on the audible peer as made L earlier even with Quantize off.
+  if (!ctx.quantize) return { type: 'start', at: at + (ctx.heardSeconds ?? 0) * (ctx.playRate ?? 1) };
   const { at: entry, delaySeconds } = crossDeckLaunchTarget(
     at,
     ctx.playRate ?? 1,
