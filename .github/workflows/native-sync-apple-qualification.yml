@@ -37,6 +37,9 @@ jobs:
           echo '783fe8a4778c395fe86d8b1d1cf257b5f34984386b5aba5133b506a917eff01c  native-schema-interop.patch' | shasum -a 256 -c -
           git apply --check --exclude=backend/continuous_sync/NATIVE_CAPTURE.md native-schema-interop.patch
           git apply --exclude=backend/continuous_sync/NATIVE_CAPTURE.md native-schema-interop.patch
+          echo '9dbbc81c6f640e4208c8000edbd46f4d6a8b3223eab565b4ff50b5742758abbb  native-metadata-wire.patch' | shasum -a 256 -c -
+          git apply --check native-metadata-wire.patch
+          git apply native-metadata-wire.patch
           git diff --stat
       - name: Select latest production Xcode
         shell: bash
