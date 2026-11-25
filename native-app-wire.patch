@@ -48,7 +48,7 @@ index fd4b3cb1..dd50706f 100644
  		};
  		"3D5D06619AD2FD8BA0F34D57" = {
 diff --git a/ios/Manadj/AppModel.swift b/ios/Manadj/AppModel.swift
-index 3a7719a0..d2e2ed10 100644
+index 3a7719a0..65316515 100644
 --- a/ios/Manadj/AppModel.swift
 +++ b/ios/Manadj/AppModel.swift
 @@ -70,6 +70,51 @@ struct DeckViewState {
@@ -103,9 +103,26 @@ index 3a7719a0..d2e2ed10 100644
      private let root: URL
      private let deviceId: String
  
+@@ -123,6 +168,16 @@ struct DeckViewState {
+             repository = repo
+             snapshot = await repo.cachedSnapshot()
+             downloaded = await repo.downloadedIds()
++            let provisioning = root.appendingPathComponent("continuous-sync/public-provisioning.json")
++            if FileManager.default.fileExists(atPath: provisioning.path), let base = snapshot {
++                do {
++                    let properties = try provisioning.resourceValues(forKeys: [.fileSizeKey, .isSymbolicLinkKey])
++                    guard properties.isSymbolicLink != true, let size = properties.fileSize, size <= 64 * 1024 else { throw NativeReplicaError.invalid }
++                    let store = await repo.store
++                    try await cloudSync.configure(Data(contentsOf: provisioning), snapshot: base, store: store)
++                    snapshot = try cloudSync.project(base)
++                } catch { self.error = "Saved private sync configuration needs review: " + error.localizedDescription }
++            }
+             if !ProcessInfo.processInfo.arguments.contains("--library-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--usb-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--sync-progress-ui-fixture"), let url = URL(string: origin), let token = PairingKeychain.token(for: origin) {
+                 connection = try DesktopConnection(url: url, deviceToken: token, deviceId: deviceId, deviceName: UIDevice.current.name)
+             }
 diff --git a/ios/Manadj/CloudSyncController.swift b/ios/Manadj/CloudSyncController.swift
 new file mode 100644
-index 00000000..83e9f568
+index 00000000..269f30c0
 --- /dev/null
 +++ b/ios/Manadj/CloudSyncController.swift
 @@ -0,0 +1,166 @@
@@ -225,7 +242,7 @@ index 00000000..83e9f568
 +                }
 +                self.status = sync.lastError.map { "Sync paused/retrying: " + $0 } ?? "Sync active. Sent \(sync.published), received \(sync.received), requests \(sync.requests)/\(NativeMetadataSync.requestBudget)"
 +                self.projectionChanged?()
-+                if !sync.running { break }
++                if !sync.running { self.captureStop?(true); break }
 +                try? await Task.sleep(for: .seconds(1))
 +            }
 +        }
@@ -533,19 +550,35 @@ index 0cd2eb96..bd0ba37e 100644
          guard packet.count <= 248 * 1024, let envelope = try JSONSerialization.jsonObject(with: packet) as? [String: Any],
                let body = envelope["body"] as? [String: Any] else { throw NativeReplicaError.invalid }
 diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataSync.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataSync.swift
-index e65f51b0..ae95d331 100644
+index e65f51b0..1aac89e8 100644
 --- a/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataSync.swift
 +++ b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataSync.swift
-@@ -28,7 +28,7 @@ public enum NativeTransportError: Error { case invalid, http(Int), oversized, qu
+@@ -23,12 +23,21 @@ public enum NativeTransportError: Error { case invalid, http(Int), oversized, qu
+     private var ticking = false
+     private var verifiedOwnPrefix = 0
+     // Keep fixed resource separate from caller-provided payloads.
+-    private let base = CloudLibraryOAuth.resource
++    private let base: URL
+     public static let requestBudget = 1800
  
-     public init(replica: NativeMetadataReplica, group: UUID, origin: UUID, origins: [UUID],
+-    public init(replica: NativeMetadataReplica, group: UUID, origin: UUID, origins: [UUID],
++    public convenience init(replica: NativeMetadataReplica, group: UUID, origin: UUID, origins: [UUID],
                  token: @escaping @MainActor () async throws -> String) throws {
 -        guard origins.contains(origin), Set(origins).count == origins.count, (2...4).contains(origins.count) else { throw NativeTransportError.invalid }
++        try self.init(replica: replica, group: group, origin: origin, origins: origins, token: token, endpoint: CloudLibraryOAuth.resource)
++    }
++
++    // Internal generated-network qualification seam. The app cannot supply an
++    // alternate endpoint through its public initializer or provisioning JSON.
++    init(replica: NativeMetadataReplica, group: UUID, origin: UUID, origins: [UUID],
++         token: @escaping @MainActor () async throws -> String, endpoint: URL) throws {
++        guard endpoint == CloudLibraryOAuth.resource || (endpoint.scheme == "http" && endpoint.host == "127.0.0.1" && endpoint.path.isEmpty && endpoint.user == nil && endpoint.password == nil && endpoint.query == nil && endpoint.fragment == nil) else { throw NativeTransportError.invalid }
++        base = endpoint
 +        guard origins.contains(origin), Set(origins).count == origins.count, (2...3).contains(origins.count) else { throw NativeTransportError.invalid }
          self.replica = replica; self.group = group; self.origin = origin; self.origins = origins; self.token = token
          let config = URLSessionConfiguration.ephemeral
          config.httpCookieStorage = nil; config.urlCredentialStorage = nil; config.urlCache = nil
-@@ -102,7 +102,8 @@ public enum NativeTransportError: Error { case invalid, http(Int), oversized, qu
+@@ -102,7 +111,8 @@ public enum NativeTransportError: Error { case invalid, http(Int), oversized, qu
          }
          for other in origins where other != origin {
              for packet in try await read(origin: other, after: replica.cursor(other), epoch: epoch) {
@@ -782,6 +815,86 @@ index a85e09d1..296d2305 100644
      @MainActor func testFailedCommitDoesNotAdvanceCursorAndUnboundTrackRejected() throws {
          let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
          defer { try? FileManager.default.removeItem(at: root) }
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataTransportTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataTransportTests.swift
+new file mode 100644
+index 00000000..c213a8c2
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataTransportTests.swift
+@@ -0,0 +1,40 @@
++#if canImport(CryptoKit) && canImport(JavaScriptCore)
++import XCTest
++import CryptoKit
++@testable import ManadjCore
++
++final class NativeMetadataTransportTests: XCTestCase, @unchecked Sendable {
++    @MainActor func testActualURLSessionLoopsConvergeThroughGeneratedLoopbackHTTP() async throws {
++        guard ProcessInfo.processInfo.environment["MANADJ_NATIVE_HTTP_FIXTURE"] == "1" else { throw XCTSkip("Explicit generated loopback fixture not started") }
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let group=UUID(), aID=UUID(), bID=UUID(), logical=UUID()
++        let aKey=Curve25519.Signing.PrivateKey(), bKey=Curve25519.Signing.PrivateKey()
++        let members=[aID:aKey.publicKey,bID:bKey.publicKey]
++        func replica(_ origin: UUID, _ key: Curve25519.Signing.PrivateKey, _ local: Int) throws -> NativeMetadataReplica {
++            try NativeMetadataReplica(file:root.appendingPathComponent(origin.uuidString+".json"),group:group,origin:origin,key:key,members:members,
++                bindings:[.init(logicalID:logical,localID:local,contentSHA256:String(repeating:"a",count:64),byteLength:4096)])
++        }
++        let a=try replica(aID,aKey,12), b=try replica(bID,bKey,99)
++        _=try a.edit(localID:12,value:.title("Native URLSession sender"))
++        let endpoint=URL(string:"http://127.0.0.1:49371")!
++        let syncA=try NativeMetadataSync(replica:a,group:group,origin:aID,origins:[aID,bID],token:{"generated-loopback-only"},endpoint:endpoint)
++        let syncB=try NativeMetadataSync(replica:b,group:group,origin:bID,origins:[aID,bID],token:{"generated-loopback-only"},endpoint:endpoint)
++        defer { syncA.stop();syncB.stop() }
++        syncA.start();syncB.start()
++        for _ in 0..<150 {
++            if b.cursor(aID)==1 { break }
++            try await Task.sleep(for:.milliseconds(100))
++            if syncA.published>0 { try await syncB.tick() }
++        }
++        XCTAssertEqual(try b.values(localID:99,field:"title").first?["value"] as? String,"Native URLSession sender")
++        _=try b.edit(localID:99,value:.mainCue(12.5))
++        try await syncB.tick();try await syncA.tick()
++        XCTAssertEqual(try a.values(localID:12,field:"main_cue").first?["value"] as? Double,12.5)
++        try await syncA.tick();try await syncB.tick()
++        XCTAssertEqual(a.allPackets().count,2);XCTAssertEqual(b.allPackets().count,2)
++        XCTAssertNil(syncA.lastError);XCTAssertNil(syncB.lastError)
++        XCTAssertGreaterThan(syncA.requests,0);XCTAssertGreaterThan(syncB.requests,0)
++    }
++}
++#endif
+diff --git a/scripts/qualification/native-transport-fixture.py b/scripts/qualification/native-transport-fixture.py
+new file mode 100644
+index 00000000..d9d70163
+--- /dev/null
++++ b/scripts/qualification/native-transport-fixture.py
+@@ -0,0 +1,28 @@
++"""Loopback generated-only network fixture, not production auth or relay proof."""
++import json
++from http.server import BaseHTTPRequestHandler, HTTPServer
++from urllib.parse import urlsplit, parse_qs
++
++packets = {}
++class Handler(BaseHTTPRequestHandler):
++    def log_message(self, *_): pass
++    def answer(self, value, status=200):
++        raw=json.dumps(value,separators=(',',':')).encode();self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
++    def route(self):
++        parsed=urlsplit(self.path);parts=parsed.path.split('/')
++        if self.headers.get('Authorization') != 'Bearer generated-loopback-only': self.answer({},403);return
++        if len(parts)<7 or parts[1:3]!=['v1','sync'] or parts[4]!='origins': self.answer({},404);return
++        key=(parts[3],parts[5]);rows=packets.setdefault(key,[])
++        if parts[6]=='head': self.answer({'sequence':len(rows)});return
++        if self.command=='PUT':
++            body=json.loads(self.rfile.read(int(self.headers['Content-Length'])));packet=body['packet'];seq=int(parts[7])
++            if seq<=len(rows):
++                if rows[seq-1]!=packet:self.answer({},409);return
++            elif seq==len(rows)+1 and body['expectedPreviousSequence']==len(rows):rows.append(packet)
++            else:self.answer({},409);return
++            self.answer({'sequence':seq,'stored':True},201);return
++        query=parse_qs(parsed.query);after=int(query['after'][0]);limit=int(query['limit'][0]);page=rows[after:after+limit]
++        self.answer({'operations':page,'nextAfter':after+len(page),'more':after+len(page)<len(rows)})
++    do_GET=route
++    do_PUT=route
++HTTPServer(('127.0.0.1',49371),Handler).serve_forever()
 diff --git a/scripts/qualification/verify-native-history-application.py b/scripts/qualification/verify-native-history-application.py
 new file mode 100644
 index 00000000..91c00c9c
