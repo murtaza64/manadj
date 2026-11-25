@@ -1,3 +1,131 @@
+diff --git a/android/audio-engine/src/main/cpp/Engine.cpp b/android/audio-engine/src/main/cpp/Engine.cpp
+index 2dc610dc..c7e57665 100644
+--- a/android/audio-engine/src/main/cpp/Engine.cpp
++++ b/android/audio-engine/src/main/cpp/Engine.cpp
+@@ -970,6 +970,7 @@ void Engine::cancelScheduledNow(const Command& c) noexcept {
+ void Engine::render(float* output, int frames, int channels) noexcept {
+     const auto start = outputFrames_.load(kRelaxed);
+     renderFrame_ = static_cast<int64_t>(start);
++    captureStep(); // honour a stop requested between callbacks, even for a zero-frame call
+     while (queueRead_.load(kRelaxed) != queueWrite_.load(kAcquire)) {
+         const auto read = queueRead_.load(kRelaxed);
+         const Command& c = commands_[read % kQueueSize];
+@@ -993,7 +994,7 @@ void Engine::render(float* output, int frames, int channels) noexcept {
+             scheduleCount_.store(scheduleCount_.load(kRelaxed) - 1, kRelaxed);
+         }
+         std::array<double, kDeckCount> capturePositions{};
+-        const bool capturing = captureEnabled_.load(kRelaxed);
++        const bool capturing = captureStep();
+         if (capturing) for (int i = 0; i < kDeckCount; ++i) capturePositions[i] = decks_[i].position.load(kRelaxed);
+         renderBuses(n, static_cast<int64_t>(now));
+         // Record the logical stereo Master, never the physical cue-routing
+@@ -1025,10 +1026,51 @@ void Engine::render(float* output, int frames, int channels) noexcept {
+         done += n;
+         if (capturing) publishCapture(now, start + done, capturePositions);
+     }
++    captureStep(); // all of this call's segments are published; ack a stop that arrived mid-call
+     if (clicksLeft_ > 0) renderClicks(output, frames, channels, start);
+     outputFrames_.fetch_add(frames, kRelease);
+ }
+ 
++bool Engine::captureStep() noexcept {
++    const auto req = stopRequest_.load(kAcquire);
++    if (req != stopAck_.load(kRelaxed)) {
++        captureEnabled_.store(false, kRelaxed);
++        stopFinalFrame_.store(lastCaptureFrame_, kRelaxed);
++        stopPublished_.store(captureWrite_.load(kRelaxed), kRelaxed);
++        stopGap_.store(captureGap_.load(kAcquire), kRelaxed);
++        stopAck_.store(req, kRelease);
++    }
++    return captureEnabled_.load(kRelaxed);
++}
++
++void Engine::enableCapture(bool enabled) noexcept {
++    if (!enabled) { requestCaptureStop(); return; }
++    if (stopRequest_.load(kAcquire) != 0) return;
++    captureEnabled_.store(true);
++}
++
++uint64_t Engine::requestCaptureStop() noexcept {
++    uint64_t cur = stopRequest_.load(kAcquire);
++    if (!captureEnabled_.load(kAcquire) && cur == stopAck_.load(kAcquire)) return cur; // never armed (0) or already acked
++    while (cur == stopAck_.load(kAcquire)) {
++        if (stopRequest_.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel)) return cur + 1;
++    }
++    return stopRequest_.load(kAcquire);
++}
++
++int Engine::pollCaptureStop(uint64_t token, CaptureStop& result) const noexcept {
++    if (token == 0 || token > stopRequest_.load(kAcquire)) return -1;
++    const auto ack = stopAck_.load(kAcquire);
++    if (ack < token) return 0;
++    result.token = ack;
++    result.finalFrame = stopFinalFrame_.load(kRelaxed);
++    result.published = stopPublished_.load(kRelaxed);
++    result.gap = stopGap_.load(kRelaxed);
++    const auto read = captureRead_.load(kAcquire);
++    result.remaining = result.published > read ? result.published - read : 0;
++    return 1;
++}
++
+ void Engine::publishCapture(uint64_t start, uint64_t frame, const std::array<double, kDeckCount>& positions) noexcept {
+     CaptureSnapshot snap{};
+     snap.frame = frame; snap.segmentStart = start; snap.sampleRate = outputRate(); snap.crossfade = crossfade();
+@@ -1049,6 +1091,7 @@ void Engine::publishCapture(uint64_t start, uint64_t frame, const std::array<dou
+     }
+     // SPSC queue slots are owned by producer until release-published and by
+     // consumer until release-consumed. No overwrite and no callback waiting.
++    lastCaptureFrame_ = frame;
+     const auto write = captureWrite_.load(kRelaxed);
+     if (write - captureRead_.load(kAcquire) >= kCaptureQueue) captureGap_.store(true, kRelease);
+     else if (!captureGap_.load(kRelaxed)) {
+@@ -1072,7 +1115,7 @@ int Engine::popCapture(CaptureSnapshot& result) noexcept {
+ }
+ 
+ bool Engine::captureSnapshot(CaptureSnapshot& result) const noexcept {
+-    if (!captureEnabled_.load()) return false;
++    if (!captureEnabled_.load() || stopRequest_.load() != stopAck_.load()) return false;
+     std::array<uint64_t, kCaptureWords> words{};
+     for (int attempt = 0; attempt < 4; ++attempt) {
+         const auto before = captureRevision_.load();
+diff --git a/android/audio-engine/src/main/cpp/Engine.h b/android/audio-engine/src/main/cpp/Engine.h
+index 73145f3f..8cc248eb 100644
+--- a/android/audio-engine/src/main/cpp/Engine.h
++++ b/android/audio-engine/src/main/cpp/Engine.h
+@@ -279,7 +279,18 @@ public:
+     // Single consumer only. 1=frame, 0=empty, -1=overflow: recording must
+     // stop/report incomplete evidence rather than silently skip heard changes.
+     int popCapture(CaptureSnapshot& result) noexcept;
+-    void enableCapture(bool enabled) noexcept { captureEnabled_.store(enabled); }
++    struct CaptureStop { uint64_t token = 0, finalFrame = 0, published = 0, remaining = 0; bool gap = false; };
++    // Arm one capture epoch. Ignored after any stop was requested: an epoch is never
++    // re-armed and the queue/overflow latch is never reset.
++    void enableCapture(bool enabled) noexcept;
++    // Any single control thread, nonblocking. Returns a monotonic nonzero token for
++    // this epoch's stop (same token if one is already pending/acked), or 0 if capture
++    // was never armed. Snapshots published by the render callback up to the ack remain
++    // queued; none are published after the ack.
++    uint64_t requestCaptureStop() noexcept;
++    // 1 = render thread acknowledged token (result filled), 0 = pending (callbacks not
++    // yet observed it; if they stopped, caller times out as incomplete), -1 = bad token.
++    int pollCaptureStop(uint64_t token, CaptureStop& result) const noexcept;
+     explicit Engine(int outputRate = 48000);
+     // Any thread; one producer lock, never taken on the callback. Returns 0 if full.
+     uint64_t submit(Op op, int deck, double value = 0, uint64_t load = 0, int slot = 0, const double* aux = nullptr);
+@@ -384,6 +395,13 @@ private:
+     std::array<std::atomic<uint64_t>, kCaptureWords> captureWords_{};
+     std::atomic<uint64_t> captureRevision_{0};
+     std::atomic<bool> captureEnabled_{false};
++    // Stop fence. stopRequest_ is the monotonic token (control side); stopAck_ is
++    // written only by the render thread after it commits its last publication and
++    // sets captureEnabled_ false. The stop* fields are release-published by stopAck_.
++    std::atomic<uint64_t> stopRequest_{0}, stopAck_{0}, stopFinalFrame_{0}, stopPublished_{0};
++    std::atomic<bool> stopGap_{false};
++    uint64_t lastCaptureFrame_ = 0; // render thread only
++    bool captureStep() noexcept;    // render thread: apply pending stop, return whether capturing
+     static constexpr uint64_t kCaptureQueue = 128;
+     std::array<CaptureSnapshot, kCaptureQueue> captureQueue_{};
+     std::atomic<uint64_t> captureWrite_{0}, captureRead_{0};
 diff --git a/ios/Manadj.xcodeproj/project.pbxproj b/ios/Manadj.xcodeproj/project.pbxproj
 index fd4b3cb1..dd50706f 100644
 --- a/ios/Manadj.xcodeproj/project.pbxproj
@@ -48,7 +176,7 @@ index fd4b3cb1..dd50706f 100644
  		};
  		"3D5D06619AD2FD8BA0F34D57" = {
 diff --git a/ios/Manadj/AppModel.swift b/ios/Manadj/AppModel.swift
-index 3a7719a0..65316515 100644
+index 3a7719a0..f700c088 100644
 --- a/ios/Manadj/AppModel.swift
 +++ b/ios/Manadj/AppModel.swift
 @@ -70,6 +70,51 @@ struct DeckViewState {
@@ -80,7 +208,7 @@ index 3a7719a0..65316515 100644
 +        }
 +        controller.captureStop = { [weak self] incomplete in
 +            self?.captureDrainTask?.cancel(); self?.captureDrainTask = nil
-+            self?.audio?.stopSessionCapture(incomplete: incomplete)
++            await self?.audio?.stopSessionCapture(incomplete: incomplete)?.value
 +        }
 +        cloudSyncStorage = controller
 +        return controller
@@ -122,10 +250,10 @@ index 3a7719a0..65316515 100644
              }
 diff --git a/ios/Manadj/CloudSyncController.swift b/ios/Manadj/CloudSyncController.swift
 new file mode 100644
-index 00000000..269f30c0
+index 00000000..ee55ab55
 --- /dev/null
 +++ b/ios/Manadj/CloudSyncController.swift
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,182 @@
 +import Foundation
 +import CryptoKit
 +import Security
@@ -149,7 +277,8 @@ index 00000000..269f30c0
 +    @Published private(set) var conflicts = 0
 +    @Published private(set) var history = "No signed session history"
 +    var captureStart: (() throws -> Void)?
-+    var captureStop: ((Bool) -> Void)?
++    var captureStop: ((Bool) async -> Void)?
++    private var stopping = false
 +    private var journal: SessionEventJournal?
 +    private var libraryIdentity = ""
 +    private let auth = CloudLibrarySession()
@@ -226,7 +355,7 @@ index 00000000..269f30c0
 +        catch { status = "Sign-in stopped: \(error.localizedDescription)" }
 +    }
 +    func start() {
-+        guard CloudLibraryOAuth.enabled, let sync else { status = "Private cloud test is not enabled"; return }
++        guard !stopping, CloudLibraryOAuth.enabled, let sync else { status = "Private cloud test is not enabled"; return }
 +        do { try captureStart?() } catch { status = "Capture not started: " + error.localizedDescription; return }
 +        sync.start(); running = sync.running
 +        poll?.cancel()
@@ -238,16 +367,31 @@ index 00000000..269f30c0
 +                        try replica.captureHistory(await journal.all(), libraryIdentity: self.libraryIdentity)
 +                        let summary = try replica.historySummary()
 +                        self.history = "Signed history: \(summary.sessions) sessions, \(summary.chunks) chunks, \(summary.active) active. Replay unavailable."
-+                    } catch { self.stop(); self.status = "History sync stopped: " + error.localizedDescription; break }
++                    } catch { self.stop(incomplete: true); self.status = "History sync stopped: " + error.localizedDescription; break }
 +                }
 +                self.status = sync.lastError.map { "Sync paused/retrying: " + $0 } ?? "Sync active. Sent \(sync.published), received \(sync.received), requests \(sync.requests)/\(NativeMetadataSync.requestBudget)"
 +                self.projectionChanged?()
-+                if !sync.running { self.captureStop?(true); break }
++                if !sync.running { await self.captureStop?(true); break }
 +                try? await Task.sleep(for: .seconds(1))
 +            }
 +        }
 +    }
-+    func stop(incomplete: Bool = true) { captureStop?(incomplete); sync?.stop(); poll?.cancel(); poll = nil; running = false; status = "Stopped. Pending changes kept." }
++    func stop(incomplete: Bool = false) {
++        guard !stopping else { return }
++        stopping = true; poll?.cancel(); poll = nil; running = false
++        status = "Closing session and keeping pending changes..."
++        Task {
++            await captureStop?(incomplete)
++            do {
++                if let journal, let replica {
++                    try replica.captureHistory(await journal.all(), libraryIdentity: libraryIdentity)
++                    if sync?.running == true { try await sync?.tick() }
++                }
++                status = "Stopped. Pending changes kept. Reopen app before another capture."
++            } catch { status = "Stopped. Pending history kept locally: " + error.localizedDescription }
++            sync?.stop(); stopping = false
++        }
++    }
 +    func edit(localID: Int, value: LibraryEditValue) throws {
 +        guard let replica else { throw NativeReplicaError.invalid }
 +        try replica.edit(localID: localID, value: value); projectionChanged?()
@@ -421,11 +565,74 @@ index f03a5d01..d4afca7c 100644
      @MainActor private func waitForReadyTransport(_ play: XCUIElement, app: XCUIApplication) {
          let ready = NSPredicate(format: "enabled == true AND hittable == true")
          let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: play)], timeout: 20)
+diff --git a/ios/Packages/ManadjAudio/Sources/CEngine/EngineBridge.cpp b/ios/Packages/ManadjAudio/Sources/CEngine/EngineBridge.cpp
+index d566b9b6..14104919 100644
+--- a/ios/Packages/ManadjAudio/Sources/CEngine/EngineBridge.cpp
++++ b/ios/Packages/ManadjAudio/Sources/CEngine/EngineBridge.cpp
+@@ -26,6 +26,14 @@ static void captureConvert(const CaptureSnapshot& snap, MDJCaptureSnapshot* resu
+     }
+     *result = out;
+ }
++uint64_t mdj_capture_request_stop(MDJEngine e) { return e ? E(e)->requestCaptureStop() : 0; }
++int mdj_capture_stop_poll(MDJEngine e, uint64_t token, MDJCaptureStop* result) {
++    if (!e || !result) return -1;
++    Engine::CaptureStop stop;
++    const int status = E(e)->pollCaptureStop(token, stop);
++    if (status == 1) { result->token = stop.token; result->finalFrame = stop.finalFrame; result->published = stop.published; result->remaining = stop.remaining; result->gap = stop.gap; }
++    return status;
++}
+ bool mdj_capture_snapshot(MDJEngine e, MDJCaptureSnapshot* result) {
+     if (!e || !result) return false;
+     CaptureSnapshot snap;
+diff --git a/ios/Packages/ManadjAudio/Sources/CEngine/include/CEngine.h b/ios/Packages/ManadjAudio/Sources/CEngine/include/CEngine.h
+index 9af99d07..ad8d1dd4 100644
+--- a/ios/Packages/ManadjAudio/Sources/CEngine/include/CEngine.h
++++ b/ios/Packages/ManadjAudio/Sources/CEngine/include/CEngine.h
+@@ -39,7 +39,17 @@ typedef struct {
+ } MDJCaptureSnapshot;
+ // Returns false before first render or during bounded publication contention.
+ // On false the caller keeps its old state and does not invent a new event.
++// enable(false) is a nonblocking stop request, not a fence: use the token API below
++// to know when the render thread has stopped publishing. enable(true) is ignored
++// once a stop was requested; an epoch is never re-armed.
+ void mdj_capture_enable(MDJEngine engine, bool enabled);
++typedef struct { uint64_t token, finalFrame, published, remaining; bool gap; } MDJCaptureStop;
++// Nonzero monotonic token, or 0 if capture was never armed. Idempotent per epoch.
++uint64_t mdj_capture_request_stop(MDJEngine engine);
++// 1=acked (render committed its last publication; none follow), 0=pending, -1=bad token.
++// After 1, pop until published snapshots are consumed (remaining reaches 0 and the
++// last frame equals finalFrame); gap=true means evidence is incomplete.
++int mdj_capture_stop_poll(MDJEngine engine, uint64_t token, MDJCaptureStop *result);
+ bool mdj_capture_snapshot(MDJEngine engine, MDJCaptureSnapshot *result);
+ // One consumer, 1=frame, 0=empty, -1=gap. Gap remains latched for this engine.
+ int mdj_capture_pop(MDJEngine engine, MDJCaptureSnapshot *result);
 diff --git a/ios/Packages/ManadjAudio/Sources/ManadjAudio/NativeAudio.swift b/ios/Packages/ManadjAudio/Sources/ManadjAudio/NativeAudio.swift
-index fd38fbf0..37217fe2 100644
+index fd38fbf0..8d929ad1 100644
 --- a/ios/Packages/ManadjAudio/Sources/ManadjAudio/NativeAudio.swift
 +++ b/ios/Packages/ManadjAudio/Sources/ManadjAudio/NativeAudio.swift
-@@ -146,6 +146,12 @@ private final class NotificationTokens: @unchecked Sendable {
+@@ -68,7 +68,9 @@ private final class NotificationTokens: @unchecked Sendable {
+     private let graph = AVAudioEngine()
+     private let node: AVAudioSourceNode
+     private var sequence: UInt64 = 0
+-    private var captureLoads: SessionCaptureLoads?
++    private var captureLoads = SessionCaptureLoads()
++    private var captureConsumed: UInt64 = 0
++    private var captureLastFrame: UInt64 = 0
+     private var captureRuntime: SessionCaptureRuntime?
+     private var captureTask: Task<Void, Error>?
+     private var captureFailure: String?
+@@ -140,36 +142,71 @@ private final class NotificationTokens: @unchecked Sendable {
+     // unavailable until Apple and storage/service acceptance is complete.
+     public func prepareSessionCapture(journal: SessionEventJournal, libraryIdentity: String) throws {
+         guard captureRuntime == nil, captureTask == nil, captureFailure == nil,
+-              !libraryIdentity.isEmpty, !running else { throw AudioFailure("Capture requires a fresh stopped engine") }
+-        captureLoads = SessionCaptureLoads()
++              !libraryIdentity.isEmpty else { throw AudioFailure("Capture epoch unavailable. Reopen the app before another capture.") }
++        for deck in 0..<4 {
++            let token = mdj_deck(handle.raw, Int32(deck)).load
++            guard token == 0 || captureLoads.resolve(deck: deck, token: token) != nil else { throw AudioFailure("Reload imported tracks from the library before capture") }
++        }
+         captureRuntime = SessionCaptureRuntime(journal: journal, libraryIdentity: libraryIdentity)
          // Deliberately OFF. Candidate compiles host ownership without collecting.
          mdj_capture_enable(handle.raw, false)
      }
@@ -436,8 +643,212 @@ index fd38fbf0..37217fe2 100644
 +        mdj_capture_enable(handle.raw, true)
 +    }
      public var sessionCaptureIsPrepared: Bool { captureRuntime != nil }
-     public func stopSessionCapture(incomplete: Bool = true) {
-         mdj_capture_enable(handle.raw, false)
+-    public func stopSessionCapture(incomplete: Bool = true) {
+-        mdj_capture_enable(handle.raw, false)
+-        let prior = captureTask; captureTask = nil
+-        guard let runtime = captureRuntime else { return }
++    @discardableResult public func stopSessionCapture(incomplete: Bool = true) -> Task<Void, Never>? {
++        let token = mdj_capture_request_stop(handle.raw)
++        let prior = captureTask
++        guard let runtime = captureRuntime else { return nil }
+         captureRuntime = nil
+-        let at = Date()
+-        // This close task is the barrier for this engine epoch; no rearm exists.
+-        captureFailure = "Capture epoch ended. Reopen the audio engine before another capture."
+-        Task { [weak self] in
++        captureFailure = "Capture epoch ended. Reopen the app before another capture."
++        let engine = handle
++        return Task { [self] in
++            var gap = incomplete
+             do {
+-                _ = try? await prior?.value
+-                try await runtime.stop(at: at, incomplete: incomplete)
++                try await prior?.value
++                let deadline = Date().addingTimeInterval(1)
++                var ack = MDJCaptureStop()
++                while true {
++                    let segments = try SessionCaptureDrain.read(engine: engine.raw, loads: captureLoads)
++                    for segment in segments {
++                        try await runtime.observe(segment, wallTime: Date())
++                        captureConsumed += 1; captureLastFrame = segment.endFrame
++                    }
++                    let state = token == 0 ? -1 : mdj_capture_stop_poll(engine.raw, token, &ack)
++                    if state == 1 {
++                        // Poll only after draining, then drain once more if an in-flight
++                        // callback committed between the drain and acknowledgment.
++                        if captureConsumed == ack.published {
++                            gap = gap || ack.gap || captureLastFrame != ack.finalFrame
++                            break
++                        }
++                    } else if state < 0 { gap = true; break }
++                    if Date() >= deadline { gap = true; break }
++                    try await Task.sleep(for: .milliseconds(5))
++                }
++                try await runtime.stop(at: Date(), incomplete: gap)
++                if gap { onCaptureFailure?("Session evidence is incomplete") }
++            } catch {
++                try? await runtime.stop(at: Date(), incomplete: true)
++                onCaptureFailure?("Session evidence is incomplete: \(error.localizedDescription)")
+             }
+-            catch { self?.onCaptureFailure?("Session evidence is incomplete: \(error.localizedDescription)") }
+         }
+     }
+     /// Drain is called only by a future single-consumer owner, never UI polling.
+     public func drainPreparedSessionCapture() async throws {
+-        guard captureTask == nil, let runtime = captureRuntime, let loads = captureLoads else { return }
++        guard captureTask == nil, let runtime = captureRuntime else { return }
++        let loads = captureLoads
+         do {
+             let segments = try SessionCaptureDrain.read(engine: handle.raw, loads: loads)
+             let work = Task {
+                 for segment in segments { try await runtime.observe(segment, wallTime: Date()) }
++                self.captureConsumed += UInt64(segments.count)
++                if let last = segments.last { self.captureLastFrame = last.endFrame }
+             }
+             captureTask = work
+             defer { captureTask = nil }
+@@ -204,13 +241,14 @@ private final class NotificationTokens: @unchecked Sendable {
+         try start()
+         sequence += 1
+         let load = sequence, engine = handle
+-        if captureRuntime != nil {
+-            guard let libraryTrackID else {
++        if let libraryTrackID {
++            do { try captureLoads.register(deck: deck, token: load, trackID: libraryTrackID) }
++            catch { stopSessionCapture(incomplete: true); throw error }
++        } else if captureRuntime != nil {
++            do {
+                 stopSessionCapture(incomplete: true)
+                 throw AudioFailure("Imported audio has no library identity for session capture")
+             }
+-            do { try captureLoads?.register(deck: deck, token: load, trackID: libraryTrackID) }
+-            catch { stopSessionCapture(incomplete: true); throw error }
+         }
+         guard mdj_prepare(engine.raw, Int32(deck), load) != 0 else { throw AudioFailure("Audio command queue is full") }
+         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Double, Error>) in
+diff --git a/ios/Packages/ManadjAudio/Tests/CaptureStopFenceTest.cpp b/ios/Packages/ManadjAudio/Tests/CaptureStopFenceTest.cpp
+new file mode 100644
+index 00000000..b1b3a2fe
+--- /dev/null
++++ b/ios/Packages/ManadjAudio/Tests/CaptureStopFenceTest.cpp
+@@ -0,0 +1,88 @@
++#include "CEngine.h"
++#include <atomic>
++#include <cassert>
++#include <chrono>
++#include <cstdio>
++#include <thread>
++#include <vector>
++using namespace std::chrono_literals;
++static void render(MDJEngine e, int frames) { std::vector<float> o(frames * 2 + 2); mdj_render(e, o.data(), frames, 2); }
++
++static void ordered_final_segment() {
++    auto e = mdj_create(48000); assert(e);
++    MDJCaptureStop stop{};
++    assert(mdj_capture_request_stop(e) == 0);      // never armed: no token, nothing to fence
++    mdj_capture_enable(e, true);
++    render(e, 96); render(e, 96);
++    auto t = mdj_capture_request_stop(e);
++    assert(t == 1 && mdj_capture_request_stop(e) == t); // monotonic nonzero, idempotent
++    assert(mdj_capture_stop_poll(e, t, &stop) == 0);    // nonblocking pending until render observes it
++    assert(mdj_capture_stop_poll(e, 0, &stop) == -1 && mdj_capture_stop_poll(e, t + 1, &stop) == -1);
++    MDJCaptureSnapshot s{};
++    assert(!mdj_capture_snapshot(e, &s));           // pending stop gates live snapshot
++    render(e, 96);                                  // stop was already requested: this call acks at entry and publishes nothing
++    assert(mdj_capture_stop_poll(e, t, &stop) == 1);
++    assert(stop.token == t && !stop.gap && stop.published == 2 && stop.remaining == 2 && stop.finalFrame == 192);
++    uint64_t last = 0; int n = 0;
++    while (mdj_capture_pop(e, &s) == 1) { assert(s.frame > last); last = s.frame; ++n; }
++    assert(n == 2 && last == stop.finalFrame);
++    render(e, 96); render(e, 0);                    // no publication after ack
++    assert(mdj_capture_pop(e, &s) == 0 && !mdj_capture_snapshot(e, &s));
++    mdj_capture_enable(e, true); render(e, 96);     // epoch is never re-armed
++    assert(mdj_capture_pop(e, &s) == 0);
++    assert(mdj_capture_request_stop(e) == t);
++    mdj_destroy(e);
++}
++
++static void zero_frame_and_mid_call_ack() {
++    auto e = mdj_create(48000);
++    mdj_capture_enable(e, true);
++    auto t = mdj_capture_request_stop(e);
++    MDJCaptureStop stop{};
++    render(e, 0);                                   // a callback that renders nothing still acks
++    assert(mdj_capture_stop_poll(e, t, &stop) == 1 && stop.published == 0 && stop.finalFrame == 0 && stop.remaining == 0);
++    mdj_destroy(e);
++}
++
++static void concurrent_stop() {
++    for (int round = 0; round < 50; ++round) {
++        auto e = mdj_create(48000);
++        mdj_capture_enable(e, true);
++        std::atomic<bool> quit{false};
++        std::thread audio([&] { while (!quit) { render(e, 64); std::this_thread::sleep_for(20us); } });
++        std::vector<uint64_t> frames; std::atomic<bool> drain{true}; std::atomic<int> failed{0};
++        std::thread consumer([&] {
++            MDJCaptureSnapshot s{};
++            while (drain) { int r = mdj_capture_pop(e, &s); if (r == 1) frames.push_back(s.frame); else if (r < 0) { failed = 1; break; } else std::this_thread::sleep_for(10us); }
++        });
++        std::this_thread::sleep_for(std::chrono::microseconds(200 + round * 37));
++        auto t = mdj_capture_request_stop(e); assert(t != 0);
++        MDJCaptureStop stop{};
++        while (mdj_capture_stop_poll(e, t, &stop) == 0) std::this_thread::sleep_for(5us);
++        std::this_thread::sleep_for(3ms);           // audio thread keeps rendering after the ack
++        drain = false; consumer.join(); quit = true; audio.join();
++        MDJCaptureSnapshot s{};
++        while (!failed && mdj_capture_pop(e, &s) == 1) frames.push_back(s.frame);
++        assert(!failed && !stop.gap);
++        assert(frames.size() == stop.published && !frames.empty() ? frames.back() == stop.finalFrame : stop.published == 0);
++        for (size_t i = 1; i < frames.size(); ++i) assert(frames[i] > frames[i - 1]);
++        mdj_destroy(e);
++    }
++}
++
++static void overflow_preserved() {
++    auto e = mdj_create(48000);
++    mdj_capture_enable(e, true);
++    for (int i = 0; i < 129; ++i) render(e, 96);
++    auto t = mdj_capture_request_stop(e);
++    render(e, 96);
++    MDJCaptureStop stop{};
++    assert(mdj_capture_stop_poll(e, t, &stop) == 1 && stop.gap);
++    MDJCaptureSnapshot s{};
++    assert(mdj_capture_pop(e, &s) == -1);           // gap stays latched; no reset to hide it
++    mdj_capture_enable(e, true); render(e, 96);
++    assert(mdj_capture_pop(e, &s) == -1);
++    mdj_destroy(e);
++}
++
++int main() { ordered_final_segment(); zero_frame_and_mid_call_ack(); concurrent_stop(); overflow_preserved(); puts("capture stop fence OK"); }
+diff --git a/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCapturePipelineTests.swift b/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCapturePipelineTests.swift
+index 748b816c..b3366ee6 100644
+--- a/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCapturePipelineTests.swift
++++ b/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCapturePipelineTests.swift
+@@ -35,7 +35,23 @@ final class SessionCapturePipelineTests: XCTestCase {
+             XCTAssertEqual(mdj_capture_pop(engine, &snapshot), 0)
+         }
+         XCTAssertGreaterThan(maximum, 0.01)
+-        try await runtime.stop(at: start.addingTimeInterval(1), incomplete: false)
++        // Leave a final rendered segment queued when stop is requested. The
++        // callback acknowledges only after committing it, then publishes no more.
++        render()
++        let stopToken = mdj_capture_request_stop(engine)
++        var fence = MDJCaptureStop()
++        XCTAssertEqual(mdj_capture_stop_poll(engine, stopToken, &fence), 0)
++        render()
++        XCTAssertEqual(mdj_capture_stop_poll(engine, stopToken, &fence), 1)
++        XCTAssertEqual(fence.published, 101); XCTAssertEqual(fence.remaining, 1)
++        XCTAssertFalse(fence.gap)
++        var lastSnapshot = MDJCaptureSnapshot()
++        XCTAssertEqual(mdj_capture_pop(engine, &lastSnapshot), 1)
++        XCTAssertEqual(lastSnapshot.frame, fence.finalFrame)
++        try await runtime.observe(SessionCaptureAdapter.convert(lastSnapshot) { deck, token in deck == 0 && token == 7 ? 42 : nil }, wallTime: start.addingTimeInterval(1))
++        XCTAssertEqual(mdj_capture_pop(engine, &lastSnapshot), 0)
++        render(); XCTAssertEqual(mdj_capture_pop(engine, &lastSnapshot), 0)
++        try await runtime.stop(at: start.addingTimeInterval(1.01), incomplete: false)
+         let reopened = try SessionEventJournal(file: file), saved = await reopened.all()
+         XCTAssertEqual(saved.count, 1); XCTAssertFalse(saved[0].incomplete)
+         XCTAssertEqual(saved[0].libraryIdentity, "generated-pipeline")
 diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataReplica.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataReplica.swift
 index 0cd2eb96..bd0ba37e 100644
 --- a/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataReplica.swift
