@@ -200,9 +200,13 @@ final class WorkspaceUITests: XCTestCase {
         for _ in 0..<16 {
             let bounds = panel.frame, target = pair.frame
             if pair.isHittable && target.minY >= bounds.minY - 1 && target.maxY <= bounds.maxY + 1 { break }
-            let movingUp = target.maxY > bounds.maxY + 1
-            let from = panel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: movingUp ? 0.8 : 0.2))
-            let to = panel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: movingUp ? 0.35 : 0.65))
+            let error = target.midY - bounds.midY
+            let distance = min(28.0, max(10.0, abs(error)))
+            let movingUp = error > 0
+            let startY = movingUp ? 0.8 : 0.2
+            let endY = startY + (movingUp ? -distance : distance) / bounds.height
+            let from = panel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
+            let to = panel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY))
             from.press(forDuration: 0.15, thenDragTo: to)
         }
         XCTAssertTrue(pair.isHittable, "Pair action must remain reachable inside bounded Sync scroll")
