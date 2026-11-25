@@ -9,10 +9,12 @@ export function CueWalkButton({
   direction,
   className,
   kbd,
+  title,
 }: {
   direction: 'prev' | 'next';
   className?: string;
   kbd?: ReactNode;
+  title?: string;
 }) {
   const { loadedTrack } = useDeck();
   const actions = useHotCueActions(loadedTrack?.id ?? null);
@@ -25,9 +27,9 @@ export function CueWalkButton({
       disabled={disabled}
       onClick={() => actions.walk?.(direction)}
       title={
-        direction === 'prev'
+        title ?? (direction === 'prev'
           ? 'Previous Hot Cue or track start; also moves Cue'
-          : 'Next Hot Cue; also moves Cue'
+          : 'Next Hot Cue; also moves Cue')
       }
     >
       {direction === 'prev' ? '|◀' : '▶|'}
@@ -37,11 +39,11 @@ export function CueWalkButton({
 }
 
 /** The side-by-side pair (Performance transport column). */
-export function CueWalkButtons({ prevKbd, nextKbd }: { prevKbd?: ReactNode; nextKbd?: ReactNode }) {
+export function CueWalkButtons({ prevKbd, nextKbd, prevTitle, nextTitle }: { prevKbd?: ReactNode; nextKbd?: ReactNode; prevTitle?: string; nextTitle?: string }) {
   return (
     <div className="deck-cuewalk">
-      <CueWalkButton direction="prev" kbd={prevKbd} />
-      <CueWalkButton direction="next" kbd={nextKbd} />
+      <CueWalkButton direction="prev" kbd={prevKbd} title={prevTitle} />
+      <CueWalkButton direction="next" kbd={nextKbd} title={nextTitle} />
     </div>
   );
 }
