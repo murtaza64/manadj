@@ -100,10 +100,10 @@ struct WorkspaceView: View {
             let deckHeight: CGFloat = compact ? min(316, max(284, availableHeight - infoHeight - 36 - gap * 5 - mixerFloor - 103)) : 360
             // Budget real row heights rather than letting the deck's minimum
             // overflow the viewport. Only waveform height yields on standard phones.
-            let waveHeight: CGFloat = compact ? max(36, min(103, availableHeight - infoHeight - deckHeight - 36 - gap * 5 - mixerFloor)) : 135
+            let waveHeight: CGFloat = compact ? (availableHeight >= 720 ? 103 : max(36, min(103, availableHeight - infoHeight - deckHeight - 36 - gap * 5 - mixerFloor))) : 135
             VStack(spacing: gap) {
                 HStack(spacing: 10) { deckInfo(0); deckInfo(1) }.frame(height: browsing && keyboardOpen ? 36 : infoHeight)
-                if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: waveHeight) }
+                if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: waveHeight).fixedSize(horizontal: false, vertical: true).layoutPriority(1) }
                 ZStack(alignment: .bottom) {
                     if !settings && !browsing { VStack(spacing: gap) {
                         mixer.frame(maxHeight: .infinity)
