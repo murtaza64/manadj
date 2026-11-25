@@ -15,9 +15,9 @@ import { validatePart } from './part.mjs';
 // admitted call debits first and persists; a call rejected after admission
 // (changed-manifest / changed-part immutable 409) rolls back with its change
 // and consumes nothing. Per snapshot: begin 1 + begin retry 1 + one per PUT
-// + index-0 retry 1 + commit 1 + commit retry 1 + delete start/finish 2.
+// + index-0 retry 1 + commit 1 + commit retry 1 + two ledger debits per bounded eight-part delete batch.
 export function plannedWrites(snapshots, parts) {
-  return snapshots * (parts + 7);
+  return snapshots * (parts + 5 + 2 * Math.ceil(parts / 8));
 }
 // Preflight headroom on top of the exact plan, covering arithmetic drift
 // against live counters. Cleanup deletes for created snapshots are already
@@ -44,11 +44,26 @@ export async function runCheck({ baseUrl = '', token = null, fetchImpl = fetch, 
       throw new Error(`${method} ${path} -> ${response.status} ${code || text.slice(0, 80)} (CPU/resource failures show as 5xx here)`);
     }
     let value = null; try { value = JSON.parse(text); } catch { /* part bodies */ }
-    return { value, text, ms, etag: response.headers.get('etag') };
+    return { value, text, ms, status: response.status, etag: response.headers.get('etag') };
+  }
+  async function remove(id) {
+    let next = -1;
+    for (let attempt = 0; attempt < 33; attempt++) {
+      const { value, status } = await call(`/v1/snapshots/${id}`, { method: 'DELETE', expect: [200, 202] });
+      if (value?.snapshotId !== id) throw new Error('delete receipt id mismatch');
+      if (status === 200 && value.deleted === true) return value;
+      if (status !== 202 || value.deleted !== false || value.state !== 'deleting' ||
+          !Number.isSafeInteger(value.next) || value.next <= next || value.next < 1 ||
+          !Number.isSafeInteger(value.parts) || value.parts > 256 || value.next >= value.parts) {
+        throw new Error('delete progress invalid');
+      }
+      next = value.next;
+    }
+    throw new Error('delete progress exhausted');
   }
   async function cleanup() {
     for (const id of created) {
-      try { await call(`/v1/snapshots/${id}`, { method: 'DELETE', expect: [200] }); }
+      try { await remove(id); }
       catch { log(`cleanup: ${id} may remain reserved; delete it from the app or rerun after reset`); }
     }
     created.length = 0;
@@ -146,8 +161,8 @@ export async function runCheck({ baseUrl = '', token = null, fetchImpl = fetch, 
     const list = await call('/v1/snapshots');
     if (list.value.snapshots.length !== created.length) await fail('stored list does not match created snapshots');
     for (const id of created) {
-      const del = await call(`/v1/snapshots/${id}`, { method: 'DELETE' });
-      if (del.value?.deleted !== true) await fail(`deletion of ${id} did not confirm`);
+      const del = await remove(id);
+      if (del.deleted !== true) await fail(`deletion of ${id} did not confirm`);
       await call(`/v1/snapshots/${id}`, { expect: [404] });
     }
     created.length = 0;

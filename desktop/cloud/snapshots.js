@@ -18,7 +18,15 @@ async function listSnapshots(connection) {
 }
 async function deleteSnapshot(connection, snapshotId) {
   if (!ID.test(snapshotId || '')) fail('cloud_request_invalid');
-  const value = await connection.authenticated(`/v1/snapshots/${snapshotId}`, { method: 'DELETE' });
+  let value, next = -1;
+  for (let attempt = 0; attempt < 33; attempt++) {
+    value = await connection.authenticated(`/v1/snapshots/${snapshotId}`, { method: 'DELETE' });
+    if (value?.deleted === true) break;
+    if (!value || value.snapshotId !== snapshotId || value.deleted !== false || value.state !== 'deleting' ||
+        !integer(value.parts, 1, 256) || !integer(value.bytes, 1, 64 * 1024 * 1024) ||
+        !integer(value.next, 1, value.parts - 1) || value.next <= next) fail('cloud_response_invalid');
+    next = value.next;
+  }
   if (!value || typeof value !== 'object' || value.snapshotId !== snapshotId || value.deleted !== true ||
       !integer(value.parts, 0, 256) || !integer(value.bytes, 0, 64 * 1024 * 1024)) fail('cloud_response_invalid');
   // Independent readback: the deleted snapshot must be absent from the

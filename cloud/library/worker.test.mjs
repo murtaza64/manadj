@@ -397,3 +397,135 @@ test('status usage reads a rolled day as zero without mutating the stored counte
   assert.equal(stored.day, '2026-11-21');
   assert.equal(stored.writes, 500);
 });
+
+test('256-part deletion is bounded, persistent, quota-counted and releases only after final absence', async () => {
+  const f = fixture(), values = Array.from({ length: 256 }, (_, i) => part(String(i)));
+  await complete(f, values);
+  const before = (await new Ledger(f.bucket, 'synthetic-owner', NOW).load()).state.writes;
+  for (let batch = 0; batch < 32; batch++) {
+    f.bucket.calls.length = 0;
+    const r = await f.call(`/v1/snapshots/${ID}`, 'DELETE'), v = await r.json();
+    assert.equal(r.status, batch === 31 ? 200 : 202);
+    assert.equal(v.deleted, batch === 31);
+    assert.equal(f.bucket.calls.filter(([op]) => op === 'delete').length, 8);
+    assert.equal(f.bucket.calls.filter(([op, key]) => op === 'get' && key !== CONTROL_KEY).length, 8);
+    const { state } = await new Ledger(f.bucket, 'synthetic-owner', NOW).load();
+    assert.equal(state.writes, before + 2 * (batch + 1));
+    if (batch < 31) {
+      assert.equal(v.next, 8 * (batch + 1));
+      assert.equal(state.snapshots[0].deleteNext, v.next);
+      assert.equal(state.snapshots[0].total, values.reduce((n, x) => n + bytes(x).length, 0));
+      assert.equal((await f.call(`/v1/snapshots/${ID}`)).status, 409);
+    } else assert.deepEqual(state.snapshots, []);
+  }
+  assert.equal([...f.bucket.objects.keys()].filter(k => k !== CONTROL_KEY).length, 0);
+});
+
+test('failed batch keeps verified cursor, and a fresh handler resumes without redoing earlier batches', async () => {
+  const f = fixture(), values = Array.from({ length: 17 }, () => part()); await complete(f, values);
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 202);
+  f.bucket.hook = async (key, _value, options) => { if (options?.delete && key === partKey(ID, 10)) throw new Error('interrupted'); };
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 503);
+  let state = (await new Ledger(f.bucket, 'synthetic-owner', NOW).load()).state;
+  assert.equal(state.snapshots[0].deleteNext, 8);
+  f.bucket.hook = null; f.bucket.calls.length = 0;
+  const fresh = fixture(); fresh.env.LIBRARY_BUCKET = f.bucket;
+  assert.equal((await fresh.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 202);
+  assert.ok(!f.bucket.calls.some(([op, key]) => op === 'delete' && key === partKey(ID, 0)));
+  assert.equal((await fresh.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 200);
+});
+
+test('concurrent DELETE requests cannot regress progress or skip unverified parts', async () => {
+  const f = fixture(), values = Array.from({ length: 17 }, () => part()); await complete(f, values);
+  const rs = await Promise.all([f.call(`/v1/snapshots/${ID}`, 'DELETE'), f.call(`/v1/snapshots/${ID}`, 'DELETE')]);
+  assert.ok(rs.every(r => r.status === 202 || r.status === 409));
+  let state = (await new Ledger(f.bucket, 'synthetic-owner', NOW).load()).state;
+  assert.ok(state.snapshots[0].deleteNext >= 8 && state.snapshots[0].deleteNext <= 16);
+  assert.ok(await f.bucket.get(partKey(ID, 16)), 'last part still reserved and untouched');
+  for (let i = 0; i < 3; i++) {
+    const r = await f.call(`/v1/snapshots/${ID}`, 'DELETE');
+    if (r.status === 200) break;
+    assert.equal(r.status, 202);
+  }
+  state = (await new Ledger(f.bucket, 'synthetic-owner', NOW).load()).state;
+  assert.deepEqual(state.snapshots, []);
+});
+
+test('daily admission exhaustion never skips the unfinished deletion or releases its reservation', async () => {
+  const f = fixture(); await complete(f, Array.from({ length: 9 }, () => part()));
+  const ledger = new Ledger(f.bucket, 'synthetic-owner', NOW);
+  await ledger.change(s => { s.writes = LIMITS.writes - 2; });
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 202);
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 429);
+  const state = (await ledger.load()).state;
+  assert.equal(state.snapshots[0].deleteNext, 8); assert.equal(state.snapshots[0].deleting, true);
+  assert.ok(await f.bucket.get(partKey(ID, 8)));
+});
+
+test('a lost progress write rechecks the same batch before advancing', async () => {
+  const f = fixture(); await complete(f, Array.from({ length: 9 }, () => part()));
+  let armed = true;
+  f.bucket.hook = async (key, raw, options) => {
+    if (armed && key === CONTROL_KEY && raw && !options?.delete) {
+      const state = JSON.parse(new TextDecoder().decode(raw));
+      if (state.snapshots[0]?.deleteNext === 8) { armed = false; throw new Error('progress write failed'); }
+    }
+  };
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 503);
+  assert.equal((await new Ledger(f.bucket, 'synthetic-owner', NOW).load()).state.snapshots[0].deleteNext, undefined);
+  f.bucket.hook = null; f.bucket.calls.length = 0;
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 202);
+  assert.ok(f.bucket.calls.some(([op, key]) => op === 'delete' && key === partKey(ID, 0)));
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 200);
+});
+
+test('storage operations have bounded parallelism and at most two delete/readback waves per batch', async () => {
+  const f = fixture(); await complete(f, Array.from({ length: 17 }, () => part()));
+  let inflight = 0, peak = 0, operations = 0;
+  for (const name of ['get', 'delete']) {
+    const original = f.bucket[name].bind(f.bucket);
+    f.bucket[name] = async key => {
+      if (key === CONTROL_KEY) return original(key);
+      inflight++; peak = Math.max(peak, inflight); operations++;
+      try { await new Promise(resolve => setTimeout(resolve, 2)); return await original(key); }
+      finally { inflight--; }
+    };
+  }
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 202);
+  assert.equal(operations, 16); assert.equal(peak, 4); assert.equal(inflight, 0);
+  assert.ok(await f.bucket.get(partKey(ID, 8)));
+});
+
+
+test('legacy tombstones without a cursor resume from zero and malformed cursor fails closed', async () => {
+  const f = fixture(); await complete(f, Array.from({ length: 9 }, () => part()));
+  const ledger = new Ledger(f.bucket, 'synthetic-owner', NOW);
+  await ledger.startDelete(ID);
+  assert.equal((await ledger.load()).state.snapshots[0].deleteNext, undefined);
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 202);
+  assert.equal((await ledger.load()).state.snapshots[0].deleteNext, 8);
+  const state = (await ledger.load()).state;
+  for (const invalid of [-1, 10, 1.5, '8']) {
+    const copy = structuredClone(state); copy.snapshots[0].deleteNext = invalid;
+    assert.throws(() => ledger.validate(copy));
+  }
+  const copy = structuredClone(state); copy.snapshots[0].deleting = false;
+  assert.throws(() => ledger.validate(copy));
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 200);
+});
+
+test('positive absence readback is required before advancing deletion cursor', async () => {
+  const f = fixture(); await complete(f, Array.from({ length: 9 }, () => part()));
+  const original = f.bucket.delete.bind(f.bucket);
+  f.bucket.delete = async key => key === partKey(ID, 3) ? undefined : original(key);
+  const result = await f.call(`/v1/snapshots/${ID}`, 'DELETE');
+  assert.equal(result.status, 503);
+  const state = (await new Ledger(f.bucket, 'synthetic-owner', NOW).load()).state;
+  assert.equal(state.snapshots[0].deleteNext, undefined);
+  assert.equal(state.snapshots[0].deleting, true);
+  assert.ok(await f.bucket.get(partKey(ID, 3)));
+  assert.ok(await f.bucket.get(partKey(ID, 8)));
+  f.bucket.delete = original;
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 202);
+  assert.equal((await f.call(`/v1/snapshots/${ID}`, 'DELETE')).status, 200);
+});

@@ -42,3 +42,20 @@ test('deletion fails visibly when the id survives readback or the receipt mismat
     await assert.rejects(deleteSnapshot(connection([receipt]), ID), { code: 'cloud_response_invalid' });
   await assert.rejects(deleteSnapshot(connection([]), 'not-a-uuid'), { code: 'cloud_request_invalid' });
 });
+
+test('deletion follows bounded progress before confirming final independent absence', async () => {
+  const progress = next => ({ snapshotId: ID, deleted: false, state: 'deleting', next, parts: 17, bytes: 1700 });
+  const c = connection([progress(8), progress(16), { snapshotId: ID, deleted: true, parts: 17, bytes: 1700 }, { snapshots: [] }]);
+  const result = await deleteSnapshot(c, ID);
+  assert.equal(result.deleted.parts, 17);
+  assert.deepEqual(c.calls.map(x => x[1]), ['DELETE', 'DELETE', 'DELETE', 'GET']);
+});
+
+test('deletion stops on stalled, regressed, excess or mismatched progress without an unbounded retry', async () => {
+  const p = { snapshotId: ID, deleted: false, state: 'deleting', next: 8, parts: 17, bytes: 1700 };
+  for (const bad of [p, { ...p, next: 7 }, { ...p, next: 17 }, { ...p, snapshotId: 'other' }, { ...p, parts: 257 }]) {
+    const c = connection([p, bad]);
+    await assert.rejects(deleteSnapshot(c, ID), { code: 'cloud_response_invalid' });
+    assert.equal(c.calls.length, 2);
+  }
+});

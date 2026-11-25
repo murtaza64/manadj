@@ -99,9 +99,16 @@ wire DTO, not the earlier gzip offline-export artifact.
    The ledger tombstones the snapshot first (state `deleting`, all other
    operations on it rejected, retry of begin with the same ID rejected), then
    every part object is deleted and verified absent by readback, and only then
-   is the ledger entry removed, releasing its slot and reserved bytes. An
-   interrupted deletion stays resumable: a repeated DELETE re-runs the missing
-   steps idempotently. Deleting an absent ID returns a plain confirmation, so
+   is the ledger entry removed, releasing its slot and reserved bytes.
+   Each request removes at most eight parts, with at most four concurrent
+   delete/absence-readback chains. A confirmed partial batch persists a cursor
+   and returns HTTP 202 `{snapshotId,deleted:false,state:"deleting",next,parts,bytes}`.
+   The client repeats DELETE only while progress strictly advances (at most 33
+   calls), and accepts success only on final 200 plus independent list absence.
+   An interrupted batch leaves the earlier cursor unchanged; a later explicit
+   retry safely redoes that batch. Existing tombstones without a cursor start
+   at zero. Every batch costs two write admissions (start + progress/finalize).
+   No object-list, direct-bucket or quota-reset bypass is used. Deleting an absent ID returns a plain confirmation, so
    an ambiguous earlier success can be retried safely. Deletion works on
    committed snapshots and incomplete reservations and consumes the same daily
    write admission as other mutations.
@@ -184,8 +191,8 @@ Write admission is budgeted before anything is stored. Verified against the
 ledger, an admitted call debits once and persists; a call rejected after
 admission (the changed-manifest and changed-part immutable 409 probes) rolls
 back with its change and consumes nothing, so a run costs exactly
-`snapshots x (parts + 7)` writes: 263 for the worst single snapshot and 150
-for the full-ledger run, 413 total against the 512/UTC-day budget. `/v1/status`
+`snapshots x (parts + 5 + 2 x ceil(parts / 8))` writes: 325 for the worst
+single snapshot and 150 for the full-ledger run, 475 total against the 512/UTC-day budget. `/v1/status`
 reports live `usage` counters; the check fails before any write unless the
 remaining day budget covers the plan plus reserve. Any failure after a
 reservation triggers best-effort deletion of exactly the snapshots this run

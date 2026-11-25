@@ -1,5 +1,6 @@
 import { bytes, LIMITS, SCHEMA, reject, validID, validHash, integer, exact } from './contracts.mjs';
 export const CONTROL_KEY = 'library-v1/control.json';
+export const DELETE_BATCH_PARTS = 8;
 const dayString = now => new Date(now).toISOString().slice(0, 10);
 export class Ledger {
   constructor(bucket, owner, now = Date.now()) { this.bucket = bucket; this.owner = owner; this.day = dayString(now); }
@@ -18,7 +19,9 @@ export class Ledger {
         !Array.isArray(s.snapshots) || s.snapshots.length > LIMITS.snapshots) reject(503, 'control_invalid');
     let total = 0; const ids = new Set();
     for (const x of s.snapshots) {
-      if (!exact(x, ['id', 'manifestHash', 'total', 'createdAt', 'committed', 'deleting', 'parts']) || !validID(x.id) || ids.has(x.id) ||
+      const shape = ['id', 'manifestHash', 'total', 'createdAt', 'committed', 'deleting', 'parts'];
+      if (!(exact(x, shape) || exact(x, [...shape, 'deleteNext'])) ||
+          (Object.hasOwn(x, 'deleteNext') && (!x.deleting || !integer(x.deleteNext, 0, x.parts?.length ?? -1))) || !validID(x.id) || ids.has(x.id) ||
           !validHash(x.manifestHash) || !integer(x.total, 1, LIMITS.snapshotBytes) ||
           typeof x.createdAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(x.createdAt) || typeof x.committed !== 'boolean' ||
           typeof x.deleting !== 'boolean' ||
@@ -128,19 +131,27 @@ export class Ledger {
       this.debit(s, 'writes');
       const x = s.snapshots.find(x => x.id === id);
       if (!x) return { found: false, parts: 0, bytes: 0 };
-      const summary = { found: true, parts: x.parts.length, bytes: x.total };
+      const summary = { found: true, parts: x.parts.length, bytes: x.total, next: x.deleteNext ?? 0 };
       x.deleting = true; return summary;
     });
   }
   // Phase two runs only after every part object is verified absent, so the
   // reservation bytes/slots are released last and a retry can always resume.
-  async finishDelete(id) {
+  async finishDelete(id, verifiedThrough) {
     return this.change(s => {
       this.debit(s, 'writes');
       const at = s.snapshots.findIndex(x => x.id === id);
       if (at < 0) return { found: false };
       if (!s.snapshots[at].deleting) reject(409, 'snapshot_delete_not_started');
-      s.snapshots.splice(at, 1); return { found: true };
+      const x = s.snapshots[at], next = x.deleteNext ?? 0;
+      if (!integer(verifiedThrough, next, Math.min(x.parts.length, next + DELETE_BATCH_PARTS))) {
+        // A concurrent delete may already have advanced farther. Never move
+        // the cursor backwards or release unverified parts.
+        if (!integer(verifiedThrough, 0, next)) reject(409, 'snapshot_delete_progress_invalid');
+      }
+      x.deleteNext = Math.max(next, verifiedThrough);
+      if (x.deleteNext < x.parts.length) return { found: true, deleted: false, next: x.deleteNext };
+      s.snapshots.splice(at, 1); return { found: true, deleted: true };
     });
   }
 }

@@ -1,5 +1,5 @@
 import { LIMITS, Failure, authorizeOwner, bytes, digest, reject, readJSON, validateManifest, validID, integer } from './contracts.mjs';
-import { Ledger, partKey } from './ledger.mjs';
+import { Ledger, partKey, DELETE_BATCH_PARTS } from './ledger.mjs';
 import { validatePart } from './part.mjs';
 import { CHECK_PAGE_HTML } from './check_page.mjs';
 import { CHECK_ASSETS } from './browser_sources.mjs';
@@ -68,11 +68,19 @@ export function createHandler({ authorize = authorizeOwner, clock = Date.now } =
           // 'deleting' state, never a readable snapshot with missing parts.
           const started = await ledger.startDelete(id);
           if (!started.found) return response({ snapshotId: id, deleted: true, parts: 0, bytes: 0 });
-          for (let part = 0; part < started.parts; part++) {
-            await env.LIBRARY_BUCKET.delete(partKey(id, part));
-            if (await env.LIBRARY_BUCKET.get(partKey(id, part))) reject(503, 'delete_readback_failed');
+          const end = Math.min(started.parts, started.next + DELETE_BATCH_PARTS);
+          // At most eight objects per request, four concurrent chains. Never
+          // acknowledge progress until all deletions have absence readback.
+          for (let first = started.next; first < end; first += 4) {
+            await Promise.all(Array.from({ length: Math.min(4, end - first) }, async (_, offset) => {
+              const key = partKey(id, first + offset);
+              await env.LIBRARY_BUCKET.delete(key);
+              if (await env.LIBRARY_BUCKET.get(key)) reject(503, 'delete_readback_failed');
+            }));
           }
-          await ledger.finishDelete(id);
+          const finished = await ledger.finishDelete(id, end);
+          if (finished.deleted === false) return response({ snapshotId: id, deleted: false,
+            state: 'deleting', next: finished.next, parts: started.parts, bytes: started.bytes }, 202);
           return response({ snapshotId: id, deleted: true, parts: started.parts, bytes: started.bytes });
         }
         if (request.method !== 'GET') reject(405, 'method_not_allowed');

@@ -42,9 +42,9 @@ test('origin pin accepts only exact Workers hostnames', () => {
 });
 
 test('planned writes match the exact ledger debit algorithm', () => {
-  assert.equal(plannedWrites(1, 256), 263);   // reviewed Run A worst shape
+  assert.equal(plannedWrites(1, 256), 325);   // reviewed Run A worst shape
   assert.equal(plannedWrites(10, 8), 150);    // reviewed Run B near-full ledger
-  assert.equal(plannedWrites(2, 256), 526);   // old shape, over the 512/day budget
+  assert.equal(plannedWrites(2, 256), 650);   // old shape, over the 512/day budget
   assert.equal(plannedWrites(2, 3), 20);
 });
 
@@ -129,4 +129,34 @@ test('a non-empty stored list is refused before any write', async () => {
     snapshots: 1, parts: 3, partBytes: 2048, log: quiet }), /not empty/);
   const control = await controlState(f.bucket);
   assert.equal(control.snapshots.length, 1, 'existing data untouched');
+});
+
+test('worst part count follows32 bounded delete batches and exact325write plan', async () => {
+  const f = fixture(); let deletions = 0, progress = 0;
+  const wrapped = async (url, init) => {
+    const r = await f.fetchImpl(url, init);
+    if (init?.method === 'DELETE') { deletions++; if (r.status === 202) progress++; }
+    return r;
+  };
+  const result = await runServiceCheck({ origin: ORIGIN, token: 'synthetic-check', fetchImpl: wrapped,
+    snapshots: 1, parts: 256, partBytes: 1024, log: quiet });
+  assert.equal(result.plannedWrites, 325); assert.equal(deletions, 32); assert.equal(progress, 31);
+  const state = await controlState(f.bucket); assert.equal(state.writes, 325); assert.deepEqual(state.snapshots, []);
+});
+
+test('progress must advance, and failure cleanup remains bounded and reports residue honestly', async () => {
+  const f = fixture(); let deletes = 0; const logs = [];
+  const wrapped = async (url, init) => {
+    if (init?.method === 'DELETE') {
+      deletes++;
+      const id = new URL(url).pathname.split('/').pop();
+      return Response.json({ snapshotId: id, deleted: false, state: 'deleting', next: 8, parts: 17, bytes: 1700 }, { status: 202 });
+    }
+    return f.fetchImpl(url, init);
+  };
+  await assert.rejects(runServiceCheck({ origin: ORIGIN, token: 'synthetic-check', fetchImpl: wrapped,
+    snapshots: 1, parts: 17, partBytes: 1024, log: line => logs.push(line) }), /delete progress invalid/);
+  assert.equal(deletes, 4, 'two stalled calls in main deletion and two in one cleanup attempt');
+  assert.ok(logs.some(x => x.includes('may remain reserved')));
+  assert.equal((await controlState(f.bucket)).snapshots.length, 1);
 });
