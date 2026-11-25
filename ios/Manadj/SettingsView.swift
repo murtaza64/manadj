@@ -35,6 +35,7 @@ struct SettingsView: View {
                         Button("SYNC") { model.sync() }.buttonStyle(FlatButtonStyle()).disabled(model.pairedOrigin == nil)
                     }
                 }
+                CloudSyncPanel(controller: model.cloudSync, tracks: model.snapshot?.tracks ?? [], importConfiguration: model.configureCloudSync)
                 Text(model.status).font(Ink.font(12)).foregroundStyle(Ink.muted)
                 Text("LAN sync uses the desktop's HTTP listener. Audio, library data and pairing credentials are not encrypted in transit on that connection. Use a trusted private network.").font(Ink.font(11)).foregroundStyle(Ink.warning)
                 if let progress = model.syncProgress {

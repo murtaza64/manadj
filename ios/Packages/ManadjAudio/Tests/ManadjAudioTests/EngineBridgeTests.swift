@@ -53,3 +53,22 @@ final class EngineBridgeTests: XCTestCase {
         XCTAssertFalse(mdj_record_start(engine, url.path))
     }
 }
+
+extension EngineBridgeTests {
+    func testSessionCaptureUsesAppliedFrameNotSubmissionReceipt() throws {
+        let engine = try XCTUnwrap(mdj_create(48_000)); defer { mdj_destroy(engine) }
+        var snap = MDJCaptureSnapshot()
+        XCTAssertFalse(mdj_capture_snapshot(engine, &snap))
+        mdj_capture_enable(engine, true)
+        XCTAssertNotEqual(mdj_submit(engine, MDJCrossfade, 0, -0.5, 0), 0)
+        XCTAssertFalse(mdj_capture_snapshot(engine, &snap))
+        var out = [Float](repeating: 0, count: 192)
+        out.withUnsafeMutableBufferPointer { mdj_render(engine, $0.baseAddress!, 96, 2) }
+        XCTAssertTrue(mdj_capture_snapshot(engine, &snap))
+        XCTAssertEqual(snap.frame, 96)
+        XCTAssertEqual(snap.sampleRate, 48_000)
+        XCTAssertEqual(snap.crossfade, -0.5)
+        mdj_capture_enable(engine, false)
+        XCTAssertFalse(mdj_capture_snapshot(engine, &snap))
+    }
+}

@@ -198,6 +198,10 @@ def prepare_snapshot(path: Path, *, timeout_seconds=15):
         db.execute("PRAGMA query_only=ON")
         db.execute("BEGIN")  # One consistent WAL-aware read transaction.
         existing = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND sql NOT LIKE 'CREATE VIRTUAL%'")}
+        # This old snapshot format has no continuous signed-log provenance.
+        # Do not flatten synced sessions into fresh local recording evidence.
+        if "continuous_sync_operations" in existing and db.execute("SELECT 1 FROM continuous_sync_operations LIMIT 1").fetchone():
+            fail("cloud_continuous_history_snapshot_not_supported")
         cols = {t: {r[1] for r in db.execute("PRAGMA table_info(" + quoted(t) + ")")} for t in FIELDS if t in existing}
         if not {"id", "title", "artist"} <= cols.get("tracks", set()):
             fail("cloud_library_schema_unrecognized")

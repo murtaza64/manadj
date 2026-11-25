@@ -7,11 +7,12 @@ let package = Package(
     name: "ManadjAudio",
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [.library(name: "ManadjAudio", targets: ["ManadjAudio"])],
+    dependencies: [.package(path: "../ManadjCore")],
     targets: [
         .target(name: "CEngine", publicHeadersPath: "include", cxxSettings: [
             .unsafeFlags(["-O3", "-I", sharedHeaders])
         ]),
-        .target(name: "ManadjAudio", dependencies: ["CEngine"]),
+        .target(name: "ManadjAudio", dependencies: ["CEngine", "ManadjCore"]),
         .testTarget(name: "ManadjAudioTests", dependencies: ["ManadjAudio", "CEngine"])
     ],
     cxxLanguageStandard: .cxx17

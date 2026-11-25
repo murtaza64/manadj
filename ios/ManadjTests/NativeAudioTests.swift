@@ -663,3 +663,57 @@ final class NativeAudioTests: XCTestCase {
     }
 
 }
+
+extension NativeAudioTests {
+    @MainActor func testSessionCaptureCandidateRemainsDisabledAndLifecycleCloses() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let journal = try SessionEventJournal(file: root.appendingPathComponent("manifest.json"))
+        let audio = try NativeAudio()
+        try audio.prepareSessionCapture(journal: journal, libraryIdentity: "generated-apple-host")
+        XCTAssertTrue(audio.sessionCaptureIsPrepared)
+        XCTAssertNil(audio.captureSnapshot(), "Preparing host ownership never enables capture")
+        try await audio.drainPreparedSessionCapture()
+        let sessions = await journal.all(); XCTAssertTrue(sessions.isEmpty)
+        audio.stopSessionCapture(incomplete: true)
+        XCTAssertFalse(audio.sessionCaptureIsPrepared)
+        XCTAssertThrowsError(try audio.prepareSessionCapture(journal: journal, libraryIdentity: "generated-apple-host"))
+    }
+
+    @MainActor func testPreparedCaptureStartsOnRunningEngineAndFencesCompleteClose() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("generated.wav")
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2))
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: format.settings)
+            let pcm = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 96000))
+            pcm.frameLength = 96000
+            let channels = try XCTUnwrap(pcm.floatChannelData)
+            for i in 0..<96000 { let v = Float(sin(Double(i) * .pi * 2 * 440 / 48000)) * 0.1; channels[0][i] = v; channels[1][i] = v }
+            try file.write(from: pcm)
+        }
+        let audio = try NativeAudio()
+        _ = try await audio.load(url, deck: 0, libraryTrackID: 42)
+        XCTAssertTrue(audio.running)
+        let journal = try SessionEventJournal(file: root.appendingPathComponent("journal.json"))
+        try audio.prepareSessionCapture(journal: journal, libraryIdentity: "generated-running-engine")
+        try audio.armPreparedSessionCapture()
+        XCTAssertTrue(audio.send(MDJPlay))
+        for _ in 0..<12 {
+            try await Task.sleep(for: .milliseconds(30))
+            try await audio.drainPreparedSessionCapture()
+        }
+        await audio.stopSessionCapture(incomplete: false)?.value
+        let saved = await journal.all()
+        XCTAssertEqual(saved.count, 1)
+        let session = try XCTUnwrap(saved.first)
+        XCTAssertFalse(session.incomplete)
+        XCTAssertNotNil(session.endedAt)
+        XCTAssertFalse(session.chunks.isEmpty)
+        XCTAssertFalse(audio.sessionCaptureIsPrepared)
+        XCTAssertThrowsError(try audio.prepareSessionCapture(journal: journal, libraryIdentity: "generated-running-engine"))
+    }
+
+}

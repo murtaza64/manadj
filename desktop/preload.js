@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("manadjLibraryCloud", {
   state: () => ipcRenderer.invoke("library-cloud:state"),
+  continuousStart: (group) => ipcRenderer.invoke("library-cloud:continuousStart", group),
+  continuousStop: () => ipcRenderer.invoke("library-cloud:continuousStop"),
   connect: () => ipcRenderer.invoke("library-cloud:connect"),
   resume: () => ipcRenderer.invoke("library-cloud:resume"),
   disconnect: () => ipcRenderer.invoke("library-cloud:disconnect"),

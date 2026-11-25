@@ -1,6 +1,21 @@
 import XCTest
 
 final class WorkspaceUITests: XCTestCase {
+    @MainActor func testPrivateCloudControlsDisabledAndVisible() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--cloud-sync-ui-fixture"]
+        app.launch()
+        let identity = app.buttons["DEVICE ID"]
+        XCTAssertTrue(identity.waitForExistence(timeout: 15))
+        XCTAssertTrue(identity.isHittable)
+        XCTAssertTrue(app.buttons["IMPORT GROUP"].isHittable)
+        XCTAssertTrue(app.buttons["SIGN IN"].isEnabled)
+        XCTAssertFalse(app.buttons["START"].isEnabled)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Owner sign-in available, personal data transport disabled"
+        shot.lifetime = .keepAlways; add(shot)
+    }
+
     @MainActor private func waitForReadyTransport(_ play: XCUIElement, app: XCUIApplication) {
         let ready = NSPredicate(format: "enabled == true AND hittable == true")
         let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: play)], timeout: 20)

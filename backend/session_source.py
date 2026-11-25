@@ -18,6 +18,8 @@ def deny_peer_write(session):
     if session is not None:
         from sqlalchemy.orm import object_session
 
+        from .continuous_sync.provenance import deny
+        deny(object_session(session), session.uuid)
         from .peer_sync.group_history import deny_group_uuid
         deny_group_uuid(object_session(session), session.uuid)
     if session is not None and session.peer_history is not None:
@@ -25,6 +27,8 @@ def deny_peer_write(session):
 
 
 def deny_peer_derivation(db, uuid):
+    from .continuous_sync.provenance import deny
+    deny(db, uuid)
     from .peer_sync.group_history import deny_group_uuid
     if uuid:
         deny_group_uuid(db, uuid)
@@ -48,6 +52,8 @@ def peer_detail(db, session):
 
 
 def session_events(db, session):
+    from .continuous_sync.provenance import deny
+    deny(db, session.uuid)
     from .peer_sync.group_history import deny_group_uuid
     deny_group_uuid(db, session.uuid)
     if session.peer_history is not None:
@@ -61,6 +67,8 @@ def replay_generation(session):
 
 
 def preview_source(db, uuid):
+    from .continuous_sync.provenance import deny
+    deny(db, uuid)
     from .peer_sync.group_history import deny_group_uuid
     deny_group_uuid(db, uuid)
     from .models import Session

@@ -72,7 +72,7 @@ public struct MetricLadder: Equatable, Sendable {
 /// A desktop Library Track as synced to the device. `id` is the desktop Track id.
 public struct LibraryTrack: Equatable, Sendable, Identifiable {
     public let id: Int
-    public let title: String
+    public var title: String
     public let artist: String?
     public let fileName: String
     public let bpm: Double?
@@ -84,7 +84,7 @@ public struct LibraryTrack: Equatable, Sendable, Identifiable {
     public let energy: Int?
     public let durationSecs: Double?
     public let dateAdded: Date?
-    public let mainCue: Double?
+    public var mainCue: Double?
     public let codec: String?
     public let fileSizeBytes: Int64?
     public let audioRev: String?
@@ -150,7 +150,7 @@ public struct Snapshot: Sendable {
     public let generatedAt: Date?
     public let categories: [TagCategory]
     public let tags: [LibraryTag]
-    public let tracks: [LibraryTrack]
+    public var tracks: [LibraryTrack]
     public let playlists: [Playlist]
     public let links: [(Int, Int)]
     public let transitions: [TransitionEdge]

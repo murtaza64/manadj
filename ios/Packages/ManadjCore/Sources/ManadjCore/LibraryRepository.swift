@@ -16,7 +16,167 @@ public actor LibraryRepository {
     public let recoveryWarning: String?
     private var snapshot: Snapshot?
     private var syncing = false
-    public init(root: URL) throws {
+    private var editJournal: LibraryEditJournal?
+    private var editBindings: [Int: UUID] = [:]
+    private var editTail: Task<Void, Error>?
+    private var editTailID = UUID()
+    private var editLibraryIdentity: String?
+    private var editReady = false
+    private let editWriter: @Sendable (Data, URL) throws -> Void
+    public private(set) var editRecoveryError: String?
+
+    /// Source revision here is the snapshot's revision plus exact file size/name,
+    /// not a content hash or proof of remote authorship. Missing evidence blocks.
+    private static func sourceRevision(_ track: LibraryTrack) -> String? {
+        guard let rev = track.audioRev, !rev.isEmpty, let bytes = track.fileSizeBytes, bytes > 0 else { return nil }
+        return "\(rev)|\(bytes)|\(track.fileName)"
+    }
+
+    public func prepareEdits(libraryIdentity: String, bindings: [Int: UUID]) async throws {
+        guard editJournal == nil, editTail == nil, !syncing,
+              Set(bindings.values).count == bindings.count,
+              bindings.keys.allSatisfy({ id in snapshot?.tracks.contains { $0.id == id && Self.sourceRevision($0) != nil } == true }) else {
+            throw LibraryEditJournalError.unavailableSource
+        }
+        editLibraryIdentity = libraryIdentity; editBindings = bindings
+        do {
+            let journal = try LibraryEditJournal(file: store.root.appendingPathComponent("continuous-edits.json"), libraryIdentity: libraryIdentity, writer: editWriter)
+            editBindings = bindings; editLibraryIdentity = libraryIdentity; editJournal = journal
+            let problems = await unresolvedEdits()
+            editRecoveryError = problems.isEmpty ? nil : "Some pending edits need source binding review; healthy tracks remain editable"
+            editReady = true
+        } catch {
+            editRecoveryError = "Edits unavailable; original journal retained: \(error)"
+            throw error
+        }
+    }
+
+    /// Serialization retains concurrent requests, including while audio sync is
+    /// awaiting network. Each request receives success only after durable commit.
+    public func editTrack(_ localID: Int, to value: LibraryEditValue, parents: [UUID]) async throws {
+        let previous = editTail
+        let token = UUID(); editTailID = token
+        let work = Task { [weak self] in
+            _ = try? await previous?.value
+            guard let self else { throw CancellationError() }
+            try await self.performEdit(localID, value: value, parents: parents)
+        }
+        editTail = work
+        defer { if editTailID == token { editTail = nil } }
+        try await work.value
+    }
+
+    private func performEdit(_ localID: Int, value: LibraryEditValue, parents: [UUID]) async throws {
+        // No trusted signed head ledger is wired yet. Do not label arbitrary
+        // caller UUIDs as validated causality; nonempty parents fail closed.
+        guard parents.isEmpty else { throw LibraryEditJournalError.invalid }
+        guard editReady, let journal = editJournal, let logical = editBindings[localID],
+              let track = snapshot?.tracks.first(where: { $0.id == localID }),
+              let revision = Self.sourceRevision(track) else { throw LibraryEditJournalError.unavailableSource }
+        let pending = await journal.pending()
+        guard pending.filter({ $0.logicalTrackID == logical }).allSatisfy({ $0.sourceRevision == revision }) else {
+            throw LibraryEditJournalError.identityMismatch
+        }
+        let base: LibraryEditValue = value.field == "title" ? .title(track.title) : .mainCue(track.mainCue)
+        let previous = LibraryEditJournal.project(pending, logicalTrackID: logical, base: base)
+        _ = try await journal.append(logicalTrackID: logical, oldValue: previous.value, newValue: value,
+            parents: parents, sourceRevision: revision)
+    }
+
+    /// Explicit non-destructive reopen after uncertain persistence, no restart.
+    public func reopenEdits() async throws {
+        let previous = editTail
+        let token = UUID(); editTailID = token
+        let work = Task { [weak self] in
+            _ = try? await previous?.value
+            guard let self else { throw CancellationError() }
+            try await self.performReopen()
+        }
+        editTail = work
+        defer { if editTailID == token { editTail = nil } }
+        try await work.value
+    }
+
+    private func performReopen() async throws {
+        guard let identity = editLibraryIdentity else { throw LibraryEditJournalError.invalid }
+        do {
+            let journal = try LibraryEditJournal(file: store.root.appendingPathComponent("continuous-edits.json"), libraryIdentity: identity, writer: editWriter)
+            editJournal = journal
+            let problems = await unresolvedEdits()
+            editRecoveryError = problems.isEmpty ? nil : "Some pending edits need source binding review; healthy tracks remain editable"
+            editReady = true
+        } catch {
+            editReady = false; editRecoveryError = "Journal reopen failed; original bytes retained: \(error)"
+            throw error
+        }
+    }
+
+    /// Explicitly set aside one whole track's pending intent chain. Original
+    /// evidence remains retrievable; this never purges or resolves server state.
+    public func setAsideEdits(logicalTrackID: UUID) async throws {
+        let previous = editTail
+        let token = UUID(); editTailID = token
+        let work = Task { [weak self] in
+            _ = try? await previous?.value
+            guard let self else { throw CancellationError() }
+            try await self.performSetAside(logicalTrackID)
+        }
+        editTail = work
+        defer { if editTailID == token { editTail = nil } }
+        try await work.value
+    }
+
+    private func performSetAside(_ logical: UUID) async throws {
+        guard let journal = editJournal else { throw LibraryEditJournalError.invalid }
+        let ids = Set(await journal.pending().filter { $0.logicalTrackID == logical }.map(\.id))
+        try await journal.setAsideIntents(ids)
+    }
+
+    public func editEvidence() async -> [LibraryEditIntent] { await editJournal?.evidence() ?? [] }
+
+    public func pendingEdits() async -> [LibraryEditIntent] { await editJournal?.pending() ?? [] }
+
+    public func unresolvedEdits() async -> [LibraryEditIntent] {
+        guard let journal = editJournal else { return [] }
+        let tracks = snapshot?.tracks ?? [], bindings = editBindings
+        let pending = await journal.pending()
+        return pending.filter { intent in
+            !tracks.contains { track in bindings[track.id] == intent.logicalTrackID && Self.sourceRevision(track) == intent.sourceRevision }
+        }
+    }
+
+    private func projectedSnapshot() async -> Snapshot? {
+        guard var result = snapshot, let journal = editJournal else { return snapshot }
+        let bindings = editBindings
+        let intents = await journal.pending()
+        for index in result.tracks.indices {
+            guard let logical = bindings[result.tracks[index].id], let revision = Self.sourceRevision(result.tracks[index]) else { continue }
+            let edits = intents.filter { $0.logicalTrackID == logical }
+            guard edits.allSatisfy({ $0.sourceRevision == revision }) else { continue }
+            let title = LibraryEditJournal.project(edits, logicalTrackID: logical, base: .title(result.tracks[index].title))
+            let cue = LibraryEditJournal.project(edits, logicalTrackID: logical, base: .mainCue(result.tracks[index].mainCue))
+            // Differing base never silently displays an unresolved local winner.
+            if title.conflictingBase == nil, case .title(let value) = title.value { result.tracks[index].title = value }
+            if cue.conflictingBase == nil, case .mainCue(let value) = cue.value { result.tracks[index].mainCue = value }
+        }
+        return result
+    }
+
+    public func editConflicts() async -> [UUID: [LibraryEditProjection]] {
+        guard let snapshot, let journal = editJournal else { return [:] }
+        var result: [UUID: [LibraryEditProjection]] = [:]
+        let intents = await journal.pending()
+        for track in snapshot.tracks {
+            guard let logical = editBindings[track.id] else { continue }
+            for base in [LibraryEditValue.title(track.title), .mainCue(track.mainCue)] {
+                let projection = LibraryEditJournal.project(intents, logicalTrackID: logical, base: base)
+                if projection.conflictingBase != nil { result[logical, default: []].append(projection) }
+            }
+        }
+        return result
+    }
+    public init(root: URL, editWriter: @escaping @Sendable (Data, URL) throws -> Void = SessionEventJournal.durableWrite) throws {
+        self.editWriter = editWriter
         store = try LibraryStore(root: root)
         do {
             snapshot = try store.readSnapshot()
@@ -30,7 +190,27 @@ public actor LibraryRepository {
             recoveryWarning = "The offline snapshot was unreadable and was kept separately. Sync again to restore the library."
         }
     }
-    public func cachedSnapshot() -> Snapshot? { snapshot }
+    /// Snapshot commit uses the same lane as edits, so an edit cannot return
+    /// success against a source revision replaced halfway through its append.
+    private func installSnapshot(_ text: String, snapshot next: Snapshot) async throws {
+        let previous = editTail
+        let token = UUID(); editTailID = token
+        let work = Task { [weak self] in
+            _ = try? await previous?.value
+            guard let self else { throw CancellationError() }
+            try await self.commitSnapshot(text, snapshot: next)
+        }
+        editTail = work
+        defer { if editTailID == token { editTail = nil } }
+        try await work.value
+    }
+
+    private func commitSnapshot(_ text: String, snapshot next: Snapshot) throws {
+        try store.saveSnapshot(text)
+        snapshot = next
+    }
+
+    public func cachedSnapshot() async -> Snapshot? { await projectedSnapshot() }
     public func sync(_ connection: DesktopConnection, allAudio: Bool = false, progress: (@Sendable (LibrarySyncProgress) async -> Void)? = nil) async throws -> Snapshot {
         guard !syncing else { throw SyncError("A library sync is already in progress") }
         syncing = true
@@ -40,8 +220,7 @@ public actor LibraryRepository {
         let text = try await client.snapshotText()
         try Task.checkCancellation()
         let next = try SnapshotJson.parse(text)
-        try store.saveSnapshot(text)
-        snapshot = next
+        try await installSnapshot(text, snapshot: next)
         // Preview failure does not erase the last good library. Caller receives the error and can retry.
         let missing = next.tracks.filter { store.preview($0) == nil && $0.previewRev != nil }
         await progress?(.init(phase: .previews, total: missing.count))
@@ -81,7 +260,7 @@ public actor LibraryRepository {
             }
         }
         try Task.checkCancellation()
-        return next
+        return await projectedSnapshot() ?? next
     }
     public func audio(_ track: LibraryTrack, connection: DesktopConnection?) async throws -> URL {
         guard let target = store.audioFile(track) else { throw SyncError("Track has no downloadable audio revision. Sync the desktop library again.") }

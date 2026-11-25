@@ -8,6 +8,46 @@ using namespace manadj;
 static Engine *E(MDJEngine e) { return static_cast<Engine *>(e); }
 static bool valid(int d) { return d >= 0 && d < kDeckCount; }
 extern "C" {
+void mdj_capture_enable(MDJEngine e, bool enabled) { if (e) E(e)->enableCapture(enabled); }
+static void captureConvert(const CaptureSnapshot& snap, MDJCaptureSnapshot* result) {
+    MDJCaptureSnapshot out{};
+    out.frame = snap.frame; out.segmentStart = snap.segmentStart; out.sampleRate = snap.sampleRate; out.crossfade = snap.crossfade;
+    out.fxEffect = snap.fxEffect; out.fxTarget = snap.fxTarget; out.fxHeld = snap.fxHeld;
+    out.fxOn = snap.fxOn; out.fxDepth = snap.fxDepth; out.fxBeats = snap.fxBeats;
+    for (int i = 0; i < 4; ++i) {
+        const auto& c = snap.decks[i]; auto& d = out.decks[i];
+        d.load = c.load; d.transport = c.transport; d.launchFrame = c.launchFrame;
+        d.position = c.position; d.startPosition = c.startPosition; d.bpm = c.bpm; d.loopStart = c.loopStart; d.loopEnd = c.loopEnd;
+        d.fader = c.fader; d.trim = c.trim; d.pitch = c.pitch; d.bend = c.bend; d.filter = c.filter;
+        d.previewSlot = c.previewSlot; d.playing = c.playing; d.preview = c.preview;
+        d.scratching = c.scratching; d.loop = c.loop; d.pfl = c.pfl; d.ready = c.ready;
+        for (int k = 0; k < 3; ++k) d.eq[k] = c.eq[k];
+        for (int k = 0; k < 4; ++k) d.stems[k] = c.stems[k];
+    }
+    *result = out;
+}
+uint64_t mdj_capture_request_stop(MDJEngine e) { return e ? E(e)->requestCaptureStop() : 0; }
+int mdj_capture_stop_poll(MDJEngine e, uint64_t token, MDJCaptureStop* result) {
+    if (!e || !result) return -1;
+    Engine::CaptureStop stop;
+    const int status = E(e)->pollCaptureStop(token, stop);
+    if (status == 1) { result->token = stop.token; result->finalFrame = stop.finalFrame; result->published = stop.published; result->remaining = stop.remaining; result->gap = stop.gap; }
+    return status;
+}
+bool mdj_capture_snapshot(MDJEngine e, MDJCaptureSnapshot* result) {
+    if (!e || !result) return false;
+    CaptureSnapshot snap;
+    if (!E(e)->captureSnapshot(snap)) return false;
+    captureConvert(snap, result);
+    return true;
+}
+int mdj_capture_pop(MDJEngine e, MDJCaptureSnapshot* result) {
+    if (!e || !result) return -1;
+    CaptureSnapshot snap;
+    const int status = E(e)->popCapture(snap);
+    if (status == 1) captureConvert(snap, result);
+    return status;
+}
 MDJEngine mdj_create(int rate) { try { return new Engine(rate); } catch (...) { return nullptr; } }
 void mdj_destroy(MDJEngine e) { delete E(e); }
 void mdj_set_rate(MDJEngine e, int r) { E(e)->setOutputRate(r); }

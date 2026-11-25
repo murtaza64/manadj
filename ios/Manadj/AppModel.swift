@@ -70,6 +70,51 @@ struct DeckViewState {
     private var liveStream = ""
     private var liveSequence = -1
     private var engineErrors: Set<UInt64> = []
+    private var captureDrainTask: Task<Void, Never>?
+    private var cloudSyncStorage: CloudSyncController?
+    var cloudSync: CloudSyncController {
+        if let controller = cloudSyncStorage { return controller }
+        let controller = CloudSyncController(root: root.appendingPathComponent("continuous-sync"))
+        controller.projectionChanged = { [weak self, weak controller] in
+            Task { @MainActor in
+                guard let self, let controller, let repository = self.repository, let base = await repository.cachedSnapshot() else { return }
+                do { self.snapshot = try controller.project(base) }
+                catch { self.error = error.localizedDescription }
+            }
+        }
+        controller.captureStart = { [weak self, weak controller] in
+            guard CloudLibraryOAuth.enabled, let self, let audio = self.audio, let (journal, identity) = controller?.captureJournal() else { throw NativeReplicaError.invalid }
+            if !audio.sessionCaptureIsPrepared { try audio.prepareSessionCapture(journal: journal, libraryIdentity: identity) }
+            try audio.armPreparedSessionCapture()
+            self.captureDrainTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    do { try await self?.audio?.drainPreparedSessionCapture(); try await Task.sleep(for: .milliseconds(50)) }
+                    catch { self?.cloudSyncStorage?.stop(); self?.error = "Session evidence capture stopped"; break }
+                }
+            }
+        }
+        controller.captureStop = { [weak self] incomplete in
+            self?.captureDrainTask?.cancel(); self?.captureDrainTask = nil
+            await self?.audio?.stopSessionCapture(incomplete: incomplete)?.value
+        }
+        cloudSyncStorage = controller
+        return controller
+    }
+
+    func stopCloudSyncForBackground() { cloudSyncStorage?.stop(incomplete: true) }
+
+    func configureCloudSync(from url: URL) {
+        Task {
+            let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }
+            do {
+                guard let repository, let base = await repository.cachedSnapshot() else { throw NativeReplicaError.unresolvedBinding }
+                let store = await repository.store
+                try await cloudSync.configure(Data(contentsOf: url), snapshot: base, store: store)
+                snapshot = try cloudSync.project(base)
+            } catch { self.error = "Private sync configuration rejected: " + error.localizedDescription }
+        }
+    }
+
     private let root: URL
     private let deviceId: String
 
@@ -123,6 +168,16 @@ struct DeckViewState {
             repository = repo
             snapshot = await repo.cachedSnapshot()
             downloaded = await repo.downloadedIds()
+            let provisioning = root.appendingPathComponent("continuous-sync/public-provisioning.json")
+            if FileManager.default.fileExists(atPath: provisioning.path), let base = snapshot {
+                do {
+                    let properties = try provisioning.resourceValues(forKeys: [.fileSizeKey, .isSymbolicLinkKey])
+                    guard properties.isSymbolicLink != true, let size = properties.fileSize, size <= 64 * 1024 else { throw NativeReplicaError.invalid }
+                    let store = await repo.store
+                    try await cloudSync.configure(Data(contentsOf: provisioning), snapshot: base, store: store)
+                    snapshot = try cloudSync.project(base)
+                } catch { self.error = "Saved private sync configuration needs review: " + error.localizedDescription }
+            }
             if !ProcessInfo.processInfo.arguments.contains("--library-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--usb-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--sync-progress-ui-fixture"), let url = URL(string: origin), let token = PairingKeychain.token(for: origin) {
                 connection = try DesktopConnection(url: url, deviceToken: token, deviceId: deviceId, deviceName: UIDevice.current.name)
             }
@@ -332,7 +387,7 @@ struct DeckViewState {
                 liveStatus = "Preparing deck \(Ink.deckName(index)) audio · silent until ready"
                 let file = try await repository.audio(track, connection: connection)
                 try Task.checkCancellation()
-                let duration = try await audio.load(file, deck: index)
+                let duration = try await audio.load(file, deck: index, libraryTrackID: track.id)
                 try Task.checkCancellation()
                 decks[index].track = track; decks[index].title = track.title
                 decks[index].artist = track.artist ?? ""; decks[index].duration = duration
@@ -487,7 +542,7 @@ struct DeckViewState {
                 let url = try await repository.audio(track, connection: connection)
                 try Task.checkCancellation()
                 guard deckLoadIDs[deck] == loadID else { return }
-                let duration = try await audio.load(url, deck: deck)
+                let duration = try await audio.load(url, deck: deck, libraryTrackID: track.id)
                 try Task.checkCancellation()
                 guard deckLoadIDs[deck] == loadID else { return }
                 let grid = track.grid

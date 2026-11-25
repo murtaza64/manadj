@@ -182,6 +182,8 @@ class PeerSync:
 
     def export(self, sid, body):
         self._lock()
+        from backend.continuous_sync.provenance import deny
+        deny(self.db, str(sid))
         local = self.identity()["replica_id"]
         sid = str(sid)
         stored = self.db.get(SyncSession, sid)

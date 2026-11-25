@@ -7,15 +7,17 @@ const { ReviewedUpload } = require('./upload');
 const { listSnapshots, deleteSnapshot } = require('./snapshots');
 const { prepareFromManagedBackend } = require('./source');
 const target = require('./target');
+const { ContinuousSync, managedSync } = require('./continuous');
 function registerCloudIpc({ ipcMain, webContents, app, safeStorage, shell, getBackend,
   getTargetURL, connection: suppliedConnection, upload: suppliedUpload }) {
   const connection = suppliedConnection || new CloudConnection({ config: target,
     store: new EncryptedTokenStore({ directory: path.join(app.getPath('userData'), 'library-cloud'), safeStorage,
       audience: target.resource }), openExternal: value => shell.openExternal(value) });
   const upload = suppliedUpload || new ReviewedUpload({ connection, prepare: options => prepareFromManagedBackend(getBackend(), options) });
+  const continuous = new ContinuousSync({ connection, backend: (body, options) => managedSync(getBackend(), body, options), enabled: target.continuousEnabled === true });
   const handlers = [];
   const guard = event => authorizeFrame(event, webContents, getTargetURL());
-  const state = () => ({ connection: connection.publicState(), upload: upload.state() });
+  const state = () => ({ connection: connection.publicState(), upload: upload.state(), continuous: continuous.state() });
   const register = (name, fn) => {
     const channel = `library-cloud:${name}`; handlers.push(channel);
     ipcMain.handle(channel, async (event, ...args) => {
@@ -25,9 +27,14 @@ function registerCloudIpc({ ipcMain, webContents, app, safeStorage, shell, getBa
   };
   const none = args => { if (args.length) throw new CloudFailure('cloud_request_invalid'); };
   register('state', (...args) => { none(args); return state(); });
-  register('connect', async (...args) => { none(args); upload.clear(); await connection.connect(); return state(); });
-  register('resume', async (...args) => { none(args); upload.clear(); await connection.resume(); return state(); });
-  register('disconnect', async (...args) => { none(args); upload.clear(); await connection.disconnect(); return state(); });
+  register('connect', async (...args) => { none(args); continuous.stop(); upload.clear(); await connection.connect(); return state(); });
+  register('resume', async (...args) => { none(args); continuous.stop(); upload.clear(); await connection.resume(); return state(); });
+  register('disconnect', async (...args) => { none(args); continuous.stop(); upload.clear(); await connection.disconnect(); return state(); });
+  register('continuousStart', (...args) => {
+    if (args.length !== 1 || typeof args[0] !== 'string') throw new CloudFailure('cloud_request_invalid');
+    continuous.start(args[0]); return state();
+  });
+  register('continuousStop', (...args) => { none(args); continuous.stop(); return state(); });
   register('review', async (...args) => { none(args); await upload.review(); return state(); });
   register('upload', async (...args) => {
     if (args.length !== 1 || !args[0] || typeof args[0] !== 'object' || Array.isArray(args[0]) ||
@@ -44,10 +51,10 @@ function registerCloudIpc({ ipcMain, webContents, app, safeStorage, shell, getBa
       throw new CloudFailure('cloud_request_invalid');
     upload.clear(); // A cleared local review never claims cloud deletion; this does.
     return deleteSnapshot(connection, args[0].snapshotId); });
-  register('cancel', (...args) => { none(args); upload.cancel();
+  register('cancel', (...args) => { none(args); continuous.stop(); upload.cancel();
     if (connection.publicState().phase === 'connecting') connection.cancel();
     return state(); });
-  const cancelWork = () => { upload.cancel(); connection.cancel(); };
+  const cancelWork = () => { continuous.stop(); upload.cancel(); connection.cancel(); };
   // Hash/history routing and child frames do not replace the trusted renderer.
   const navigated = (_event, _url, isInPlace, isMainFrame) => {
     if (isMainFrame === true && isInPlace === false) cancelWork();

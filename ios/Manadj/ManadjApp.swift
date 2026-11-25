@@ -11,14 +11,18 @@ import CEngine
         WindowGroup {
             Group {
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("--local-live-ui-fixture") { LocalLiveView() }
+                if ProcessInfo.processInfo.arguments.contains("--cloud-sync-ui-fixture") { SettingsView() }
+                else if ProcessInfo.processInfo.arguments.contains("--local-live-ui-fixture") { LocalLiveView() }
                 else { WorkspaceView() }
                 #else
                 WorkspaceView()
                 #endif
             }.environmentObject(model)
                 .onAppear { model.syncWake.setActive(scenePhase == .active) }
-                .onChange(of: scenePhase) { _, phase in model.syncWake.setActive(phase == .active) }
+                .onChange(of: scenePhase) { _, phase in
+                    model.syncWake.setActive(phase == .active)
+                    if phase != .active { model.stopCloudSyncForBackground() }
+                }
                 .font(Ink.font()).foregroundStyle(Ink.text)
                 .tint(Ink.accent).preferredColorScheme(.dark)
         }

@@ -1,0 +1,52 @@
+name: Integrated private sync Apple acceptance
+on:
+  push:
+    branches: [instinct/continuous-sync-integrated]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: integrated-private-sync-apple
+  cancel-in-progress: false
+jobs:
+  apple:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Apple packages and real generated HTTP transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_*.app' ! -iname '*beta*' | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          python3 scripts/qualification/native-transport-fixture.py > native-loopback-fixture.log 2>&1 &
+          FIXTURE_PID=$!
+          trap 'kill "$FIXTURE_PID" || true' EXIT
+          export MANADJ_NATIVE_HTTP_FIXTURE=1
+          export MANADJ_NATIVE_VECTOR_OUTPUT="$GITHUB_WORKSPACE/native-generated"
+          (cd ios/Packages/ManadjCore && swift test -j 2) 2>&1 | tee native-core.log
+          (cd ios/Packages/ManadjAudio && swift test -j 2) 2>&1 | tee native-audio.log
+      - name: Compile real iPhoneOS host
+        run: xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphoneos -destination generic/platform=iOS -derivedDataPath "$RUNNER_TEMP/iphone" CODE_SIGNING_ALLOWED=NO build > native-iphone.log 2>&1
+      - name: Actual running AVAudioEngine start and fenced journal close
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEVICE=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; groups=json.load(sys.stdin)["devices"]; phones=[d for r,ds in sorted(groups.items(),reverse=True) if "iOS" in r for d in ds if d.get("isAvailable") and d["name"].startswith("iPhone")]; assert phones; print(phones[0]["udid"])')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath "$RUNNER_TEMP/native-sim" -parallel-testing-enabled NO -only-testing:ManadjTests/NativeAudioTests/testPreparedCaptureStartsOnRunningEngineAndFencesCompleteClose -only-testing:ManadjTests/NativeAudioTests/testSessionCaptureCandidateRemainsDisabledAndLifecycleCloses -only-testing:ManadjUITests/WorkspaceUITests/testPrivateCloudControlsDisabledAndVisible -resultBundlePath IntegratedNativeSync.xcresult CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$(uname -m)" test 2>&1 | tee native-simulator.log
+          ditto -c -k --keepParent "$RUNNER_TEMP/native-sim/Build/Products/Debug-iphonesimulator/Manadj.app" Manadj-simulator.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: integrated-private-sync-source-and-simulator
+          path: |
+            native-*.log
+            native-generated/*.json
+            IntegratedNativeSync.xcresult
+            Manadj-simulator.zip
+          retention-days: 7
