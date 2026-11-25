@@ -25,6 +25,9 @@ jobs:
           echo '6c550f229ad8269edde553d0b05e30726b111dc532408f9fb84b7b3173fae932  native-sync-apple-candidate.patch' | shasum -a 256 -c -
           git apply --check native-sync-apple-candidate.patch
           git apply native-sync-apple-candidate.patch
+          echo 'ac7135c7cd791f0d2560397a5b0c0801bb321e5e91a0e0565815ecd2902317a0  native-library-edit-candidate.patch' | shasum -a 256 -c -
+          git apply --check --exclude=backend/continuous_sync/NATIVE_CAPTURE.md native-library-edit-candidate.patch
+          git apply --exclude=backend/continuous_sync/NATIVE_CAPTURE.md native-library-edit-candidate.patch
           git diff --stat
       - name: Select latest production Xcode
         shell: bash
