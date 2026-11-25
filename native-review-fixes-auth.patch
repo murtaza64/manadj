@@ -1,0 +1,828 @@
+diff --git a/backend/continuous_sync/NATIVE_CAPTURE.md b/backend/continuous_sync/NATIVE_CAPTURE.md
+index 48b6fa6b..339de69e 100644
+--- a/backend/continuous_sync/NATIVE_CAPTURE.md
++++ b/backend/continuous_sync/NATIVE_CAPTURE.md
+@@ -168,3 +168,24 @@ rewrite at1024intents/1MiB is a generated safety ceiling, not energy/production
+ capacity evidence. Parent-directory/APFS durability and exclusive-owner limits
+ of SessionEventJournal.durableWrite also apply. No archive UI added: tombstone
+ semantics still belong to signed application adapter.
++
++Independent7225fcd2 review revisions: intentsv2 now persist source revision
++(snapshot audio_rev + file size/name, explicitly NOT a content hash). Missing
++source evidence, absent/rebound logical IDs and changed revisions are unresolved
++and surfaced; prepare rejects while retaining readable pendingEdits/unresolvedEdits.
++Conflicting bases no longer get a silent overlay winner. Snapshot revision is a
++legacy freshness guard, not signed content/owner authority; exact-byte binding
++still required before transport activation. Repository serializes concurrent edits
++through task chain without rejecting them merely because sync awaits network.
++Non-destructive serialized reopen exists, including generated ambiguous-after-
++rename recovery. Corrupt evidence remains failclosed with explicit error, no
++fresh-empty fallback. Arbitrary nonempty causal parents rejected by repository
++until verified signed heads exist. Lowlevel journal only structurally validates.
++
++Native library auth candidate reuses hardened feedback flow but has a separate
++fixed library resource, callback path, keychain namespace and generation. Build-
++time enabledfalse blocks signIn/accessToken/signOut before network/keychain work;
++no AppModel caller. Resource and issuer match existing desktop target; no live
++native registration/login/refresh has run.7new package auth boundary tests pass,
++fullCore129 after review fixes. New auth file is in generated Xcode project, team
++setting preserved. Apple qualification must be extended to this revised source.
+diff --git a/ios/Manadj.xcodeproj/project.pbxproj b/ios/Manadj.xcodeproj/project.pbxproj
+index 24dfb37a..fd4b3cb1 100644
+--- a/ios/Manadj.xcodeproj/project.pbxproj
++++ b/ios/Manadj.xcodeproj/project.pbxproj
+@@ -45,6 +45,16 @@
+ 			"isa" = "PBXBuildFile";
+ 			"fileRef" = "09024B84027E0D1FB5626D28";
+ 		};
++		"608D18B1080DDEA233B2B710" = {
++			"isa" = "PBXFileReference";
++			"lastKnownFileType" = "sourcecode.swift";
++			"path" = "Manadj/CloudLibrarySession.swift";
++			"sourceTree" = "<group>";
++		};
++		"CA8A8267FA1DE7EBD9A40BB3" = {
++			"isa" = "PBXBuildFile";
++			"fileRef" = "608D18B1080DDEA233B2B710";
++		};
+ 		"408495BABA2882DD79B6083D" = {
+ 			"isa" = "PBXFileReference";
+ 			"lastKnownFileType" = "sourcecode.swift";
+@@ -497,7 +507,7 @@
+ 		"76E512711C5F577B8E6FBFD0" = {
+ 			"isa" = "PBXSourcesBuildPhase";
+ 			"buildActionMask" = "2147483647";
+-			"files" = ( "0C5DDEB9FFDFEC8AEE8C87E1", "8C2E29AB80D8C09CBC04DDAD", "B5E3FD23377412F2CB202F2C", "8AC59A98B5F0B2FBEDFC11A6", "1597544FAC0E8262AF5B161F", "964681B923424E0D86EA6981", "863BDC7987C2C4A2452F176B", "CE5EE24556FE3346F2965DF4", "4DBA9C765E5D441BA3DBF1C3", "6713B7E60383489821397303", "5BECCF1ADEC5BA5FA7A563C5", "E052604597102E80EE331EBA", "40C48AB6B17CC06A65832468", "1BA049E8D4277A31E08F36B2", "4415ECB8C8FC0A8A5D2E6104", "572F7BFA4453CEB2C79A0BE7", "B6028571C64C3D1E63C3543F", "204E18768B90B66EE770B10A", "B6D81B424E1FC9A158F21932", "2559CAB0E88E35ED4ADA6C71", "90163E095ED8233E6DB77D95", "630C393AA4A8DDEF1D0E26DD", "53F16D2FFFF2BE4336896599", "0951F688A846A8FECBC5396B", "3194699105DDE2D630B979E4", "DF7F9CCF7F29825C2DE9967D" );
++			"files" = ( "0C5DDEB9FFDFEC8AEE8C87E1", "8C2E29AB80D8C09CBC04DDAD", "B5E3FD23377412F2CB202F2C", "8AC59A98B5F0B2FBEDFC11A6", "CA8A8267FA1DE7EBD9A40BB3", "1597544FAC0E8262AF5B161F", "964681B923424E0D86EA6981", "863BDC7987C2C4A2452F176B", "CE5EE24556FE3346F2965DF4", "4DBA9C765E5D441BA3DBF1C3", "6713B7E60383489821397303", "5BECCF1ADEC5BA5FA7A563C5", "E052604597102E80EE331EBA", "40C48AB6B17CC06A65832468", "1BA049E8D4277A31E08F36B2", "4415ECB8C8FC0A8A5D2E6104", "572F7BFA4453CEB2C79A0BE7", "B6028571C64C3D1E63C3543F", "204E18768B90B66EE770B10A", "B6D81B424E1FC9A158F21932", "2559CAB0E88E35ED4ADA6C71", "90163E095ED8233E6DB77D95", "630C393AA4A8DDEF1D0E26DD", "53F16D2FFFF2BE4336896599", "0951F688A846A8FECBC5396B", "3194699105DDE2D630B979E4", "DF7F9CCF7F29825C2DE9967D" );
+ 			"runOnlyForDeploymentPostprocessing" = "0";
+ 		};
+ 		"49437234D5065FDA996CF015" = {
+@@ -732,7 +742,7 @@
+ 		};
+ 		"0D6E4079E36703EBD37C0072" = {
+ 			"isa" = "PBXGroup";
+-			"children" = ( "B6CCF6DD2C669EE22189A0BE", "91A97089C1CFA90EFC7C1DCF", "044A5D939F1318306B28EEAC", "09024B84027E0D1FB5626D28", "408495BABA2882DD79B6083D", "41595082BC68E17CED3490BA", "5BF733380053CF5E5748076D", "332FEA8B746FD7E7DAAFDC4A", "E55464A31BDA8C2F440BF3FD", "53AEEC7E675DA40F70D11BE5", "C0B9E42AE682E6F7055FC31F", "70E77657F583E42EC6A45274", "13549ABE64A39A39257DC333", "6F826538A1324194F0AC3FD6", "DB35650A4ACE8F109AD3BDEB", "E7D218D0E84EF24A370DF7DE", "48B85CBC5B901D7D35EF5B5A", "FC2F07F0E421947BDC29C2E7", "29AB76729B8B5F565F57B879", "1A97C8336E1B43A3AA05D7BE", "0E5BC8DB19D29813F6990DAB", "BDB63F35D1A32B0901A2A387", "59D811ED7AC44BC5FDE04098", "4527B83E3BDD2B2F311E942B", "5766C4DD11A6571197534A8F", "E66BB25412CEAA23941DBAF8", "C54B76856E24381FB1A092AC", "E7209099DBD5FA1101E5C035", "3C629BA99D49C7D7E6A6CA7E", "8AFDE70D7D181D745BF4705B", "4DBE2B621A7EFF1CFA76DFDF", "5430D72D3A091C4899AD7DE5", "DC747BD3FD41AF2923F09EA5", "7B16C465127864F034A2702C", "DF33A9E143A5BF598DC02DD3", "73EF1B9D455F92208B07943B", "CDA4AED43C9B6A9ED4EEF40A", "D15433147512D7AA9E47CCBC", "9F86E2C4A027B35C84DF186A", "AC2B9964FFEF408073A0A766", "5CE8F4B64A57BCF49F8AEB8C", "9CEEC13202AFBF12EE3ABB99", "98ED5F647931C8F88FDD0607", "41F068B78878D975C08AB9DC", "ABFEDA3C1E1944BD23D77324", "B265896C2A006DB1979E7355", "248D5FDC408CBB847F89E1A6", "02D81B447E0043DAA97841EB", "0A3E27B8CA818264D75C8D81" );
++			"children" = ( "B6CCF6DD2C669EE22189A0BE", "91A97089C1CFA90EFC7C1DCF", "044A5D939F1318306B28EEAC", "09024B84027E0D1FB5626D28", "608D18B1080DDEA233B2B710", "408495BABA2882DD79B6083D", "41595082BC68E17CED3490BA", "5BF733380053CF5E5748076D", "332FEA8B746FD7E7DAAFDC4A", "E55464A31BDA8C2F440BF3FD", "53AEEC7E675DA40F70D11BE5", "C0B9E42AE682E6F7055FC31F", "70E77657F583E42EC6A45274", "13549ABE64A39A39257DC333", "6F826538A1324194F0AC3FD6", "DB35650A4ACE8F109AD3BDEB", "E7D218D0E84EF24A370DF7DE", "48B85CBC5B901D7D35EF5B5A", "FC2F07F0E421947BDC29C2E7", "29AB76729B8B5F565F57B879", "1A97C8336E1B43A3AA05D7BE", "0E5BC8DB19D29813F6990DAB", "BDB63F35D1A32B0901A2A387", "59D811ED7AC44BC5FDE04098", "4527B83E3BDD2B2F311E942B", "5766C4DD11A6571197534A8F", "E66BB25412CEAA23941DBAF8", "C54B76856E24381FB1A092AC", "E7209099DBD5FA1101E5C035", "3C629BA99D49C7D7E6A6CA7E", "8AFDE70D7D181D745BF4705B", "4DBE2B621A7EFF1CFA76DFDF", "5430D72D3A091C4899AD7DE5", "DC747BD3FD41AF2923F09EA5", "7B16C465127864F034A2702C", "DF33A9E143A5BF598DC02DD3", "73EF1B9D455F92208B07943B", "CDA4AED43C9B6A9ED4EEF40A", "D15433147512D7AA9E47CCBC", "9F86E2C4A027B35C84DF186A", "AC2B9964FFEF408073A0A766", "5CE8F4B64A57BCF49F8AEB8C", "9CEEC13202AFBF12EE3ABB99", "98ED5F647931C8F88FDD0607", "41F068B78878D975C08AB9DC", "ABFEDA3C1E1944BD23D77324", "B265896C2A006DB1979E7355", "248D5FDC408CBB847F89E1A6", "02D81B447E0043DAA97841EB", "0A3E27B8CA818264D75C8D81" );
+ 			"sourceTree" = "<group>";
+ 		};
+ 		"3D5D06619AD2FD8BA0F34D57" = {
+diff --git a/ios/Manadj/CloudLibrarySession.swift b/ios/Manadj/CloudLibrarySession.swift
+new file mode 100644
+index 00000000..7700f0a5
+--- /dev/null
++++ b/ios/Manadj/CloudLibrarySession.swift
+@@ -0,0 +1,270 @@
++import AuthenticationServices
++import CryptoKit
++import Foundation
++import ManadjCore
++import Security
++import Combine
++import UIKit
++
++/// Disabled owner-only library sign-in, isolated from feedback credentials.
++/// Access tokens are opaque. Owner identity is enforced by Access and the
++/// Worker's signed-assertion check, never by decoding a client-side JWT.
++@MainActor
++final class CloudLibrarySession: NSObject, ObservableObject, ASWebAuthenticationPresentationContextProviding {
++    private struct Credentials: Codable, Sendable {
++        let clientID: String
++        let accessToken: String
++        let refreshToken: String
++        let expiresAt: Date
++    }
++    private struct TokenResponse: Decodable {
++        let access_token: String
++        let token_type: String
++        let expires_in: Double
++        let refresh_token: String?
++    }
++    private struct Registration: Decodable {
++        let client_id: String
++        let redirect_uris: [String]
++        let token_endpoint_auth_method: String
++    }
++    private let http: URLSession = {
++        let config = URLSessionConfiguration.ephemeral
++        config.httpCookieStorage = nil
++        config.urlCredentialStorage = nil
++        config.urlCache = nil
++        config.requestCachePolicy = .reloadIgnoringLocalCacheData
++        config.timeoutIntervalForRequest = 30
++        config.timeoutIntervalForResource = 45
++        return URLSession(configuration: config, delegate: CloudLibraryNoRedirects(), delegateQueue: nil)
++    }()
++    private var browser: ASWebAuthenticationSession?
++    private var loginInProgress = false
++    private var refresh: Task<Credentials, Error>?
++    private var generation = UUID()
++
++    func signIn() async throws {
++        guard CloudLibraryOAuth.enabled else { throw FeedbackFailure("Continuous library sync is not enabled") }
++        guard !loginInProgress else { throw FeedbackFailure("Cloud sign-in is already open") }
++        loginInProgress = true
++        generation = UUID()
++        refresh?.cancel(); refresh = nil
++        defer { loginInProgress = false }
++        let currentGeneration = generation
++        let metadata = try await discovery()
++        let clientID = try await registeredClient(metadata: metadata)
++        let state = try Self.randomURLSafe()
++        var verifier = try Self.randomURLSafe()
++        var challenge = Self.challenge(verifier)
++        // Access documents an alphanumeric-first challenge requirement.
++        // Bound the retry and fail closed if the random generator is broken.
++        for _ in 0..<16 where !Self.startsAlphanumeric(challenge) {
++            verifier = try Self.randomURLSafe(); challenge = Self.challenge(verifier)
++        }
++        guard Self.startsAlphanumeric(challenge) else { throw FeedbackFailure("Could not prepare secure cloud sign-in") }
++        let url = try CloudLibraryOAuth.authorizationURL(metadata: metadata, clientID: clientID, state: state, challenge: challenge)
++        try Task.checkCancellation()
++        guard generation == currentGeneration else { throw CancellationError() }
++        let callback = try await authenticate(url)
++        let code = try CloudLibraryOAuth.authorizationCode(callback: callback, expectedState: state)
++        let reply = try await token(metadata: metadata, fields: ["grant_type": "authorization_code", "client_id": clientID,
++            "redirect_uri": CloudLibraryOAuth.redirect, "code_verifier": verifier, "code": code,
++            "resource": CloudLibraryOAuth.resource.absoluteString])
++        let credentials = try makeCredentials(reply, clientID: clientID, priorRefresh: nil)
++        guard generation == currentGeneration else { throw CancellationError() }
++        try CloudLibraryKeychain.save(try JSONEncoder().encode(credentials), account: "tokens")
++    }
++
++    /// Does not open a browser automatically. A send cannot unexpectedly prompt
++    /// for account access or replace the report preview with a login sheet.
++    func accessToken() async throws -> String {
++        guard CloudLibraryOAuth.enabled else { throw FeedbackFailure("Continuous library sync is not enabled") }
++        guard !loginInProgress else { throw FeedbackFailure("Finish cloud sign-in before sending") }
++        let credentials = try storedCredentials()
++        if credentials.expiresAt.timeIntervalSinceNow > 45 { return credentials.accessToken }
++        if let refresh { return try await refresh.value.accessToken }
++        let currentGeneration = generation
++        let work = Task { @MainActor in
++            let metadata = try await self.discovery()
++            let reply = try await self.token(metadata: metadata, fields: ["grant_type": "refresh_token",
++                "client_id": credentials.clientID, "refresh_token": credentials.refreshToken,
++                "resource": CloudLibraryOAuth.resource.absoluteString])
++            let updated = try self.makeCredentials(reply, clientID: credentials.clientID, priorRefresh: credentials.refreshToken)
++            guard self.generation == currentGeneration else { throw CancellationError() }
++            try CloudLibraryKeychain.save(try JSONEncoder().encode(updated), account: "tokens")
++            return updated
++        }
++        refresh = work
++        defer { if generation == currentGeneration { refresh = nil } }
++        return try await work.value.accessToken
++    }
++
++    /// Returns whether remote revocation was confirmed. Local credentials are
++    /// removed first even when offline. Never describes an offline logout as
++    /// revoking the server grant.
++    @discardableResult
++    func signOut() async throws -> Bool {
++        guard CloudLibraryOAuth.enabled else { throw FeedbackFailure("Continuous library sync is not enabled") }
++        generation = UUID()
++        refresh?.cancel(); refresh = nil; browser?.cancel()
++        let previous = try? storedCredentials()
++        try CloudLibraryKeychain.save(nil, account: "tokens")
++        guard let previous else { return true }
++        do {
++            let metadata = try await discovery()
++            var request = URLRequest(url: metadata.revocation_endpoint)
++            request.httpMethod = "POST"
++            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
++            request.httpBody = CloudLibraryOAuth.form(["token": previous.refreshToken, "token_type_hint": "refresh_token", "client_id": previous.clientID])
++            _ = try await checkedData(request)
++            return true
++        } catch { return false }
++    }
++
++    private func storedCredentials() throws -> Credentials {
++        guard let data = try CloudLibraryKeychain.read(account: "tokens"),
++              let value = try? JSONDecoder().decode(Credentials.self, from: data),
++              !value.clientID.isEmpty, !value.accessToken.isEmpty, !value.refreshToken.isEmpty else {
++            throw FeedbackFailure("Sign in to private library sync first")
++        }
++        return value
++    }
++
++    private func discovery() async throws -> CloudLibraryOAuth.Discovery {
++        let body = try await checkedData(URLRequest(url: CloudLibraryOAuth.discovery))
++        return try JSONDecoder().decode(CloudLibraryOAuth.Discovery.self, from: body).validated()
++    }
++
++    private func registeredClient(metadata: CloudLibraryOAuth.Discovery) async throws -> String {
++        if let data = try CloudLibraryKeychain.read(account: "client"), let id = String(data: data, encoding: .utf8), !id.isEmpty { return id }
++        var request = URLRequest(url: metadata.registration_endpoint)
++        request.httpMethod = "POST"
++        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
++        request.httpBody = try JSONSerialization.data(withJSONObject: ["client_name": "manaDJ iPhone private library sync",
++            "redirect_uris": [CloudLibraryOAuth.redirect], "grant_types": ["authorization_code", "refresh_token"],
++            "response_types": ["code"], "token_endpoint_auth_method": "none", "resource": CloudLibraryOAuth.resource.absoluteString])
++        let registration = try JSONDecoder().decode(Registration.self, from: try await checkedData(request))
++        guard !registration.client_id.isEmpty, registration.client_id.count <= 1024,
++              registration.redirect_uris == [CloudLibraryOAuth.redirect], registration.token_endpoint_auth_method == "none" else {
++            throw FeedbackFailure("Cloud sign-in registration did not match this app")
++        }
++        try CloudLibraryKeychain.save(Data(registration.client_id.utf8), account: "client")
++        return registration.client_id
++    }
++
++    private func token(metadata: CloudLibraryOAuth.Discovery, fields: [String: String]) async throws -> TokenResponse {
++        var request = URLRequest(url: metadata.token_endpoint)
++        request.httpMethod = "POST"
++        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
++        request.httpBody = CloudLibraryOAuth.form(fields)
++        return try JSONDecoder().decode(TokenResponse.self, from: try await checkedData(request))
++    }
++
++    private func makeCredentials(_ reply: TokenResponse, clientID: String, priorRefresh: String?) throws -> Credentials {
++        guard reply.token_type.lowercased() == "bearer", !reply.access_token.isEmpty,
++              reply.access_token.count <= 16384, reply.expires_in.isFinite,
++              reply.expires_in > 0, reply.expires_in <= 86400,
++              let refresh = reply.refresh_token ?? priorRefresh, !refresh.isEmpty, refresh.count <= 16384 else {
++            throw FeedbackFailure("Cloud sign-in returned an incomplete session")
++        }
++        return Credentials(clientID: clientID, accessToken: reply.access_token, refreshToken: refresh,
++            expiresAt: Date().addingTimeInterval(reply.expires_in))
++    }
++
++    private func checkedData(_ request: URLRequest) async throws -> Data {
++        do {
++            let (data, response) = try await http.data(for: request)
++            guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode), data.count <= 65536 else {
++                throw FeedbackFailure("Private library cloud sign-in is unavailable or needs a fresh login")
++            }
++            return data
++        } catch is CancellationError { throw CancellationError() }
++        catch { throw FeedbackFailure("Private library cloud sign-in is unavailable or needs a fresh login") }
++    }
++
++    private func authenticate(_ url: URL) async throws -> URL {
++        let currentGeneration = generation
++        return try await withTaskCancellationHandler {
++            try Task.checkCancellation()
++            return try await withCheckedThrowingContinuation { continuation in
++                let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "earth.murtaza.manadj.ios") { [weak self] callback, error in
++                    Task { @MainActor in
++                        self?.browser = nil
++                        if let callback { continuation.resume(returning: callback) }
++                        else if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin { continuation.resume(throwing: CancellationError()) }
++                        else { continuation.resume(throwing: FeedbackFailure("Cloud sign-in did not finish")) }
++                    }
++                }
++                session.presentationContextProvider = self
++                session.prefersEphemeralWebBrowserSession = true
++                browser = session
++                if !session.start() {
++                    browser = nil
++                    continuation.resume(throwing: FeedbackFailure("Could not open cloud sign-in"))
++                }
++            }
++        } onCancel: { [weak self] in
++            Task { @MainActor in
++                guard let self, self.generation == currentGeneration else { return }
++                self.browser?.cancel()
++            }
++        }
++    }
++
++    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
++        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
++            .filter { $0.activationState == .foregroundActive }.flatMap(\.windows).first(where: \.isKeyWindow) ?? ASPresentationAnchor()
++    }
++    private static func randomURLSafe() throws -> String {
++        var bytes = [UInt8](repeating: 0, count: 32)
++        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
++            throw FeedbackFailure("Could not prepare secure cloud sign-in")
++        }
++        return base64URL(Data(bytes))
++    }
++    private static func challenge(_ verifier: String) -> String { base64URL(Data(SHA256.hash(data: Data(verifier.utf8)))) }
++    private static func base64URL(_ data: Data) -> String {
++        data.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
++    }
++    private static func startsAlphanumeric(_ value: String) -> Bool {
++        value.utf8.first.map { (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) } ?? false
++    }
++}
++
++private final class CloudLibraryNoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
++    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
++                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
++        completionHandler(nil)
++    }
++}
++
++private enum CloudLibraryKeychain {
++    static func read(account: String) throws -> Data? {
++        var query = base(account)
++        query[kSecReturnData as String] = true
++        query[kSecMatchLimit as String] = kSecMatchLimitOne
++        var item: CFTypeRef?
++        let status = SecItemCopyMatching(query as CFDictionary, &item)
++        if status == errSecItemNotFound { return nil }
++        guard status == errSecSuccess, let data = item as? Data else { throw FeedbackFailure("Private library cloud credentials are unavailable") }
++        return data
++    }
++    static func save(_ data: Data?, account: String) throws {
++        let query = base(account)
++        guard let data else {
++            let status = SecItemDelete(query as CFDictionary)
++            guard status == errSecSuccess || status == errSecItemNotFound else { throw FeedbackFailure("Could not remove private cloud credentials") }
++            return
++        }
++        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
++        if status == errSecSuccess { return }
++        guard status == errSecItemNotFound else { throw FeedbackFailure("Could not update private cloud credentials") }
++        var item = query
++        item[kSecValueData as String] = data
++        item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
++        guard SecItemAdd(item as CFDictionary, nil) == errSecSuccess else { throw FeedbackFailure("Could not save private cloud credentials") }
++    }
++    private static func base(_ account: String) -> [String: Any] {
++        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "earth.murtaza.manadj.ios.library.oauth", kSecAttrAccount as String: account]
++    }
++}
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/CloudLibraryOAuth.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/CloudLibraryOAuth.swift
+new file mode 100644
+index 00000000..009dbec0
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/CloudLibraryOAuth.swift
+@@ -0,0 +1,75 @@
++import Foundation
++
++/// Only the owner's configured Access application. Never accepts an alternate
++/// origin or redirect from report content, a callback, or a stored draft.
++public enum CloudLibraryOAuth {
++    /// Closed candidate. No remote configuration can turn this on.
++    public static let enabled = false
++    public static let resource = URL(string: "https://manadj-private-library.murtaza-javaid.workers.dev")!
++    public static let issuer = "https://frosty-pond-8fd5.cloudflareaccess.com"
++    public static let redirect = "earth.murtaza.manadj.ios:/oauth/library/callback"
++    public static let discovery = resource.appendingPathComponent(".well-known/oauth-authorization-server")
++
++    public struct Discovery: Decodable, Sendable {
++        public let issuer: String
++        public let authorization_endpoint: URL
++        public let token_endpoint: URL
++        public let registration_endpoint: URL
++        public let revocation_endpoint: URL
++        public let code_challenge_methods_supported: [String]
++        public let token_endpoint_auth_methods_supported: [String]
++        public let grant_types_supported: [String]
++
++        public func validated() throws -> Self {
++            guard issuer == CloudLibraryOAuth.issuer,
++                  authorization_endpoint.absoluteString == issuer + "/cdn-cgi/access/oauth/authorization",
++                  token_endpoint.absoluteString == issuer + "/cdn-cgi/access/oauth/token",
++                  registration_endpoint.absoluteString == issuer + "/cdn-cgi/access/oauth/registration",
++                  revocation_endpoint.absoluteString == issuer + "/cdn-cgi/access/oauth/revoke",
++                  code_challenge_methods_supported.contains("S256"),
++                  token_endpoint_auth_methods_supported.contains("none"),
++                  grant_types_supported.contains("authorization_code"), grant_types_supported.contains("refresh_token") else {
++                throw FeedbackFailure("Cloud sign-in configuration did not match the private library service")
++            }
++            return self
++        }
++    }
++
++    public static func authorizationURL(metadata: Discovery, clientID: String, state: String, challenge: String) throws -> URL {
++        let metadata = try metadata.validated()
++        guard !clientID.isEmpty, !state.isEmpty, !challenge.isEmpty else { throw FeedbackFailure("Cloud sign-in could not start") }
++        var parts = URLComponents(url: metadata.authorization_endpoint, resolvingAgainstBaseURL: false)!
++        parts.queryItems = [URLQueryItem(name: "response_type", value: "code"),
++            URLQueryItem(name: "client_id", value: clientID), URLQueryItem(name: "redirect_uri", value: redirect),
++            URLQueryItem(name: "resource", value: resource.absoluteString), URLQueryItem(name: "state", value: state),
++            URLQueryItem(name: "code_challenge", value: challenge), URLQueryItem(name: "code_challenge_method", value: "S256")]
++        guard let url = parts.url else { throw FeedbackFailure("Cloud sign-in URL was invalid") }
++        return url
++    }
++
++    public static func authorizationCode(callback: URL, expectedState: String) throws -> String {
++        guard let parts = URLComponents(url: callback, resolvingAgainstBaseURL: false),
++              parts.scheme == "earth.murtaza.manadj.ios", parts.host == nil,
++              parts.path == "/oauth/library/callback", parts.fragment == nil,
++              parts.user == nil, parts.password == nil, parts.port == nil,
++              !expectedState.isEmpty else { throw FeedbackFailure("Cloud sign-in returned to an unexpected address") }
++        let items = parts.queryItems ?? []
++        let states = items.filter { $0.name == "state" }
++        let codes = items.filter { $0.name == "code" }
++        guard states.count == 1, states.first?.value == expectedState,
++              !items.contains(where: { $0.name == "error" }), codes.count == 1,
++              let code = codes.first?.value, !code.isEmpty else {
++            throw FeedbackFailure("Cloud sign-in was declined or could not be verified")
++        }
++        return code
++    }
++
++    /// RFC 6749 application/x-www-form-urlencoded. Encodes plus, ampersand,
++    /// equals, Unicode and redirects without turning them into form separators.
++    public static func form(_ fields: [String: String]) -> Data {
++        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
++        return Data(fields.sorted(by: { $0.key < $1.key }).map {
++            $0.key.addingPercentEncoding(withAllowedCharacters: allowed)! + "=" + $0.value.addingPercentEncoding(withAllowedCharacters: allowed)!
++        }.joined(separator: "&").utf8)
++    }
++}
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift
+index 36026fd7..74fdc586 100644
+--- a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift
+@@ -1,7 +1,7 @@
+ import Foundation
+ 
+ public enum LibraryEditJournalError: Error, Equatable {
+-    case invalid, staleValue, full, persistence, identityMismatch
++    case invalid, staleValue, full, persistence, identityMismatch, unavailableSource
+ }
+ 
+ /// Local edit intent, not a signed continuous-sync operation or a relay receipt.
+@@ -25,6 +25,7 @@ public struct LibraryEditIntent: Codable, Equatable, Sendable {
+     public let id: UUID
+     public let sequence: Int
+     public let logicalTrackID: UUID
++    public let sourceRevision: String
+     public let oldValue: LibraryEditValue
+     public let newValue: LibraryEditValue
+     /// Known signed causal operation IDs when the edit was made. Never wall-clock LWW.
+@@ -67,7 +68,7 @@ public actor LibraryEditJournal {
+             let bytes = try Data(contentsOf: file)
+             guard bytes.count <= Self.maximumBytes else { throw LibraryEditJournalError.full }
+             let envelope = try JSONDecoder().decode(Envelope.self, from: bytes)
+-            guard envelope.version == 1, envelope.libraryIdentity == libraryIdentity else {
++            guard envelope.version == 2, envelope.libraryIdentity == libraryIdentity else {
+                 throw LibraryEditJournalError.identityMismatch
+             }
+             guard envelope.intents.count <= Self.maximumIntents,
+@@ -88,22 +89,22 @@ public actor LibraryEditJournal {
+ 
+     @discardableResult
+     public func append(id: UUID = UUID(), logicalTrackID: UUID, oldValue: LibraryEditValue,
+-                       newValue: LibraryEditValue, parents: [UUID]) throws -> LibraryEditIntent {
++                       newValue: LibraryEditValue, parents: [UUID], sourceRevision: String = "generated-journal-only") throws -> LibraryEditIntent {
+         guard !frozen else { throw LibraryEditJournalError.persistence }
+         if let existing = intents.first(where: { $0.id == id }) {
+             guard existing.logicalTrackID == logicalTrackID, existing.oldValue == oldValue,
+-                  existing.newValue == newValue, existing.parents == parents else { throw LibraryEditJournalError.invalid }
++                  existing.newValue == newValue, existing.parents == parents, existing.sourceRevision == sourceRevision else { throw LibraryEditJournalError.invalid }
+             return existing
+         }
+         let intent = LibraryEditIntent(id: id, sequence: intents.count + 1, logicalTrackID: logicalTrackID,
+-            oldValue: oldValue, newValue: newValue, parents: parents)
++            sourceRevision: sourceRevision, oldValue: oldValue, newValue: newValue, parents: parents)
+         guard Self.valid(intent) else { throw LibraryEditJournalError.invalid }
+         if let previous = intents.last(where: {
+             $0.logicalTrackID == logicalTrackID && $0.newValue.field == newValue.field
+         }), previous.newValue != oldValue { throw LibraryEditJournalError.staleValue }
+         guard intents.count < Self.maximumIntents else { throw LibraryEditJournalError.full }
+         let next = intents + [intent]
+-        let bytes = try JSONEncoder().encode(Envelope(version: 1, libraryIdentity: libraryIdentity, intents: next))
++        let bytes = try JSONEncoder().encode(Envelope(version: 2, libraryIdentity: libraryIdentity, intents: next))
+         guard bytes.count <= Self.maximumBytes else { throw LibraryEditJournalError.full }
+         do { try writer(bytes, file) }
+         catch {
+@@ -132,7 +133,7 @@ public actor LibraryEditJournal {
+     }
+ 
+     private static func valid(_ intent: LibraryEditIntent) -> Bool {
+-        intent.sequence > 0 && intent.oldValue.valid && intent.newValue.valid &&
++        !intent.sourceRevision.isEmpty && intent.sourceRevision.utf8.count <= 1024 && intent.sequence > 0 && intent.oldValue.valid && intent.newValue.valid &&
+         intent.oldValue.field == intent.newValue.field && intent.oldValue != intent.newValue &&
+         intent.parents.count <= 32 && Set(intent.parents).count == intent.parents.count
+     }
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryRepository.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryRepository.swift
+index 25039ce1..15043842 100644
+--- a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryRepository.swift
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryRepository.swift
+@@ -18,41 +18,125 @@ public actor LibraryRepository {
+     private var syncing = false
+     private var editJournal: LibraryEditJournal?
+     private var editBindings: [Int: UUID] = [:]
+-    private var editMutation = false
++    private var editTail: Task<Void, Error>?
++    private var editTailID = UUID()
++    private var editLibraryIdentity: String?
++    private var editReady = false
++    private let editWriter: @Sendable (Data, URL) throws -> Void
++    public private(set) var editRecoveryError: String?
+ 
+-    /// Disabled candidate: caller must supply verified logical bindings. Local
+-    /// desktop IDs alone are never converted into cross-device identity.
+-    public func prepareEdits(libraryIdentity: String, bindings: [Int: UUID]) throws {
+-        guard editJournal == nil, !syncing, bindings.keys.allSatisfy({ $0 > 0 }),
+-              Set(bindings.values).count == bindings.count else { throw LibraryEditJournalError.invalid }
+-        editJournal = try LibraryEditJournal(file: store.root.appendingPathComponent("continuous-edits.json"), libraryIdentity: libraryIdentity)
+-        editBindings = bindings
++    /// Source revision here is the snapshot's revision plus exact file size/name,
++    /// not a content hash or proof of remote authorship. Missing evidence blocks.
++    private static func sourceRevision(_ track: LibraryTrack) -> String? {
++        guard let rev = track.audioRev, !rev.isEmpty, let bytes = track.fileSizeBytes, bytes > 0 else { return nil }
++        return "\(rev)|\(bytes)|\(track.fileName)"
+     }
+ 
++    public func prepareEdits(libraryIdentity: String, bindings: [Int: UUID]) async throws {
++        guard editJournal == nil, editTail == nil, !syncing,
++              Set(bindings.values).count == bindings.count,
++              bindings.keys.allSatisfy({ id in snapshot?.tracks.contains { $0.id == id && Self.sourceRevision($0) != nil } == true }) else {
++            throw LibraryEditJournalError.unavailableSource
++        }
++        editLibraryIdentity = libraryIdentity; editBindings = bindings
++        do {
++            let journal = try LibraryEditJournal(file: store.root.appendingPathComponent("continuous-edits.json"), libraryIdentity: libraryIdentity, writer: editWriter)
++            editBindings = bindings; editLibraryIdentity = libraryIdentity; editJournal = journal
++            let problems = await unresolvedEdits()
++            guard problems.isEmpty else {
++                editRecoveryError = "Pending edits have missing or changed source bindings"
++                throw LibraryEditJournalError.identityMismatch
++            }
++            editRecoveryError = nil; editReady = true
++        } catch {
++            editRecoveryError = "Edits unavailable; original journal retained: \(error)"
++            throw error
++        }
++    }
++
++    /// Serialization retains concurrent requests, including while audio sync is
++    /// awaiting network. Each request receives success only after durable commit.
+     public func editTrack(_ localID: Int, to value: LibraryEditValue, parents: [UUID]) async throws {
+-        guard !syncing, !editMutation, let journal = editJournal, let logical = editBindings[localID],
+-              let track = snapshot?.tracks.first(where: { $0.id == localID }) else { throw LibraryEditJournalError.invalid }
+-        editMutation = true
+-        defer { editMutation = false }
++        let previous = editTail
++        let token = UUID(); editTailID = token
++        let work = Task { [weak self] in
++            _ = try? await previous?.value
++            guard let self else { throw CancellationError() }
++            try await self.performEdit(localID, value: value, parents: parents)
++        }
++        editTail = work
++        defer { if editTailID == token { editTail = nil } }
++        try await work.value
++    }
++
++    private func performEdit(_ localID: Int, value: LibraryEditValue, parents: [UUID]) async throws {
++        // No trusted signed head ledger is wired yet. Do not label arbitrary
++        // caller UUIDs as validated causality; nonempty parents fail closed.
++        guard parents.isEmpty else { throw LibraryEditJournalError.invalid }
++        guard editReady, let journal = editJournal, let logical = editBindings[localID],
++              let track = snapshot?.tracks.first(where: { $0.id == localID }),
++              let revision = Self.sourceRevision(track) else { throw LibraryEditJournalError.unavailableSource }
++        let pending = await journal.pending()
++        guard pending.filter({ $0.logicalTrackID == logical }).allSatisfy({ $0.sourceRevision == revision }) else {
++            throw LibraryEditJournalError.identityMismatch
++        }
+         let base: LibraryEditValue = value.field == "title" ? .title(track.title) : .mainCue(track.mainCue)
+-        let previous = await journal.project(logicalTrackID: logical, base: base)
+-        _ = try await journal.append(logicalTrackID: logical, oldValue: previous.value, newValue: value, parents: parents)
++        let previous = LibraryEditJournal.project(pending, logicalTrackID: logical, base: base)
++        _ = try await journal.append(logicalTrackID: logical, oldValue: previous.value, newValue: value,
++            parents: parents, sourceRevision: revision)
++    }
++
++    /// Explicit non-destructive reopen after uncertain persistence, no restart.
++    public func reopenEdits() async throws {
++        let previous = editTail
++        let token = UUID(); editTailID = token
++        let work = Task { [weak self] in
++            _ = try? await previous?.value
++            guard let self else { throw CancellationError() }
++            try await self.performReopen()
++        }
++        editTail = work
++        defer { if editTailID == token { editTail = nil } }
++        try await work.value
++    }
++
++    private func performReopen() async throws {
++        guard let identity = editLibraryIdentity else { throw LibraryEditJournalError.invalid }
++        do {
++            let journal = try LibraryEditJournal(file: store.root.appendingPathComponent("continuous-edits.json"), libraryIdentity: identity, writer: editWriter)
++            editJournal = journal
++            guard await unresolvedEdits().isEmpty else { throw LibraryEditJournalError.identityMismatch }
++            editRecoveryError = nil; editReady = true
++        } catch {
++            editReady = false; editRecoveryError = "Journal reopen failed; original bytes retained: \(error)"
++            throw error
++        }
+     }
+ 
+     public func pendingEdits() async -> [LibraryEditIntent] { await editJournal?.pending() ?? [] }
+ 
++    public func unresolvedEdits() async -> [LibraryEditIntent] {
++        guard let journal = editJournal else { return [] }
++        let tracks = snapshot?.tracks ?? [], bindings = editBindings
++        let pending = await journal.pending()
++        return pending.filter { intent in
++            !tracks.contains { track in bindings[track.id] == intent.logicalTrackID && Self.sourceRevision(track) == intent.sourceRevision }
++        }
++    }
++
+     private func projectedSnapshot() async -> Snapshot? {
+         guard var result = snapshot, let journal = editJournal else { return snapshot }
+-        // Capture bindings before await. prepareEdits is one-shot and snapshots
+-        // are value types, so reentrancy cannot mix libraries or overwrite disk.
+         let bindings = editBindings
+         let intents = await journal.pending()
+         for index in result.tracks.indices {
+-            guard let logical = bindings[result.tracks[index].id] else { continue }
+-            let title = LibraryEditJournal.project(intents, logicalTrackID: logical, base: .title(result.tracks[index].title))
+-            let cue = LibraryEditJournal.project(intents, logicalTrackID: logical, base: .mainCue(result.tracks[index].mainCue))
+-            if case .title(let value) = title.value { result.tracks[index].title = value }
+-            if case .mainCue(let value) = cue.value { result.tracks[index].mainCue = value }
++            guard let logical = bindings[result.tracks[index].id], let revision = Self.sourceRevision(result.tracks[index]) else { continue }
++            let edits = intents.filter { $0.logicalTrackID == logical }
++            guard edits.allSatisfy({ $0.sourceRevision == revision }) else { continue }
++            let title = LibraryEditJournal.project(edits, logicalTrackID: logical, base: .title(result.tracks[index].title))
++            let cue = LibraryEditJournal.project(edits, logicalTrackID: logical, base: .mainCue(result.tracks[index].mainCue))
++            // Differing base never silently displays an unresolved local winner.
++            if title.conflictingBase == nil, case .title(let value) = title.value { result.tracks[index].title = value }
++            if cue.conflictingBase == nil, case .mainCue(let value) = cue.value { result.tracks[index].mainCue = value }
+         }
+         return result
+     }
+@@ -70,7 +154,8 @@ public actor LibraryRepository {
+         }
+         return result
+     }
+-    public init(root: URL) throws {
++    public init(root: URL, editWriter: @escaping @Sendable (Data, URL) throws -> Void = SessionEventJournal.durableWrite) throws {
++        self.editWriter = editWriter
+         store = try LibraryStore(root: root)
+         do {
+             snapshot = try store.readSnapshot()
+@@ -86,7 +171,7 @@ public actor LibraryRepository {
+     }
+     public func cachedSnapshot() async -> Snapshot? { await projectedSnapshot() }
+     public func sync(_ connection: DesktopConnection, allAudio: Bool = false, progress: (@Sendable (LibrarySyncProgress) async -> Void)? = nil) async throws -> Snapshot {
+-        guard !syncing, !editMutation else { throw SyncError("A library sync is already in progress") }
++        guard !syncing else { throw SyncError("A library sync is already in progress") }
+         syncing = true
+         defer { syncing = false }
+         await progress?(.init(phase: .library))
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/CloudLibraryOAuthTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/CloudLibraryOAuthTests.swift
+new file mode 100644
+index 00000000..cf17cdd7
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/CloudLibraryOAuthTests.swift
+@@ -0,0 +1,73 @@
++import XCTest
++@testable import ManadjCore
++
++final class CloudLibraryOAuthTests: XCTestCase {
++    private var discovery: [String: Any] {
++        let issuer = CloudLibraryOAuth.issuer
++        return ["issuer": issuer, "authorization_endpoint": issuer + "/cdn-cgi/access/oauth/authorization",
++            "token_endpoint": issuer + "/cdn-cgi/access/oauth/token", "registration_endpoint": issuer + "/cdn-cgi/access/oauth/registration",
++            "revocation_endpoint": issuer + "/cdn-cgi/access/oauth/revoke", "code_challenge_methods_supported": ["S256"],
++            "token_endpoint_auth_methods_supported": ["none"], "grant_types_supported": ["authorization_code", "refresh_token"]]
++    }
++    private func metadata(_ object: [String: Any]) throws -> CloudLibraryOAuth.Discovery {
++        try JSONDecoder().decode(CloudLibraryOAuth.Discovery.self, from: JSONSerialization.data(withJSONObject: object))
++    }
++    func testCandidateDisabledAndSeparateFromFeedback() {
++        XCTAssertFalse(CloudLibraryOAuth.enabled)
++        XCTAssertNotEqual(CloudLibraryOAuth.resource, CloudFeedbackOAuth.resource)
++        XCTAssertNotEqual(CloudLibraryOAuth.redirect, CloudFeedbackOAuth.redirect)
++    }
++    func testExactDiscoveryAccepted() throws { _ = try metadata(discovery).validated() }
++    func testDiscoveryEndpointReplacementRejected() throws {
++        for field in ["authorization_endpoint", "token_endpoint", "registration_endpoint", "revocation_endpoint"] {
++            for endpoint in ["http://frosty-pond-8fd5.cloudflareaccess.com/cdn-cgi/access/oauth/token", "https://synthetic.invalid/oauth/token",
++                             CloudLibraryOAuth.issuer + "/alternate", CloudLibraryOAuth.issuer + "/cdn-cgi/access/oauth/token?next=other"] {
++                var object = discovery; object[field] = endpoint
++                XCTAssertThrowsError(try metadata(object).validated(), field + " must stay pinned")
++            }
++        }
++    }
++    func testMissingPKCEPublicClientRefreshOrWrongIssuerRejected() throws {
++        for (field, value) in [("code_challenge_methods_supported", ["plain"] as Any),
++            ("token_endpoint_auth_methods_supported", ["client_secret_post"] as Any),
++            ("grant_types_supported", ["authorization_code"] as Any), ("issuer", "https://synthetic.invalid" as Any)] {
++            var object = discovery; object[field] = value
++            XCTAssertThrowsError(try metadata(object).validated())
++        }
++    }
++    func testAuthorizationURLPinsResourceRedirectAndS256() throws {
++        let url = try CloudLibraryOAuth.authorizationURL(metadata: metadata(discovery), clientID: "synthetic+client&", state: "synthetic-state", challenge: "synthetic-challenge")
++        let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
++        let fields = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
++        XCTAssertEqual(url.host, "frosty-pond-8fd5.cloudflareaccess.com")
++        XCTAssertEqual(fields["client_id"], "synthetic+client&")
++        XCTAssertEqual(fields["redirect_uri"], CloudLibraryOAuth.redirect)
++        XCTAssertEqual(fields["resource"], CloudLibraryOAuth.resource.absoluteString)
++        XCTAssertEqual(fields["state"], "synthetic-state"); XCTAssertEqual(fields["code_challenge_method"], "S256")
++        XCTAssertEqual(fields["response_type"], "code")
++        XCTAssertThrowsError(try CloudLibraryOAuth.authorizationURL(metadata: metadata(discovery), clientID: "", state: "state", challenge: "challenge"))
++    }
++    func testCallbackExactStateAndAddressRequired() throws {
++        let callback = URL(string: CloudLibraryOAuth.redirect + "?state=synthetic&code=synthetic-code")!
++        XCTAssertEqual(try CloudLibraryOAuth.authorizationCode(callback: callback, expectedState: "synthetic"), "synthetic-code")
++        XCTAssertThrowsError(try CloudLibraryOAuth.authorizationCode(callback: callback, expectedState: "different"))
++        for value in ["earth.murtaza.manadj.ios://other/oauth/library/callback?state=synthetic&code=x",
++            "earth.murtaza.manadj.ios:/oauth/library/other?state=synthetic&code=x",
++            "other.app:/oauth/library/callback?state=synthetic&code=x",
++            CloudLibraryOAuth.redirect + "?state=synthetic&code=x#fragment",
++            CloudLibraryOAuth.redirect + "?state=synthetic&code=x&state=synthetic",
++            CloudLibraryOAuth.redirect + "?state=synthetic&code=x&code=y",
++            CloudLibraryOAuth.redirect + "?state=synthetic&code=x&error=denied",
++            CloudLibraryOAuth.redirect + "?state=synthetic&code="] {
++            XCTAssertThrowsError(try CloudLibraryOAuth.authorizationCode(callback: URL(string: value)!, expectedState: "synthetic"))
++        }
++    }
++    func testFormNeverIntroducesCredentialSeparators() {
++        let body = CloudLibraryOAuth.form(["code": "synthetic+value&x=y", "redirect_uri": CloudLibraryOAuth.redirect, "unicode": "a b雪"])
++        let text = String(decoding: body, as: UTF8.self)
++        XCTAssertTrue(text.contains("code=synthetic%2Bvalue%26x%3Dy"))
++        XCTAssertTrue(text.contains("unicode=a%20b%E9%9B%AA"))
++        XCTAssertEqual(text.filter { $0 == "&" }.count, 2)
++        XCTAssertFalse(text.contains(CloudLibraryOAuth.redirect))
++    }
++}
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift
+index 82c6dc9f..26bc9f76 100644
+--- a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift
+@@ -70,8 +70,8 @@ final class LibraryEditJournalTests: XCTestCase, @unchecked Sendable {
+ 
+     func testActualRepositoryOverlaySurvivesSnapshotReplacementAndLocalIDsStayScoped() async throws {
+         let root = file().deletingLastPathComponent(); defer { try? FileManager.default.removeItem(at: root) }
+-        let initial = #"{"version":1,"tag_categories":[],"tags":[],"playlists":[],"settings":{},"tracks":[{"id":42,"title":"Original","file_name":"generated.wav","main_cue":1}]}"#
+-        let remote = #"{"version":1,"tag_categories":[],"tags":[],"playlists":[],"settings":{},"tracks":[{"id":42,"title":"Remote edit","file_name":"generated.wav","main_cue":1}]}"#
++        let initial = #"{"version":1,"tag_categories":[],"tags":[],"playlists":[],"settings":{},"tracks":[{"id":42,"title":"Original","file_name":"generated.wav","audio_rev":"generated-rev","filesize_bytes":4,"main_cue":1}]}"#
++        let remote = #"{"version":1,"tag_categories":[],"tags":[],"playlists":[],"settings":{},"tracks":[{"id":42,"title":"Remote edit","file_name":"generated.wav","audio_rev":"generated-rev","filesize_bytes":4,"main_cue":1}]}"#
+         let store = try LibraryStore(root: root)
+         try store.saveSnapshot(initial)
+         let logical = UUID()
+@@ -87,7 +87,7 @@ final class LibraryEditJournalTests: XCTestCase, @unchecked Sendable {
+         let reopened = try LibraryRepository(root: root)
+         try await reopened.prepareEdits(libraryIdentity: "generated-library", bindings: [42: logical])
+         let recovered = await reopened.cachedSnapshot()
+-        XCTAssertEqual(recovered?.tracks[0].title, "Offline local edit")
++        XCTAssertEqual(recovered?.tracks[0].title, "Remote edit", "Conflicting values are not silently overlaid")
+         let conflicts = await reopened.editConflicts()
+         XCTAssertEqual(conflicts[logical]?.first?.conflictingBase, .title("Remote edit"))
+         let pending = await reopened.pendingEdits()
+@@ -98,6 +98,63 @@ final class LibraryEditJournalTests: XCTestCase, @unchecked Sendable {
+         do { try await other.prepareEdits(libraryIdentity: "other-library", bindings: [42: UUID()]); XCTFail("cross-library intent accepted") } catch { }
+     }
+ 
++    func testMissingChangedBindingsAndReusedIDCannotHideOrMisapplyIntents() async throws {
++        let root = file().deletingLastPathComponent(); defer { try? FileManager.default.removeItem(at: root) }
++        let store = try LibraryStore(root: root), logical = UUID()
++        let original = #"{"version":1,"tag_categories":[],"tags":[],"playlists":[],"settings":{},"tracks":[{"id":42,"title":"A","file_name":"a.wav","audio_rev":"revision-a","filesize_bytes":4}]}"#
++        try store.saveSnapshot(original)
++        let repository = try LibraryRepository(root: root)
++        try await repository.prepareEdits(libraryIdentity: "test", bindings: [42: logical])
++        try await repository.editTrack(42, to: .title("Rename A"), parents: [])
++        for bindings in [[:], [42: UUID()]] as [[Int: UUID]] {
++            let other = try LibraryRepository(root: root)
++            do { try await other.prepareEdits(libraryIdentity: "test", bindings: bindings); XCTFail("orphan accepted") } catch { }
++            let unresolved = await other.unresolvedEdits()
++            XCTAssertEqual(unresolved.count, 1)
++        }
++        try store.saveSnapshot(original.replacingOccurrences(of: "revision-a", with: "revision-b").replacingOccurrences(of: "a.wav", with: "b.wav"))
++        let reused = try LibraryRepository(root: root)
++        do { try await reused.prepareEdits(libraryIdentity: "test", bindings: [42: logical]); XCTFail("reused source accepted") } catch { }
++        let snapshot = await reused.cachedSnapshot()
++        XCTAssertEqual(snapshot?.tracks[0].title, "A")
++        let unresolved = await reused.unresolvedEdits()
++        XCTAssertEqual(unresolved.count, 1)
++    }
++
++    func testConcurrentRepositoryRequestsAreDurablySerializedAndCanReopen() async throws {
++        let root = file().deletingLastPathComponent(); defer { try? FileManager.default.removeItem(at: root) }
++        let store = try LibraryStore(root: root)
++        try store.saveSnapshot(#"{"version":1,"tag_categories":[],"tags":[],"playlists":[],"settings":{},"tracks":[{"id":1,"title":"A","file_name":"a.wav","audio_rev":"a","filesize_bytes":4},{"id":2,"title":"B","file_name":"b.wav","audio_rev":"b","filesize_bytes":4}]}"#)
++        let repository = try LibraryRepository(root: root)
++        try await repository.prepareEdits(libraryIdentity: "test", bindings: [1: UUID(), 2: UUID()])
++        try await withThrowingTaskGroup(of: Void.self) { group in
++            for id in [1,2] { group.addTask { try await repository.editTrack(id, to: .title("Edit"), parents: []) } }
++            try await group.waitForAll()
++        }
++        try await repository.reopenEdits()
++        let pending = await repository.pendingEdits()
++        XCTAssertEqual(pending.count, 2)
++        XCTAssertEqual(Set(pending.map(\.sequence)), [1,2])
++    }
++
++    func testRepositoryAmbiguousWriteCanReopenWithoutRestart() async throws {
++        let root = file().deletingLastPathComponent(); defer { try? FileManager.default.removeItem(at: root) }
++        let store = try LibraryStore(root: root)
++        try store.saveSnapshot(#"{"version":1,"tag_categories":[],"tags":[],"playlists":[],"settings":{},"tracks":[{"id":1,"title":"A","file_name":"a.wav","audio_rev":"a","filesize_bytes":4}]}"#)
++        let repository = try LibraryRepository(root: root, editWriter: { bytes, file in
++            try SessionEventJournal.durableWrite(bytes, file)
++            throw LibraryEditJournalError.persistence
++        })
++        try await repository.prepareEdits(libraryIdentity: "test", bindings: [1: UUID()])
++        do { try await repository.editTrack(1, to: .title("Recovered"), parents: []); XCTFail("uncertain write succeeded") } catch { }
++        try await repository.reopenEdits()
++        let snapshot = await repository.cachedSnapshot()
++        XCTAssertEqual(snapshot?.tracks[0].title, "Recovered")
++        let pending = await repository.pendingEdits()
++        XCTAssertEqual(pending.count, 1)
++        do { try await repository.editTrack(1, to: .title("unverified causal parent"), parents: [UUID()]); XCTFail("arbitrary parent accepted") } catch { }
++    }
++
+     func testCapacityFailureRetainsAllCommittedIntents() async throws {
+         let file = file(); defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+         let journal = try LibraryEditJournal(file: file, libraryIdentity: "capacity")
