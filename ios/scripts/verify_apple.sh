@@ -51,9 +51,10 @@ xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
 touch "$STOP"
 wait "$MONITOR_PID" || true
 trap - EXIT
-# Compact-phone support is backlog, not current acceptance. Opt in to its diagnostic explicitly.
+# SE is explicitly out of scope per Murtaza, 2026-11-25. Keep its known-failing
+# diagnostic opt-in; do not weaken or remove the assertions.
 SMALL_STATUS=0
-if [[ "${CHECK_COMPACT_PHONE:-1}" == "1" ]]; then
+if [[ "${CHECK_COMPACT_PHONE:-0}" == "1" ]]; then
   SMALL_UDID=$(xcrun simctl list devices available --json | python3 -c '
 import json,sys
 for group in json.load(sys.stdin)["devices"].values():
