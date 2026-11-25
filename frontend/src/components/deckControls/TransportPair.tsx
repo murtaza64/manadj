@@ -24,11 +24,13 @@ export function TransportPair({
   cueKbd,
   playKbd,
   cueTitle = 'Cue',
+  playTitleSuffix = '',
 }: {
   /** On-control keyboard hint slots (Performance view). */
   cueKbd?: ReactNode;
   playKbd?: ReactNode;
   cueTitle?: string;
+  playTitleSuffix?: string;
 }) {
   const { engine, loadedTrack } = useDeck();
   const cueHeld = useRef(false);
@@ -91,7 +93,7 @@ export function TransportPair({
         className={`player-button ${
           playState === 'playing' ? 'player-button-playing' : 'player-button-paused'
         }`}
-        title={pendingPlay ? 'Will play when loaded' : playing ? 'Pause' : 'Play'}
+        title={`${pendingPlay ? 'Will play when loaded' : playing ? 'Pause' : 'Play'}${playTitleSuffix}`}
       >
         ⏯{playKbd}
       </button>
