@@ -48,13 +48,14 @@ index fd4b3cb1..dd50706f 100644
  		};
  		"3D5D06619AD2FD8BA0F34D57" = {
 diff --git a/ios/Manadj/AppModel.swift b/ios/Manadj/AppModel.swift
-index 3a7719a0..a1fdbb90 100644
+index 3a7719a0..8fa0bf0f 100644
 --- a/ios/Manadj/AppModel.swift
 +++ b/ios/Manadj/AppModel.swift
-@@ -70,6 +70,35 @@ struct DeckViewState {
+@@ -70,6 +70,51 @@ struct DeckViewState {
      private var liveStream = ""
      private var liveSequence = -1
      private var engineErrors: Set<UInt64> = []
++    private var captureDrainTask: Task<Void, Never>?
 +    private var cloudSyncStorage: CloudSyncController?
 +    var cloudSync: CloudSyncController {
 +        if let controller = cloudSyncStorage { return controller }
@@ -65,6 +66,21 @@ index 3a7719a0..a1fdbb90 100644
 +                do { self.snapshot = try controller.project(base) }
 +                catch { self.error = error.localizedDescription }
 +            }
++        }
++        controller.captureStart = { [weak self, weak controller] in
++            guard CloudLibraryOAuth.enabled, let self, let audio = self.audio, let (journal, identity) = controller?.captureJournal() else { throw NativeReplicaError.invalid }
++            if !audio.sessionCaptureIsPrepared { try audio.prepareSessionCapture(journal: journal, libraryIdentity: identity) }
++            try audio.armPreparedSessionCapture()
++            self.captureDrainTask = Task { [weak self] in
++                while !Task.isCancelled {
++                    do { try await self?.audio?.drainPreparedSessionCapture(); try await Task.sleep(for: .milliseconds(50)) }
++                    catch { self?.cloudSyncStorage?.stop(); self?.error = "Session evidence capture stopped"; break }
++                }
++            }
++        }
++        controller.captureStop = { [weak self] in
++            self?.captureDrainTask?.cancel(); self?.captureDrainTask = nil
++            self?.audio?.stopSessionCapture(incomplete: true)
 +        }
 +        cloudSyncStorage = controller
 +        return controller
@@ -89,10 +105,10 @@ index 3a7719a0..a1fdbb90 100644
  
 diff --git a/ios/Manadj/CloudSyncController.swift b/ios/Manadj/CloudSyncController.swift
 new file mode 100644
-index 00000000..c3f54675
+index 00000000..5c056a1c
 --- /dev/null
 +++ b/ios/Manadj/CloudSyncController.swift
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,166 @@
 +import Foundation
 +import CryptoKit
 +import Security
@@ -114,6 +130,11 @@ index 00000000..c3f54675
 +    @Published private(set) var configured = false
 +    @Published private(set) var running = false
 +    @Published private(set) var conflicts = 0
++    @Published private(set) var history = "No signed session history"
++    var captureStart: (() throws -> Void)?
++    var captureStop: (() -> Void)?
++    private var journal: SessionEventJournal?
++    private var libraryIdentity = ""
 +    private let auth = CloudLibrarySession()
 +    private var replica: NativeMetadataReplica?
 +    private var sync: NativeMetadataSync?
@@ -173,8 +194,14 @@ index 00000000..c3f54675
 +        try SessionEventJournal.durableWrite(data, root.appendingPathComponent("public-provisioning.json"))
 +        replica = next; sync = transport; bindings = config.bindings
 +        verifiedRevisions = Dictionary(uniqueKeysWithValues: snapshot.tracks.filter { t in config.bindings.contains { $0.localID == t.id } }.map { ($0.id, revision($0)) })
++        libraryIdentity = config.group.uuidString.lowercased() + ":" + config.origin.uuidString.lowercased()
++        journal = try SessionEventJournal(file: root.appendingPathComponent("session-journal.json"))
 +        configured = true
 +        status = "Configured. Selected downloaded tracks only. Cloud start is disabled until test activation."
++    }
++
++    func captureJournal() -> (SessionEventJournal, String)? {
++        guard let journal else { return nil }; return (journal, libraryIdentity)
 +    }
 +
 +    func signIn() async {
@@ -183,11 +210,19 @@ index 00000000..c3f54675
 +    }
 +    func start() {
 +        guard CloudLibraryOAuth.enabled, let sync else { status = "Private cloud test is not enabled"; return }
++        do { try captureStart?() } catch { status = "Capture not started: " + error.localizedDescription; return }
 +        sync.start(); running = sync.running
 +        poll?.cancel()
 +        poll = Task { [weak self] in
 +            while let self, !Task.isCancelled {
 +                self.running = sync.running
++                if let journal = self.journal, let replica = self.replica {
++                    do {
++                        try replica.captureHistory(await journal.all(), libraryIdentity: self.libraryIdentity)
++                        let summary = try replica.historySummary()
++                        self.history = "Signed history: \(summary.sessions) sessions, \(summary.chunks) chunks, \(summary.active) active. Replay unavailable."
++                    } catch { self.stop(); self.status = "History sync stopped: " + error.localizedDescription; break }
++                }
 +                self.status = sync.lastError.map { "Sync paused/retrying: " + $0 } ?? "Sync active. Sent \(sync.published), received \(sync.received), requests \(sync.requests)/\(NativeMetadataSync.requestBudget)"
 +                self.projectionChanged?()
 +                if !sync.running { break }
@@ -195,7 +230,7 @@ index 00000000..c3f54675
 +            }
 +        }
 +    }
-+    func stop() { sync?.stop(); poll?.cancel(); poll = nil; running = false; status = "Stopped. Pending changes kept." }
++    func stop() { captureStop?(); sync?.stop(); poll?.cancel(); poll = nil; running = false; status = "Stopped. Pending changes kept." }
 +    func edit(localID: Int, value: LibraryEditValue) throws {
 +        guard let replica else { throw NativeReplicaError.invalid }
 +        try replica.edit(localID: localID, value: value); projectionChanged?()
@@ -242,10 +277,10 @@ index 00000000..c3f54675
 +}
 diff --git a/ios/Manadj/CloudSyncPanel.swift b/ios/Manadj/CloudSyncPanel.swift
 new file mode 100644
-index 00000000..424e5c76
+index 00000000..25865c0e
 --- /dev/null
 +++ b/ios/Manadj/CloudSyncPanel.swift
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,60 @@
 +import SwiftUI
 +import UniformTypeIdentifiers
 +import ManadjCore
@@ -298,6 +333,7 @@ index 00000000..424e5c76
 +                }.buttonStyle(FlatButtonStyle())
 +                if let editError { Text(editError).font(Ink.font(11)).foregroundStyle(Ink.danger) }
 +            }
++            Text(controller.history).font(Ink.font(11)).foregroundStyle(Ink.muted)
 +            Text("Selected downloaded music only. Foreground test; no cloud audio or remote session replay. Conflicts: \(controller.conflicts). Original library files stay unchanged.").font(Ink.font(10)).foregroundStyle(Ink.warning)
 +        }.padding(8).overlay(Rectangle().stroke(Ink.edge))
 +        .fileImporter(isPresented: $choosing, allowedContentTypes: [.json]) { result in
@@ -368,3 +404,348 @@ index f03a5d01..d4afca7c 100644
      @MainActor private func waitForReadyTransport(_ play: XCUIElement, app: XCUIApplication) {
          let ready = NSPredicate(format: "enabled == true AND hittable == true")
          let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: play)], timeout: 20)
+diff --git a/ios/Packages/ManadjAudio/Sources/ManadjAudio/NativeAudio.swift b/ios/Packages/ManadjAudio/Sources/ManadjAudio/NativeAudio.swift
+index fd38fbf0..37217fe2 100644
+--- a/ios/Packages/ManadjAudio/Sources/ManadjAudio/NativeAudio.swift
++++ b/ios/Packages/ManadjAudio/Sources/ManadjAudio/NativeAudio.swift
+@@ -146,6 +146,12 @@ private final class NotificationTokens: @unchecked Sendable {
+         // Deliberately OFF. Candidate compiles host ownership without collecting.
+         mdj_capture_enable(handle.raw, false)
+     }
++    /// Host must gate this explicit test arm behind its disabled-by-default
++    /// activation flag and own a frequent single-consumer drain task.
++    public func armPreparedSessionCapture() throws {
++        guard captureRuntime != nil, captureTask == nil, captureFailure == nil else { throw AudioFailure("Session capture is not prepared") }
++        mdj_capture_enable(handle.raw, true)
++    }
+     public var sessionCaptureIsPrepared: Bool { captureRuntime != nil }
+     public func stopSessionCapture(incomplete: Bool = true) {
+         mdj_capture_enable(handle.raw, false)
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataReplica.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataReplica.swift
+index 0cd2eb96..0f837077 100644
+--- a/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataReplica.swift
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataReplica.swift
+@@ -122,16 +122,18 @@ public struct NativeTrackBinding: Codable, Equatable, Sendable {
+               let operationID = body["operation_id"] as? String,
+               let entity = body["entity"] as? String, let field = body["field"] as? String,
+               let parents = body["parents"] as? [String] else { throw NativeReplicaError.invalid }
+-        let canonical = try NativeOperationCodec.verify(packet, expectedGroup: next.group, expectedOrigin: origin, pinnedKey: pin)
++        let isSession = entity.hasPrefix("session:")
++        let canonical = try isSession ? NativeSessionOperationCodec.verify(packet, group: next.group, origin: origin, pin: pin) : NativeOperationCodec.verify(packet, expectedGroup: next.group, expectedOrigin: origin, pinnedKey: pin)
+         for old in next.packets {
+             let b = try Self.object(old)
+             if b["operation_id"] as? String == operationID || (b["origin_id"] as? String == originText && b["sequence"] as? Int == sequence) {
+-                guard let previousPin = members[origin], try NativeOperationCodec.verify(old, expectedGroup: next.group, expectedOrigin: origin, pinnedKey: previousPin) == canonical else { throw NativeReplicaError.fork }
++                guard let previousPin = members[origin], try (isSession ? NativeSessionOperationCodec.verify(old, group: next.group, origin: origin, pin: previousPin) : NativeOperationCodec.verify(old, expectedGroup: next.group, expectedOrigin: origin, pinnedKey: previousPin)) == canonical else { throw NativeReplicaError.fork }
+                 return
+             }
+         }
+         guard sequence == (next.cursors[originText] ?? 0) + 1 else { throw NativeReplicaError.gap }
+-        guard next.bindings.contains(where: { entity == "track:" + $0.logicalID.uuidString.lowercased() }) else { throw NativeReplicaError.unresolvedBinding }
++        if isSession { try validateSession(body, stored: next) }
++        else { guard next.bindings.contains(where: { entity == "track:" + $0.logicalID.uuidString.lowercased() }) else { throw NativeReplicaError.unresolvedBinding } }
+         for parent in parents {
+             guard try next.packets.contains(where: { old in
+                 let b = try Self.object(old)
+@@ -145,6 +147,81 @@ public struct NativeTrackBinding: Codable, Equatable, Sendable {
+         next.packets.append(packet); next.cursors[originText] = sequence
+     }
+ 
++    /// Capture only complete durable local journal chunks. Coalescing preserves
++    /// all events, but uses at most one signed chunk per 30 seconds of history.
++    public func captureHistory(_ sessions: [JournalSession], libraryIdentity: String) throws {
++        for session in sessions where session.libraryIdentity == libraryIdentity && !session.incomplete {
++            let entity = "session:" + session.uuid.uuidString.lowercased()
++            let existing = try stored.packets.map { try Self.object($0) }.filter { $0["entity"] as? String == entity }
++            if existing.isEmpty { try issueSession(session.uuid, field: "start", value: Self.iso(session.startedAt)) }
++            var consumed = 0
++            let chunks = try stored.packets.map { try Self.object($0) }.filter { $0["entity"] as? String == entity && ($0["field"] as? String ?? "").hasPrefix("chunk:") }
++            // Rebuild exact source prefix against stored signed batches. Never
++            // republish a journal with a changed event prefix after restart.
++            var source = try session.chunks.flatMap { try JSONSerialization.jsonObject(with: $0.events) as! [[String: Any]] }
++            for body in chunks {
++                guard let value = body["value"] as? [String: Any], let events = value["events"] as? [[String: Any]], consumed + events.count <= source.count else { throw NativeReplicaError.fork }
++                let expected = Array(source[consumed..<(consumed + events.count)])
++                guard try NativeOperationCodec.canonical(["events": events]) == NativeOperationCodec.canonical(["events": expected]) else { throw NativeReplicaError.fork }
++                consumed += events.count
++            }
++            source.removeFirst(consumed)
++            var index = chunks.count
++            while !source.isEmpty {
++                let firstTime = NativeSessionOperationCodec.number(source[0]["t"]) ?? 0
++                var count = 0, mapping: [String: String] = [:], events: [[String: Any]] = []
++                for event in source.prefix(1024) {
++                    if !events.isEmpty && (NativeSessionOperationCodec.number(event["t"]) ?? 0) - firstTime >= 30 { break }
++                    if let local = NativeSessionOperationCodec.integer(event["trackId"]) {
++                        guard let binding = stored.bindings.first(where: { $0.localID == local }) else { throw NativeReplicaError.unresolvedBinding }
++                        mapping[String(local)] = binding.logicalID.uuidString.lowercased()
++                    }
++                    events.append(event); count += 1
++                    if try NativeOperationCodec.canonical(["events": events]).count > 128 * 1024 { events.removeLast(); count -= 1; break }
++                }
++                guard !events.isEmpty else { throw NativeReplicaError.full }
++                let lastTime = NativeSessionOperationCodec.number(events.last?["t"]) ?? firstTime
++                if session.endedAt == nil && source.count == count && lastTime - firstTime < 30 && count < 1024 { break }
++                try issueSession(session.uuid, field: "chunk:\(index)", value: ["events": events, "tracks": mapping])
++                source.removeFirst(count); index += 1
++            }
++            if let end = session.endedAt, source.isEmpty, !existing.contains(where: { $0["field"] as? String == "end" }) {
++                try issueSession(session.uuid, field: "end", value: Self.iso(end))
++            }
++        }
++    }
++    private func issueSession(_ id: UUID, field: String, value: Any) throws {
++        let packet = try NativeSessionOperationCodec.sign(group: stored.group, origin: stored.origin, sequence: cursor(stored.origin) + 1,
++            id: UUID(), session: id, field: field, value: value, key: key)
++        try receive(packet)
++    }
++    public func historySummary() throws -> (sessions: Int, chunks: Int, active: Int) {
++        let bodies = try stored.packets.map { try Self.object($0) }.filter { ($0["entity"] as? String ?? "").hasPrefix("session:") }
++        let starts = Set(bodies.filter { $0["field"] as? String == "start" }.compactMap { $0["entity"] as? String })
++        let ends = Set(bodies.filter { $0["field"] as? String == "end" }.compactMap { $0["entity"] as? String })
++        return (starts.count, bodies.filter { ($0["field"] as? String ?? "").hasPrefix("chunk:") }.count, starts.subtracting(ends).count)
++    }
++    private func validateSession(_ body: [String: Any], stored: Stored) throws {
++        let entity = body["entity"] as! String, field = body["field"] as! String, origin = body["origin_id"] as! String
++        let prior = try stored.packets.map { try Self.object($0) }.filter { $0["entity"] as? String == entity }
++        if field == "start" { guard prior.isEmpty else { throw NativeReplicaError.fork }; return }
++        guard let start = prior.first(where: { $0["field"] as? String == "start" }), start["origin_id"] as? String == origin,
++              !prior.contains(where: { $0["field"] as? String == "end" }), !prior.contains(where: { $0["field"] as? String == field }) else { throw NativeReplicaError.fork }
++        if field == "end" {
++            guard let end = NativeSessionOperationCodec.date(body["value"]!), let begin = NativeSessionOperationCodec.date(start["value"]!), end >= begin else { throw NativeReplicaError.invalid }; return
++        }
++        let chunk = body["value"] as! [String: Any], tracks = chunk["tracks"] as! [String: String]
++        guard tracks.values.allSatisfy({ logical in stored.bindings.contains { $0.logicalID.uuidString.lowercased() == logical } }) else { throw NativeReplicaError.unresolvedBinding }
++        let index = Int(field.dropFirst(6))!
++        let previous = prior.filter { ($0["field"] as? String ?? "").hasPrefix("chunk:") }
++        guard index == previous.count else { throw NativeReplicaError.gap }
++        if let last = previous.last, let old = last["value"] as? [String: Any], let events = old["events"] as? [[String: Any]], let current = chunk["events"] as? [[String: Any]],
++           let before = NativeSessionOperationCodec.number(events.last?["t"]), let after = NativeSessionOperationCodec.number(current.first?["t"]), after < before { throw NativeReplicaError.invalid }
++    }
++    private static func iso(_ date: Date) -> String {
++        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return formatter.string(from: date)
++    }
++
+     private static func object(_ packet: Data) throws -> [String: Any] {
+         guard packet.count <= 248 * 1024, let envelope = try JSONSerialization.jsonObject(with: packet) as? [String: Any],
+               let body = envelope["body"] as? [String: Any] else { throw NativeReplicaError.invalid }
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/NativeOperationCodec.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeOperationCodec.swift
+index 1fd20c0e..243ed1ba 100644
+--- a/ios/Packages/ManadjCore/Sources/ManadjCore/NativeOperationCodec.swift
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeOperationCodec.swift
+@@ -29,14 +29,17 @@ public enum NativeOperationError: Error { case invalid, untrusted, canonicalizat
+             "format": "manadj-continuous-sync/v1", "generation": 1, "group_id": group.uuidString.lowercased(),
+             "operation_id": id.uuidString.lowercased(), "origin_id": origin.uuidString.lowercased(),
+             "parents": parents.map { $0.uuidString.lowercased() }, "sequence": sequence, "value": rawValue]
++        return try canonical(object)
++    }
++
++    /// Recursive ECMAScript number/string formatting with lexical key order.
++    /// Building the JSON string explicitly avoids JSON.stringify reordering
++    /// integer-like Track reference keys ("12" must sort before "2").
++    static func canonical(_ object: [String: Any]) throws -> Data {
+         guard let context = JSContext() else { throw NativeOperationError.canonicalization }
+-        // Fixed protocol grammar has no nested objects, all keys ASCII. Native
+-        // bridge transfers values as data, never as interpolated JavaScript.
+-        let function = context.evaluateScript("(function(o){var r={};Object.keys(o).sort().forEach(function(k){r[k]=o[k]});return JSON.stringify(r)})")
++        let function = context.evaluateScript("(function f(v){if(v===null||typeof v!==\"object\")return JSON.stringify(v);if(Array.isArray(v))return \"[\"+v.map(f).join(\",\")+\"]\";return \"{\"+Object.keys(v).sort().map(function(k){return JSON.stringify(k)+\":\"+f(v[k])}).join(\",\")+\"}\"})")
+         guard let result = function?.call(withArguments: [object]), context.exception == nil,
+-              let text = result.toString(), let data = text.data(using: .utf8), data.count <= 240 * 1024 else {
+-            throw NativeOperationError.canonicalization
+-        }
++              let text = result.toString(), let data = text.data(using: .utf8), data.count <= 240 * 1024 else { throw NativeOperationError.canonicalization }
+         return data
+     }
+ 
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/NativeSessionOperationCodec.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeSessionOperationCodec.swift
+new file mode 100644
+index 00000000..82fc58e4
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeSessionOperationCodec.swift
+@@ -0,0 +1,137 @@
++#if canImport(CryptoKit) && canImport(JavaScriptCore)
++import Foundation
++import CryptoKit
++import CoreFoundation
++
++/// Signed history evidence only. Remote history never enters the audio engine.
++@MainActor public enum NativeSessionOperationCodec {
++    public static func sign(group: UUID, origin: UUID, sequence: Int, id: UUID, session: UUID,
++                            field: String, value: Any, key: Curve25519.Signing.PrivateKey) throws -> Data {
++        let body: [String: Any] = ["format": "manadj-continuous-sync/v1", "generation": 1,
++            "group_id": group.uuidString.lowercased(), "origin_id": origin.uuidString.lowercased(),
++            "sequence": sequence, "operation_id": id.uuidString.lowercased(),
++            "entity": "session:" + session.uuidString.lowercased(), "field": field, "parents": [String](), "value": value]
++        try validate(body)
++        let raw = try NativeOperationCodec.canonical(body)
++        let signature = try key.signature(for: NativeOperationCodec.domain + raw).base64EncodedString()
++        return Data(("{\"body\":" + String(decoding: raw, as: UTF8.self) + ",\"signature\":\"" + signature + "\"}").utf8)
++    }
++
++    static func verify(_ packet: Data, group: UUID, origin: UUID, pin: Curve25519.Signing.PublicKey) throws -> Data {
++        guard packet.count <= 248 * 1024, let envelope = try JSONSerialization.jsonObject(with: packet) as? [String: Any],
++              Set(envelope.keys) == ["body", "signature"], let body = envelope["body"] as? [String: Any],
++              body["group_id"] as? String == group.uuidString.lowercased(), body["origin_id"] as? String == origin.uuidString.lowercased(),
++              let encoded = envelope["signature"] as? String, let signature = Data(base64Encoded: encoded), signature.count == 64 else { throw NativeOperationError.invalid }
++        try validate(body)
++        let raw = try NativeOperationCodec.canonical(body)
++        guard pin.isValidSignature(signature, for: NativeOperationCodec.domain + raw) else { throw NativeOperationError.untrusted }
++        return raw
++    }
++
++    private static func validate(_ body: [String: Any]) throws {
++        guard Set(body.keys) == ["entity", "field", "format", "generation", "group_id", "operation_id", "origin_id", "parents", "sequence", "value"],
++              body["format"] as? String == "manadj-continuous-sync/v1", integer(body["generation"]) == 1,
++              let sequence = integer(body["sequence"]), sequence > 0,
++              let entity = body["entity"] as? String, entity.hasPrefix("session:"), canonicalUUID(String(entity.dropFirst(8))),
++              ["group_id", "operation_id", "origin_id"].allSatisfy({ canonicalUUID(body[$0] as? String ?? "") }),
++              let parents = body["parents"] as? [String], parents.isEmpty,
++              let field = body["field"] as? String, let value = body["value"] else { throw NativeOperationError.invalid }
++        if field == "start" || field == "end" {
++            guard date(value) != nil else { throw NativeOperationError.invalid }; return
++        }
++        guard field.hasPrefix("chunk:"), let index = Int(field.dropFirst(6)), index >= 0, index < 1_000_000, field == "chunk:\(index)",
++              let chunk = value as? [String: Any], Set(chunk.keys) == ["events", "tracks"],
++              let events = chunk["events"] as? [[String: Any]], !events.isEmpty, events.count <= 1024,
++              let tracks = chunk["tracks"] as? [String: String], tracks.count <= 512 else { throw NativeOperationError.invalid }
++        for (source, logical) in tracks {
++            guard let local = Int(source), local > 0, local <= 9_007_199_254_740_991, String(local) == source, canonicalUUID(logical) else { throw NativeOperationError.invalid }
++        }
++        var previous = -1.0
++        for event in events {
++            guard let time = number(event["t"]), time >= previous, time >= 0, time <= 1e9,
++                  let kind = event["kind"] as? String, let fields = eventFields[kind], Set(event.keys).isSubset(of: fields) else { throw NativeOperationError.invalid }
++            previous = time
++            try bounded(event, depth: 0)
++            try eventShape(event, kind: kind)
++            // History accepts the existing event DTO, never arbitrary executable
++            // controls. Every reference site must be known and explicitly bound.
++            let sites: [Any]
++            if kind == "load" { guard event.keys.contains("trackId") else { throw NativeOperationError.invalid }; sites = [event["trackId"]!] }
++            else if kind == "init" {
++                guard let decks = event["decks"] as? [String: [String: Any]], Set(decks.keys) == ["A", "B"],
++                      let a = decks["A"]?["trackId"], let b = decks["B"]?["trackId"] else { throw NativeOperationError.invalid }; sites = [a, b]
++            } else { sites = [] }
++            let refs = countTrackKeys(event)
++            guard refs == sites.count else { throw NativeOperationError.invalid }
++            for site in sites where !(site is NSNull) {
++                guard let local = integer(site), local > 0, tracks[String(local)] != nil else { throw NativeReplicaError.unresolvedBinding }
++            }
++        }
++    }
++    static func integer(_ value: Any?) -> Int? {
++        guard let value = number(value), value.rounded() == value, abs(value) <= 9_007_199_254_740_991 else { return nil }; return Int(value)
++    }
++    static func number(_ value: Any?) -> Double? {
++        guard let n = value as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue.isFinite else { return nil }; return n.doubleValue
++    }
++    static func date(_ value: Any) -> Date? {
++        guard let text = value as? String, text.count <= 40 else { return nil }
++        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
++        if let date = formatter.date(from: text) { return date }
++        formatter.formatOptions = [.withInternetDateTime]; return formatter.date(from: text)
++    }
++    private static func eventShape(_ e: [String: Any], kind: String) throws {
++        let decks = Set(["A", "B", "C", "D"])
++        if ["load", "transport", "pitch", "bend", "loop"].contains(kind) {
++            guard let deck = e["channel"] as? String, decks.contains(deck) else { throw NativeOperationError.invalid }
++        }
++        func numeric(_ key: String) -> Bool { number(e[key]).map { abs($0) <= 1e12 } ?? false }
++        switch kind {
++        case "load": guard e.keys.contains("bpm"), e["bpm"] is NSNull || numeric("bpm") else { throw NativeOperationError.invalid }
++        case "control":
++            let controls: Set<String> = ["trim","eqLow","eqMid","eqHigh","filter","fader","pfl","slipMode","vinylMode","crossfaderAssignment","crossfader","crossfaderEnabled","master","stemVocals","stemDrums","stemBass","stemOther"]
++            guard let control = e["control"] as? String, controls.contains(control), numeric("value"),
++                  e["channel"] is NSNull || (e["channel"] as? String).map(decks.contains) == true else { throw NativeOperationError.invalid }
++        case "pitch", "bend": guard numeric("value") else { throw NativeOperationError.invalid }
++        case "transport":
++            let actions: Set<String> = ["play","pause","seek","jumpBeats","hotCue","cue","previewStart","previewEnd","scratchBegin","scratchMove","scratchEnd"]
++            guard let action = e["action"] as? String, actions.contains(action), numeric("playhead") else { throw NativeOperationError.invalid }
++            for key in ["detail","deltaSeconds","durationSeconds","trackDuration","audioTime"] where e[key] != nil { guard numeric(key) else { throw NativeOperationError.invalid } }
++            if let filter = e["filter"] { guard let object = filter as? [String: Any], Set(object.keys) == ["drive","rate"], object.values.allSatisfy({ number($0) != nil }) else { throw NativeOperationError.invalid } }
++        case "loop":
++            guard numeric("playhead"), let region = e["region"] else { throw NativeOperationError.invalid }
++            if !(region is NSNull) { guard let object = region as? [String: Any], Set(object.keys) == ["start","end"], let start = number(object["start"]), let end = number(object["end"]), start < end else { throw NativeOperationError.invalid } }
++            if let slip = e["slip"] { guard let n = slip as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { throw NativeOperationError.invalid } }
++        case "tick": guard let playheads = e["playheads"] as? [String: Any], Set(playheads.keys).isSubset(of: decks), playheads.values.allSatisfy({ number($0) != nil }) else { throw NativeOperationError.invalid }
++        case "tenure": guard let edge = e["edge"] as? String, ["start","end"].contains(edge), e["holder"] is String else { throw NativeOperationError.invalid }
++        // The native engine mapper does not yet emit these shapes. Preserve
++        // safety by rejecting rather than treating unsupported history as valid.
++        case "init", "beatFx", "beatFxSettings": throw NativeOperationError.invalid
++        default: throw NativeOperationError.invalid
++        }
++    }
++    private static func canonicalUUID(_ text: String) -> Bool { UUID(uuidString: text)?.uuidString.lowercased() == text }
++    private static func bounded(_ value: Any, depth: Int) throws {
++        guard depth <= 12 else { throw NativeOperationError.invalid }
++        if let object = value as? [String: Any] {
++            guard object.count <= 64 else { throw NativeOperationError.invalid }
++            for (key, child) in object { guard key.utf8.count <= 64 else { throw NativeOperationError.invalid }; try bounded(child, depth: depth + 1) }
++        } else if let array = value as? [Any] {
++            guard array.count <= (depth == 1 ? 1024 : 128) else { throw NativeOperationError.invalid }
++            for child in array { try bounded(child, depth: depth + 1) }
++        } else if let text = value as? String { guard text.utf8.count <= 8192 else { throw NativeOperationError.invalid } }
++        else if let n = value as? NSNumber { guard n.doubleValue.isFinite, abs(n.doubleValue) <= 9_007_199_254_740_991 else { throw NativeOperationError.invalid } }
++        else if !(value is NSNull) { throw NativeOperationError.invalid }
++    }
++    private static func countTrackKeys(_ value: Any) -> Int {
++        if let object = value as? [String: Any] { return object.reduce(0) { $0 + ($1.key == "trackId" ? 1 : 0) + countTrackKeys($1.value) } }
++        if let array = value as? [Any] { return array.reduce(0) { $0 + countTrackKeys($1) } }; return 0
++    }
++    private static let eventFields: [String: Set<String>] = [
++        "load": ["t","kind","channel","trackId","bpm"], "control": ["t","kind","channel","control","value"],
++        "transport": ["t","kind","channel","action","playhead","detail","deltaSeconds","durationSeconds","filter","trackDuration","audioTime"],
++        "pitch": ["t","kind","channel","value"], "bend": ["t","kind","channel","value"], "loop": ["t","kind","channel","playhead","region","slip"],
++        "tick": ["t","kind","playheads"], "tenure": ["t","kind","edge","holder"], "beatFx": ["t","kind","selected","target","on","depth","beats","held"],
++        "beatFxSettings": ["t","kind","settings"], "init": ["t","kind","outgoingChannel","decks","crossfader","crossfaderEnabled","physicalDecks","beatFx"]]
++}
++#endif
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataReplicaTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataReplicaTests.swift
+index a85e09d1..02cd61d7 100644
+--- a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataReplicaTests.swift
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataReplicaTests.swift
+@@ -41,6 +41,44 @@ final class NativeMetadataReplicaTests: XCTestCase, @unchecked Sendable {
+         XCTAssertEqual(a.allPackets().count, 5); XCTAssertEqual(b.allPackets().count, 5)
+     }
+ 
++    @MainActor func testActiveNativeSessionCoalescesDurableChunksAndReopensOnOtherDevice() async throws {
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let group = UUID(), aID = UUID(), bID = UUID(), logical = UUID(), session = UUID()
++        let aKey = Curve25519.Signing.PrivateKey(), bKey = Curve25519.Signing.PrivateKey()
++        let members = [aID: aKey.publicKey, bID: bKey.publicKey]
++        let a = try NativeMetadataReplica(file: root.appendingPathComponent("a.json"), group: group, origin: aID, key: aKey, members: members,
++            bindings: [.init(logicalID: logical, localID: 12, contentSHA256: String(repeating: "a", count: 64), byteLength: 10)])
++        func makeB() throws -> NativeMetadataReplica {
++            try NativeMetadataReplica(file: root.appendingPathComponent("b.json"), group: group, origin: bID, key: bKey, members: members,
++                bindings: [.init(logicalID: logical, localID: 2, contentSHA256: String(repeating: "a", count: 64), byteLength: 10)])
++        }
++        let journal = try SessionEventJournal(file: root.appendingPathComponent("journal.json"))
++        let context = Data("[{\"t\":0,\"kind\":\"load\",\"channel\":\"A\",\"trackId\":12,\"bpm\":174}]".utf8)
++        try await journal.open(uuid: session, libraryIdentity: "generated-library", startedAt: Date(timeIntervalSince1970: 1790000000), context: context)
++        for second in 1...61 {
++            let event = try JSONSerialization.data(withJSONObject: [["t": second, "kind": "tick", "playheads": ["A": second]]])
++            try await journal.append(uuid: session, expectedSequence: second, events: event)
++        }
++        try a.captureHistory(await journal.all(), libraryIdentity: "generated-library")
++        XCTAssertEqual(try a.historySummary().chunks, 2)
++        XCTAssertEqual(try a.historySummary().active, 1)
++        XCTAssertEqual(a.allPackets().count, 3) // 62 events are not 62 cloud ops.
++        let b = try makeB()
++        for packet in a.allPackets() { try b.receive(packet); try b.receive(packet) }
++        XCTAssertEqual(try makeB().historySummary().sessions, 1)
++        try await journal.close(uuid: session, endedAt: Date(timeIntervalSince1970: 1790000062))
++        try a.captureHistory(await journal.all(), libraryIdentity: "generated-library")
++        for packet in a.allPackets() { try b.receive(packet) }
++        XCTAssertEqual(try b.historySummary().chunks, 3)
++        XCTAssertEqual(try b.historySummary().active, 0)
++        let count = a.allPackets().count
++        try a.captureHistory(await journal.all(), libraryIdentity: "generated-library")
++        XCTAssertEqual(a.allPackets().count, count)
++        let raw = try NativeOperationCodec.canonical(["tracks": ["2": "two", "12": "twelve"]])
++        XCTAssertEqual(String(decoding: raw, as: UTF8.self), "{\"tracks\":{\"12\":\"twelve\",\"2\":\"two\"}}")
++    }
++
+     @MainActor func testFailedCommitDoesNotAdvanceCursorAndUnboundTrackRejected() throws {
+         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+         defer { try? FileManager.default.removeItem(at: root) }
