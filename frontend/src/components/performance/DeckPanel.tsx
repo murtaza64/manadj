@@ -820,10 +820,10 @@ function PlayZone() {
             </button>
           </div>
           <CueWalkButtons
-            prevKbd={<Kbd k={`${primaryModGlyph()}${keys.jumpBack}`} />}
-            nextKbd={<Kbd k={`${primaryModGlyph()}${keys.jumpForward}`} />}
+            prevTitle={`Previous Hot Cue or track start; also moves Cue (${primaryModName()}+${keys.jumpBack.toUpperCase()})`}
+            nextTitle={`Next Hot Cue; also moves Cue (${primaryModName()}+${keys.jumpForward.toUpperCase()})`}
           />
-          <TransportPair cueKbd={<Kbd k={keys.cue} />} playKbd={<Kbd k={keys.play} />} />
+          <TransportPair cueTitle={`Cue (${keys.cue.toUpperCase()})`} playTitleSuffix={` (${keys.play.toUpperCase()})`} />
         </div>
       </div>
     </div>
@@ -1067,17 +1067,13 @@ function MixZone({ track }: { track: Track | null }) {
               : 'Key Lock off: speed and pitch coupled, like vinyl (click to hold the Key)'
           }
         >
-          <svg className="perf-keylock-icon" viewBox="0 0 16 16" aria-hidden="true">
-            <path
-              d="M5 7 V5 a3 3 0 0 1 6 0 v2"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-            />
-            <rect x="3.4" y="7" width="9.2" height="6.6" rx="1.2" fill="currentColor" />
+          <svg className="perf-keylock-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M10.5 3 8.5 19 M16.5 2 14.5 18 M6.5 9 18.5 6 M5.5 15 17.5 12"
+              fill="none" stroke="currentColor" strokeWidth="2.7" />
+            <path d="M18 18v-1.6a2 2 0 0 1 4 0V18" fill="none"
+              stroke="currentColor" strokeWidth="1.5" />
+            <rect x="17" y="18" width="6" height="5" rx=".8" fill="currentColor" />
           </svg>
-          <span>KEY LOCK</span>
         </button>
         </div>
         {/* Drift marker (key-lock 04): unlocked + |pitch| ≥ ~half a
@@ -1127,14 +1123,13 @@ function MixZone({ track }: { track: Track | null }) {
             onClick={() => onTempoAction('sync')}
             aria-label="Sync tempo"
             aria-pressed={syncStatus !== 'off'}
-            title={syncStatus === 'out-of-lock'
+            title={`${syncStatus === 'out-of-lock'
               ? 'SYNC: out of lock at pitch limit; recovers when group tempo returns in range'
               : syncStatus === 'waiting'
                 ? 'SYNC: waiting for a ready Track with BPM'
-                : 'SYNC: join/leave shared tempo; ride any member pitch fader. Quantize snaps beats once on entry.'}
+                : 'SYNC: join/leave shared tempo; ride any member pitch fader. Quantize snaps beats once on entry.'} (${primaryModName()}+Shift+${keys.fader.toUpperCase()})`}
           >
             <span className="perf-sync-label">{hint === 'sync' || syncStatus === 'out-of-lock' ? 'SYNC!' : 'SYNC'}</span>
-            <Kbd k={`${primaryModGlyph()}\u21e7${keys.fader}`} />
           </button>
           {/* MATCH as an equals glyph: = matches the other deck's tempo;
               ≠ flashes red while the target is out of pitch-fader reach. */}
@@ -1143,10 +1138,9 @@ function MixZone({ track }: { track: Track | null }) {
             disabled={!ready || !track?.bpm || !hasPlayingReference}
             onClick={() => onTempoAction('match')}
             aria-label="Match tempo"
-            title="MATCH: nearest playing Deck's tempo; align beats once with Quantize on (Shift + BEAT SYNC)"
+            title={`MATCH: nearest playing Deck's tempo; align beats once with Quantize on (Shift + BEAT SYNC; ${primaryModName()}+${keys.fader.toUpperCase()})`}
           >
             {hint === 'match' ? '\u2260' : '='}
-            <Kbd k={`${primaryModGlyph()}${keys.fader}`} offset />
           </button>
         </div>
       </div>
@@ -1232,4 +1226,4 @@ export function DeckPanel({
       <DeckDropOverlay deck={deck} state={dropState} />
     </section>
   );
-}
+  }
