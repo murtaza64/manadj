@@ -1,0 +1,430 @@
+diff --git a/backend/continuous_sync/NATIVE_CAPTURE.md b/backend/continuous_sync/NATIVE_CAPTURE.md
+index bbeae6e3..48b6fa6b 100644
+--- a/backend/continuous_sync/NATIVE_CAPTURE.md
++++ b/backend/continuous_sync/NATIVE_CAPTURE.md
+@@ -143,3 +143,28 @@ No NativeAudio/AppModel caller starts capture or polling. Integrating requires a
+ single consumer task, applying batches sequentially, explicit interruption close
+ before graph stop/restart, and a new engine epoch after a latched gap. Do not infer
+ an authorized polling policy or a hardware-safe cadence from this helper.
++
++Apple disabled host milestone (90505128): NativeAudio now owns optional load
++registry/runtime and a serialized drain barrier. AppModel library loads pass exact
++track IDs; Files import has none and rejects capture. Prepare keeps C publication
++OFF; there is no public arming entry point or AppModel prepare caller. Interruption
++stops publication, waits for prior drain, then closes incomplete before reuse.
++Apple CI applies the exact source patch on current main. Both macOS packages,
++actual unsigned iphoneos strict-concurrency build and disabled host simulator
++lifecycle test passed run45677015027 at remote4fd7ed4. This is generated stopped
++engine qualification, not active capture or physical output validation.
++
++Native library edit candidate: actor-owned bounded durable intent journal for
++first-slice title/main-cue, logical track UUIDs, original/new values, causal parent
++IDs, stable retry UUID and sequence. LibraryRepository can explicitly prepare it
++with trusted library identity/bindings and overlay cached snapshots without
++changing base bytes. Reopen recovers overlays, divergent base values remain
++visible as conflicts, no wall-clock winner or acknowledgement inferred from value
++equality. Ambiguous write freezes until reopen; capacity/corrupt bytes retained.
++119 Core Linux tests pass including actual repository replacement/reopen fixture.
++No app caller, signed serialization, verified receipts/pruning, transport, native
++OAuth library resource or trusted binding provisioning exists yet. Whole-envelope
++rewrite at1024intents/1MiB is a generated safety ceiling, not energy/production
++capacity evidence. Parent-directory/APFS durability and exclusive-owner limits
++of SessionEventJournal.durableWrite also apply. No archive UI added: tombstone
++semantics still belong to signed application adapter.
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift
+new file mode 100644
+index 00000000..36026fd7
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift
+@@ -0,0 +1,139 @@
++import Foundation
++
++public enum LibraryEditJournalError: Error, Equatable {
++    case invalid, staleValue, full, persistence, identityMismatch
++}
++
++/// Local edit intent, not a signed continuous-sync operation or a relay receipt.
++/// This scope deliberately has no pruning/ack API until verified transport exists.
++public enum LibraryEditValue: Codable, Equatable, Sendable {
++    case title(String)
++    case mainCue(Double?)
++
++    public var field: String {
++        switch self { case .title: return "title"; case .mainCue: return "main_cue" }
++    }
++    fileprivate var valid: Bool {
++        switch self {
++        case .title(let text): return text.utf8.count <= 4096
++        case .mainCue(let value): return value.map { $0.isFinite && $0 >= 0 } ?? true
++        }
++    }
++}
++
++public struct LibraryEditIntent: Codable, Equatable, Sendable {
++    public let id: UUID
++    public let sequence: Int
++    public let logicalTrackID: UUID
++    public let oldValue: LibraryEditValue
++    public let newValue: LibraryEditValue
++    /// Known signed causal operation IDs when the edit was made. Never wall-clock LWW.
++    public let parents: [UUID]
++}
++
++public struct LibraryEditProjection: Equatable, Sendable {
++    public let value: LibraryEditValue
++    /// A differing remote/base value is preserved for an explicit later decision.
++    public let conflictingBase: LibraryEditValue?
++}
++
++/// One exclusive owner, generated qualification limits. All pending edits survive
++/// restart, and local overlays become visible only after durable persistence.
++/// No caller in the app enables this candidate yet.
++public actor LibraryEditJournal {
++    private struct Envelope: Codable {
++        let version: Int
++        let libraryIdentity: String
++        let intents: [LibraryEditIntent]
++    }
++    public static let maximumBytes = 1024 * 1024
++    public static let maximumIntents = 1024
++    private let file: URL
++    public let libraryIdentity: String
++    private var intents: [LibraryEditIntent]
++    private var frozen = false
++    private let writer: @Sendable (Data, URL) throws -> Void
++
++    public init(file: URL, libraryIdentity: String,
++                writer: @escaping @Sendable (Data, URL) throws -> Void = SessionEventJournal.durableWrite) throws {
++        guard file.isFileURL, !libraryIdentity.isEmpty, libraryIdentity.utf8.count <= 256 else {
++            throw LibraryEditJournalError.invalid
++        }
++        self.file = file; self.libraryIdentity = libraryIdentity; self.writer = writer
++        if FileManager.default.fileExists(atPath: file.path) {
++            let properties = try file.resourceValues(forKeys: [.fileSizeKey, .isSymbolicLinkKey])
++            guard properties.isSymbolicLink != true,
++                  let size = properties.fileSize, size <= Self.maximumBytes else { throw LibraryEditJournalError.invalid }
++            let bytes = try Data(contentsOf: file)
++            guard bytes.count <= Self.maximumBytes else { throw LibraryEditJournalError.full }
++            let envelope = try JSONDecoder().decode(Envelope.self, from: bytes)
++            guard envelope.version == 1, envelope.libraryIdentity == libraryIdentity else {
++                throw LibraryEditJournalError.identityMismatch
++            }
++            guard envelope.intents.count <= Self.maximumIntents,
++                  Set(envelope.intents.map(\.id)).count == envelope.intents.count else { throw LibraryEditJournalError.invalid }
++            for (index, intent) in envelope.intents.enumerated() {
++                guard intent.sequence == index + 1, Self.valid(intent) else { throw LibraryEditJournalError.invalid }
++                if let previous = envelope.intents[..<index].last(where: {
++                    $0.logicalTrackID == intent.logicalTrackID && $0.newValue.field == intent.newValue.field
++                }) {
++                    guard previous.newValue == intent.oldValue else { throw LibraryEditJournalError.invalid }
++                }
++            }
++            intents = envelope.intents
++        } else { intents = [] }
++    }
++
++    public func pending() -> [LibraryEditIntent] { intents }
++
++    @discardableResult
++    public func append(id: UUID = UUID(), logicalTrackID: UUID, oldValue: LibraryEditValue,
++                       newValue: LibraryEditValue, parents: [UUID]) throws -> LibraryEditIntent {
++        guard !frozen else { throw LibraryEditJournalError.persistence }
++        if let existing = intents.first(where: { $0.id == id }) {
++            guard existing.logicalTrackID == logicalTrackID, existing.oldValue == oldValue,
++                  existing.newValue == newValue, existing.parents == parents else { throw LibraryEditJournalError.invalid }
++            return existing
++        }
++        let intent = LibraryEditIntent(id: id, sequence: intents.count + 1, logicalTrackID: logicalTrackID,
++            oldValue: oldValue, newValue: newValue, parents: parents)
++        guard Self.valid(intent) else { throw LibraryEditJournalError.invalid }
++        if let previous = intents.last(where: {
++            $0.logicalTrackID == logicalTrackID && $0.newValue.field == newValue.field
++        }), previous.newValue != oldValue { throw LibraryEditJournalError.staleValue }
++        guard intents.count < Self.maximumIntents else { throw LibraryEditJournalError.full }
++        let next = intents + [intent]
++        let bytes = try JSONEncoder().encode(Envelope(version: 1, libraryIdentity: libraryIdentity, intents: next))
++        guard bytes.count <= Self.maximumBytes else { throw LibraryEditJournalError.full }
++        do { try writer(bytes, file) }
++        catch {
++            // A writer can fail after rename. Reopen before any retry so sequence
++            // and UUID never diverge from uncertain persisted state.
++            frozen = true
++            throw LibraryEditJournalError.persistence
++        }
++        intents = next
++        return intent
++    }
++
++    public func project(logicalTrackID: UUID, base: LibraryEditValue) -> LibraryEditProjection {
++        Self.project(intents, logicalTrackID: logicalTrackID, base: base)
++    }
++
++    public nonisolated static func project(_ intents: [LibraryEditIntent], logicalTrackID: UUID,
++                                           base: LibraryEditValue) -> LibraryEditProjection {
++        let edits = intents.filter { $0.logicalTrackID == logicalTrackID && $0.newValue.field == base.field }
++        guard let first = edits.first, let last = edits.last else {
++            return .init(value: base, conflictingBase: nil)
++        }
++        // Matching a value is not a verified receipt, so retain every intent.
++        let conflict = base != first.oldValue && base != last.newValue
++        return .init(value: last.newValue, conflictingBase: conflict ? base : nil)
++    }
++
++    private static func valid(_ intent: LibraryEditIntent) -> Bool {
++        intent.sequence > 0 && intent.oldValue.valid && intent.newValue.valid &&
++        intent.oldValue.field == intent.newValue.field && intent.oldValue != intent.newValue &&
++        intent.parents.count <= 32 && Set(intent.parents).count == intent.parents.count
++    }
++}
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryRepository.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryRepository.swift
+index 8a3f41a5..25039ce1 100644
+--- a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryRepository.swift
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryRepository.swift
+@@ -16,6 +16,60 @@ public actor LibraryRepository {
+     public let recoveryWarning: String?
+     private var snapshot: Snapshot?
+     private var syncing = false
++    private var editJournal: LibraryEditJournal?
++    private var editBindings: [Int: UUID] = [:]
++    private var editMutation = false
++
++    /// Disabled candidate: caller must supply verified logical bindings. Local
++    /// desktop IDs alone are never converted into cross-device identity.
++    public func prepareEdits(libraryIdentity: String, bindings: [Int: UUID]) throws {
++        guard editJournal == nil, !syncing, bindings.keys.allSatisfy({ $0 > 0 }),
++              Set(bindings.values).count == bindings.count else { throw LibraryEditJournalError.invalid }
++        editJournal = try LibraryEditJournal(file: store.root.appendingPathComponent("continuous-edits.json"), libraryIdentity: libraryIdentity)
++        editBindings = bindings
++    }
++
++    public func editTrack(_ localID: Int, to value: LibraryEditValue, parents: [UUID]) async throws {
++        guard !syncing, !editMutation, let journal = editJournal, let logical = editBindings[localID],
++              let track = snapshot?.tracks.first(where: { $0.id == localID }) else { throw LibraryEditJournalError.invalid }
++        editMutation = true
++        defer { editMutation = false }
++        let base: LibraryEditValue = value.field == "title" ? .title(track.title) : .mainCue(track.mainCue)
++        let previous = await journal.project(logicalTrackID: logical, base: base)
++        _ = try await journal.append(logicalTrackID: logical, oldValue: previous.value, newValue: value, parents: parents)
++    }
++
++    public func pendingEdits() async -> [LibraryEditIntent] { await editJournal?.pending() ?? [] }
++
++    private func projectedSnapshot() async -> Snapshot? {
++        guard var result = snapshot, let journal = editJournal else { return snapshot }
++        // Capture bindings before await. prepareEdits is one-shot and snapshots
++        // are value types, so reentrancy cannot mix libraries or overwrite disk.
++        let bindings = editBindings
++        let intents = await journal.pending()
++        for index in result.tracks.indices {
++            guard let logical = bindings[result.tracks[index].id] else { continue }
++            let title = LibraryEditJournal.project(intents, logicalTrackID: logical, base: .title(result.tracks[index].title))
++            let cue = LibraryEditJournal.project(intents, logicalTrackID: logical, base: .mainCue(result.tracks[index].mainCue))
++            if case .title(let value) = title.value { result.tracks[index].title = value }
++            if case .mainCue(let value) = cue.value { result.tracks[index].mainCue = value }
++        }
++        return result
++    }
++
++    public func editConflicts() async -> [UUID: [LibraryEditProjection]] {
++        guard let snapshot, let journal = editJournal else { return [:] }
++        var result: [UUID: [LibraryEditProjection]] = [:]
++        let intents = await journal.pending()
++        for track in snapshot.tracks {
++            guard let logical = editBindings[track.id] else { continue }
++            for base in [LibraryEditValue.title(track.title), .mainCue(track.mainCue)] {
++                let projection = LibraryEditJournal.project(intents, logicalTrackID: logical, base: base)
++                if projection.conflictingBase != nil { result[logical, default: []].append(projection) }
++            }
++        }
++        return result
++    }
+     public init(root: URL) throws {
+         store = try LibraryStore(root: root)
+         do {
+@@ -30,9 +84,9 @@ public actor LibraryRepository {
+             recoveryWarning = "The offline snapshot was unreadable and was kept separately. Sync again to restore the library."
+         }
+     }
+-    public func cachedSnapshot() -> Snapshot? { snapshot }
++    public func cachedSnapshot() async -> Snapshot? { await projectedSnapshot() }
+     public func sync(_ connection: DesktopConnection, allAudio: Bool = false, progress: (@Sendable (LibrarySyncProgress) async -> Void)? = nil) async throws -> Snapshot {
+-        guard !syncing else { throw SyncError("A library sync is already in progress") }
++        guard !syncing, !editMutation else { throw SyncError("A library sync is already in progress") }
+         syncing = true
+         defer { syncing = false }
+         await progress?(.init(phase: .library))
+@@ -81,7 +135,7 @@ public actor LibraryRepository {
+             }
+         }
+         try Task.checkCancellation()
+-        return next
++        return await projectedSnapshot() ?? next
+     }
+     public func audio(_ track: LibraryTrack, connection: DesktopConnection?) async throws -> URL {
+         guard let target = store.audioFile(track) else { throw SyncError("Track has no downloadable audio revision. Sync the desktop library again.") }
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/Models.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/Models.swift
+index 0bee9469..ed859833 100644
+--- a/ios/Packages/ManadjCore/Sources/ManadjCore/Models.swift
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/Models.swift
+@@ -72,7 +72,7 @@ public struct MetricLadder: Equatable, Sendable {
+ /// A desktop Library Track as synced to the device. `id` is the desktop Track id.
+ public struct LibraryTrack: Equatable, Sendable, Identifiable {
+     public let id: Int
+-    public let title: String
++    public var title: String
+     public let artist: String?
+     public let fileName: String
+     public let bpm: Double?
+@@ -84,7 +84,7 @@ public struct LibraryTrack: Equatable, Sendable, Identifiable {
+     public let energy: Int?
+     public let durationSecs: Double?
+     public let dateAdded: Date?
+-    public let mainCue: Double?
++    public var mainCue: Double?
+     public let codec: String?
+     public let fileSizeBytes: Int64?
+     public let audioRev: String?
+@@ -150,7 +150,7 @@ public struct Snapshot: Sendable {
+     public let generatedAt: Date?
+     public let categories: [TagCategory]
+     public let tags: [LibraryTag]
+-    public let tracks: [LibraryTrack]
++    public var tracks: [LibraryTrack]
+     public let playlists: [Playlist]
+     public let links: [(Int, Int)]
+     public let transitions: [TransitionEdge]
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift
+new file mode 100644
+index 00000000..82c6dc9f
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift
+@@ -0,0 +1,129 @@
++import XCTest
++@testable import ManadjCore
++
++final class LibraryEditJournalTests: XCTestCase, @unchecked Sendable {
++    func file() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("edits.json") }
++
++    func testDurableOverlayRetryAndConflict() async throws {
++        let file = file(); defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
++        let track = UUID(), parent = UUID(), id = UUID()
++        let journal = try LibraryEditJournal(file: file, libraryIdentity: "generated-library")
++        let first = try await journal.append(id: id, logicalTrackID: track, oldValue: .title("Before"), newValue: .title("After"), parents: [parent])
++        let retry = try await journal.append(id: id, logicalTrackID: track, oldValue: .title("Before"), newValue: .title("After"), parents: [parent])
++        XCTAssertEqual(first, retry)
++        let second = try await journal.append(logicalTrackID: track, oldValue: .title("After"), newValue: .title("Final"), parents: [parent])
++        XCTAssertEqual(second.sequence, 2)
++        let reopened = try LibraryEditJournal(file: file, libraryIdentity: "generated-library")
++        let pending = await reopened.pending()
++        XCTAssertEqual(pending, [first, second])
++        let clean = await reopened.project(logicalTrackID: track, base: .title("Before"))
++        XCTAssertEqual(clean, .init(value: .title("Final"), conflictingBase: nil))
++        let conflict = await reopened.project(logicalTrackID: track, base: .title("Remote"))
++        XCTAssertEqual(conflict, .init(value: .title("Final"), conflictingBase: .title("Remote")))
++        let matching = await reopened.project(logicalTrackID: track, base: .title("Final"))
++        XCTAssertNil(matching.conflictingBase)
++        let retained = await reopened.pending()
++        XCTAssertEqual(retained.count, 2, "Value equality is not transport acknowledgement")
++        XCTAssertThrowsError(try LibraryEditJournal(file: file, libraryIdentity: "other-library"))
++    }
++
++    func testInvalidStaleAndRetryMismatchDoNotChangeDisk() async throws {
++        let file = file(); defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
++        let journal = try LibraryEditJournal(file: file, libraryIdentity: "test")
++        let track = UUID(), id = UUID()
++        _ = try await journal.append(id: id, logicalTrackID: track, oldValue: .mainCue(nil), newValue: .mainCue(2), parents: [])
++        let before = try Data(contentsOf: file)
++        let attempts: [(UUID, LibraryEditValue, LibraryEditValue, [UUID])] = [
++            (id, .mainCue(nil), .mainCue(3), []),
++            (UUID(), .mainCue(nil), .mainCue(3), []),
++            (UUID(), .mainCue(2), .mainCue(.nan), []),
++            (UUID(), .mainCue(2), .title("bad"), []),
++            (UUID(), .title("same"), .title("same"), []),
++            (UUID(), .mainCue(2), .mainCue(-1), [])
++        ]
++        for (id, old, new, parents) in attempts {
++            do { _ = try await journal.append(id: id, logicalTrackID: track, oldValue: old, newValue: new, parents: parents); XCTFail("accepted invalid/stale") }
++            catch { }
++        }
++        XCTAssertEqual(try Data(contentsOf: file), before)
++        let second = try await journal.append(logicalTrackID: UUID(), oldValue: .mainCue(nil), newValue: .mainCue(3), parents: [])
++        XCTAssertEqual(second.sequence, 2)
++    }
++
++    func testUncertainWriteFreezesUntilReopen() async throws {
++        let file = file(); defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
++        let id = UUID(), track = UUID()
++        let journal = try LibraryEditJournal(file: file, libraryIdentity: "test", writer: { bytes, target in
++            try SessionEventJournal.durableWrite(bytes, target)
++            throw LibraryEditJournalError.persistence
++        })
++        for _ in 0..<2 {
++            do { _ = try await journal.append(id: id, logicalTrackID: track, oldValue: .title("a"), newValue: .title("b"), parents: []); XCTFail("uncertain write succeeded") }
++            catch { XCTAssertEqual(error as? LibraryEditJournalError, .persistence) }
++        }
++        let reopened = try LibraryEditJournal(file: file, libraryIdentity: "test")
++        let retry = try await reopened.append(id: id, logicalTrackID: track, oldValue: .title("a"), newValue: .title("b"), parents: [])
++        XCTAssertEqual(retry.sequence, 1)
++        let pending = await reopened.pending()
++        XCTAssertEqual(pending.count, 1)
++    }
++
++    func testActualRepositoryOverlaySurvivesSnapshotReplacementAndLocalIDsStayScoped() async throws {
++        let root = file().deletingLastPathComponent(); defer { try? FileManager.default.removeItem(at: root) }
++        let initial = #"{"version":1,"tag_categories":[],"tags":[],"playlists":[],"settings":{},"tracks":[{"id":42,"title":"Original","file_name":"generated.wav","main_cue":1}]}"#
++        let remote = #"{"version":1,"tag_categories":[],"tags":[],"playlists":[],"settings":{},"tracks":[{"id":42,"title":"Remote edit","file_name":"generated.wav","main_cue":1}]}"#
++        let store = try LibraryStore(root: root)
++        try store.saveSnapshot(initial)
++        let logical = UUID()
++        let repository = try LibraryRepository(root: root)
++        try await repository.prepareEdits(libraryIdentity: "generated-library", bindings: [42: logical])
++        try await repository.editTrack(42, to: .title("Offline local edit"), parents: [])
++        try await repository.editTrack(42, to: .mainCue(12.5), parents: [])
++        let overlay = await repository.cachedSnapshot()
++        XCTAssertEqual(overlay?.tracks[0].title, "Offline local edit")
++        XCTAssertEqual(overlay?.tracks[0].mainCue, 12.5)
++        XCTAssertEqual(try store.readSnapshot()?.tracks[0].title, "Original", "Overlay never mutates base snapshot")
++        try store.saveSnapshot(remote)
++        let reopened = try LibraryRepository(root: root)
++        try await reopened.prepareEdits(libraryIdentity: "generated-library", bindings: [42: logical])
++        let recovered = await reopened.cachedSnapshot()
++        XCTAssertEqual(recovered?.tracks[0].title, "Offline local edit")
++        let conflicts = await reopened.editConflicts()
++        XCTAssertEqual(conflicts[logical]?.first?.conflictingBase, .title("Remote edit"))
++        let pending = await reopened.pendingEdits()
++        XCTAssertEqual(pending.count, 2)
++        XCTAssertEqual(pending.map(\.logicalTrackID), [logical, logical])
++        do { try await reopened.editTrack(99, to: .title("Wrong local ID"), parents: []); XCTFail("unbound edit accepted") } catch { }
++        let other = try LibraryRepository(root: root)
++        do { try await other.prepareEdits(libraryIdentity: "other-library", bindings: [42: UUID()]); XCTFail("cross-library intent accepted") } catch { }
++    }
++
++    func testCapacityFailureRetainsAllCommittedIntents() async throws {
++        let file = file(); defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
++        let journal = try LibraryEditJournal(file: file, libraryIdentity: "capacity")
++        let track = UUID()
++        for index in 0..<LibraryEditJournal.maximumIntents {
++            _ = try await journal.append(logicalTrackID: track, oldValue: .title(String(index)), newValue: .title(String(index + 1)), parents: [])
++        }
++        let before = try Data(contentsOf: file)
++        do { _ = try await journal.append(logicalTrackID: track, oldValue: .title("1024"), newValue: .title("1025"), parents: []); XCTFail("capacity ignored") }
++        catch { XCTAssertEqual(error as? LibraryEditJournalError, .full) }
++        XCTAssertEqual(try Data(contentsOf: file), before)
++        let reopened = try LibraryEditJournal(file: file, libraryIdentity: "capacity")
++        let pending = await reopened.pending()
++        XCTAssertEqual(pending.count, LibraryEditJournal.maximumIntents)
++    }
++
++    func testCorruptAndSymlinkEvidencePreserved() throws {
++        let file = file(); defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
++        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
++        let original = Data("bad generated bytes".utf8)
++        try original.write(to: file)
++        XCTAssertThrowsError(try LibraryEditJournal(file: file, libraryIdentity: "test"))
++        XCTAssertEqual(try Data(contentsOf: file), original)
++        let link = file.deletingLastPathComponent().appendingPathComponent("link.json")
++        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: file)
++        XCTAssertThrowsError(try LibraryEditJournal(file: link, libraryIdentity: "test"))
++        XCTAssertEqual(try Data(contentsOf: file), original)
++    }
++}
