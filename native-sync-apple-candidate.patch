@@ -1,0 +1,1704 @@
+diff --git a/android/audio-engine/src/main/cpp/Engine.cpp b/android/audio-engine/src/main/cpp/Engine.cpp
+index e842407f..2dc610dc 100644
+--- a/android/audio-engine/src/main/cpp/Engine.cpp
++++ b/android/audio-engine/src/main/cpp/Engine.cpp
+@@ -1,3 +1,4 @@
++#include <cstring>
+ #include "Engine.h"
+ #include <algorithm>
+ 
+@@ -991,6 +992,9 @@ void Engine::render(float* output, int frames, int channels) noexcept {
+             scheduleHead_ = (scheduleHead_ + 1) % kScheduleSize;
+             scheduleCount_.store(scheduleCount_.load(kRelaxed) - 1, kRelaxed);
+         }
++        std::array<double, kDeckCount> capturePositions{};
++        const bool capturing = captureEnabled_.load(kRelaxed);
++        if (capturing) for (int i = 0; i < kDeckCount; ++i) capturePositions[i] = decks_[i].position.load(kRelaxed);
+         renderBuses(n, static_cast<int64_t>(now));
+         // Record the logical stereo Master, never the physical cue-routing
+         // buffer. Fixed stack scratch; worker owns conversion and disk IO.
+@@ -1019,11 +1023,68 @@ void Engine::render(float* output, int frames, int channels) noexcept {
+         }
+         if (captureMaster) masterRecorder.push(recorded.data(), n, outputRate_.load(kRelaxed), captureMaster);
+         done += n;
++        if (capturing) publishCapture(now, start + done, capturePositions);
+     }
+     if (clicksLeft_ > 0) renderClicks(output, frames, channels, start);
+     outputFrames_.fetch_add(frames, kRelease);
+ }
+ 
++void Engine::publishCapture(uint64_t start, uint64_t frame, const std::array<double, kDeckCount>& positions) noexcept {
++    CaptureSnapshot snap{};
++    snap.frame = frame; snap.segmentStart = start; snap.sampleRate = outputRate(); snap.crossfade = crossfade();
++    snap.fxEffect = fxEffect(); snap.fxTarget = fxTarget(); snap.fxHeld = fxHeld();
++    snap.fxOn = fxOn(); snap.fxDepth = fxDepth(); snap.fxBeats = fxBeats();
++    for (int i = 0; i < kDeckCount; ++i) {
++        const auto& d = decks_[i]; auto& c = snap.decks[i];
++        c.load = d.loadId.load(); c.transport = d.transport.load(); c.launchFrame = d.launchAt.load();
++        c.position = d.position.load(); c.startPosition = positions[i]; c.bpm = d.bpm.load();
++        c.loopStart = d.loopStart.load(); c.loopEnd = d.loopEnd.load();
++        c.fader = d.fader.load(); c.trim = d.trim.load(); c.pitch = d.pitch.load(); c.bend = d.bend.load(); c.filter = d.filter.load();
++        c.previewSlot = d.previewSlot.load(); c.playing = d.playing.load(); c.preview = d.preview.load();
++        c.scratching = d.scratching.load(); c.loop = d.loopActive.load(); c.pfl = d.pfl.load();
++        const auto status = d.status.load();
++        c.ready = c.load != 0 && (status & 3) == kReady && (status >> 2) == c.load && (d.ring.load() == c.transport || d.inTrack.load());
++        for (int k = 0; k < 3; ++k) c.eq[k] = d.eq[k].load();
++        for (int k = 0; k < kStems; ++k) c.stems[k] = d.stemTarget[k].load();
++    }
++    // SPSC queue slots are owned by producer until release-published and by
++    // consumer until release-consumed. No overwrite and no callback waiting.
++    const auto write = captureWrite_.load(kRelaxed);
++    if (write - captureRead_.load(kAcquire) >= kCaptureQueue) captureGap_.store(true, kRelease);
++    else if (!captureGap_.load(kRelaxed)) {
++        captureQueue_[write % kCaptureQueue] = snap;
++        captureWrite_.store(write + 1, kRelease);
++    }
++    std::array<uint64_t, kCaptureWords> words{};
++    std::memcpy(words.data(), &snap, sizeof(snap));
++    captureRevision_.fetch_add(1); // odd, published bytes are changing
++    for (size_t i = 0; i < kCaptureWords; ++i) captureWords_[i].store(words[i]);
++    captureRevision_.fetch_add(1); // even, complete frame/mixer/deck snapshot
++}
++
++int Engine::popCapture(CaptureSnapshot& result) noexcept {
++    if (captureGap_.load(kAcquire)) return -1;
++    const auto read = captureRead_.load(kRelaxed);
++    if (read == captureWrite_.load(kAcquire)) return 0;
++    result = captureQueue_[read % kCaptureQueue];
++    captureRead_.store(read + 1, kRelease);
++    return captureGap_.load(kAcquire) ? -1 : 1;
++}
++
++bool Engine::captureSnapshot(CaptureSnapshot& result) const noexcept {
++    if (!captureEnabled_.load()) return false;
++    std::array<uint64_t, kCaptureWords> words{};
++    for (int attempt = 0; attempt < 4; ++attempt) {
++        const auto before = captureRevision_.load();
++        if (!before || (before & 1)) continue;
++        for (size_t i = 0; i < kCaptureWords; ++i) words[i] = captureWords_[i].load();
++        if (captureRevision_.load() != before) continue;
++        std::memcpy(&result, words.data(), sizeof(result));
++        return true;
++    }
++    return false;
++}
++
+ // Crossfade tail of whatever was heard before the last relocation/stop. Returns whether it wrote.
+ bool Engine::renderTail(Deck& d, float* strip, int frames) noexcept {
+     bool active = false;
+diff --git a/android/audio-engine/src/main/cpp/Engine.h b/android/audio-engine/src/main/cpp/Engine.h
+index c01d7bda..73145f3f 100644
+--- a/android/audio-engine/src/main/cpp/Engine.h
++++ b/android/audio-engine/src/main/cpp/Engine.h
+@@ -250,9 +250,36 @@ struct Deck {
+     float tailCueGain = 0;
+ };
+ 
++// Callback-published capture state. Reader never assembles live deck atomics.
++// No allocation/lock on callback; bounded reader may skip a busy sample.
++static_assert(std::atomic<uint64_t>::is_always_lock_free, "Capture publication requires lock-free words");
++struct CaptureDeck {
++    uint64_t load = 0, transport = 0, launchFrame = 0;
++    double position = 0, startPosition = 0, bpm = 0, loopStart = 0, loopEnd = 0;
++    float fader = 0, trim = 0, pitch = 0, bend = 0, filter = 0;
++    std::array<float, 3> eq{};
++    std::array<float, 4> stems{};
++    int previewSlot = -1;
++    bool playing = false, preview = false, scratching = false, loop = false, pfl = false, ready = false;
++};
++struct CaptureSnapshot {
++    uint64_t frame = 0, segmentStart = 0;
++    int sampleRate = 0;
++    float crossfade = 0;
++    int fxEffect = 0, fxTarget = 0, fxHeld = 0;
++    bool fxOn = false;
++    double fxDepth = 0, fxBeats = 0;
++    std::array<CaptureDeck, kDeckCount> decks{};
++};
++
+ class Engine {
+ public:
+     MasterRecorder masterRecorder;
++    bool captureSnapshot(CaptureSnapshot& result) const noexcept;
++    // Single consumer only. 1=frame, 0=empty, -1=overflow: recording must
++    // stop/report incomplete evidence rather than silently skip heard changes.
++    int popCapture(CaptureSnapshot& result) noexcept;
++    void enableCapture(bool enabled) noexcept { captureEnabled_.store(enabled); }
+     explicit Engine(int outputRate = 48000);
+     // Any thread; one producer lock, never taken on the callback. Returns 0 if full.
+     uint64_t submit(Op op, int deck, double value = 0, uint64_t load = 0, int slot = 0, const double* aux = nullptr);
+@@ -351,6 +378,17 @@ public:
+     bool trackCovers(const Deck& d, double seconds, double spanFrames) const noexcept;
+ 
+ private:
++    // Atomic byte representation avoids the C++ data race of a plain-data
++    // seqlock. Fixed size, one writer (callback), any number of readers.
++    static constexpr size_t kCaptureWords = (sizeof(CaptureSnapshot) + 7) / 8;
++    std::array<std::atomic<uint64_t>, kCaptureWords> captureWords_{};
++    std::atomic<uint64_t> captureRevision_{0};
++    std::atomic<bool> captureEnabled_{false};
++    static constexpr uint64_t kCaptureQueue = 128;
++    std::array<CaptureSnapshot, kCaptureQueue> captureQueue_{};
++    std::atomic<uint64_t> captureWrite_{0}, captureRead_{0};
++    std::atomic<bool> captureGap_{false};
++    void publishCapture(uint64_t start, uint64_t frame, const std::array<double, kDeckCount>& positions) noexcept;
+     std::array<Deck, kDeckCount> decks_{};
+     std::array<Command, kQueueSize> commands_{};
+     std::atomic<uint64_t> lateOps_{0};
+diff --git a/ios/Manadj/AppModel.swift b/ios/Manadj/AppModel.swift
+index fa659ec8..3a7719a0 100644
+--- a/ios/Manadj/AppModel.swift
++++ b/ios/Manadj/AppModel.swift
+@@ -332,7 +332,7 @@ struct DeckViewState {
+                 liveStatus = "Preparing deck \(Ink.deckName(index)) audio · silent until ready"
+                 let file = try await repository.audio(track, connection: connection)
+                 try Task.checkCancellation()
+-                let duration = try await audio.load(file, deck: index)
++                let duration = try await audio.load(file, deck: index, libraryTrackID: track.id)
+                 try Task.checkCancellation()
+                 decks[index].track = track; decks[index].title = track.title
+                 decks[index].artist = track.artist ?? ""; decks[index].duration = duration
+@@ -487,7 +487,7 @@ struct DeckViewState {
+                 let url = try await repository.audio(track, connection: connection)
+                 try Task.checkCancellation()
+                 guard deckLoadIDs[deck] == loadID else { return }
+-                let duration = try await audio.load(url, deck: deck)
++                let duration = try await audio.load(url, deck: deck, libraryTrackID: track.id)
+                 try Task.checkCancellation()
+                 guard deckLoadIDs[deck] == loadID else { return }
+                 let grid = track.grid
+diff --git a/ios/ManadjTests/NativeAudioTests.swift b/ios/ManadjTests/NativeAudioTests.swift
+index 482c1692..86fefbde 100644
+--- a/ios/ManadjTests/NativeAudioTests.swift
++++ b/ios/ManadjTests/NativeAudioTests.swift
+@@ -661,3 +661,20 @@ final class NativeAudioTests: XCTestCase {
+     }
+ 
+ }
++
++extension NativeAudioTests {
++    @MainActor func testSessionCaptureCandidateRemainsDisabledAndLifecycleCloses() async throws {
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let journal = try SessionEventJournal(file: root.appendingPathComponent("manifest.json"))
++        let audio = try NativeAudio()
++        try audio.prepareSessionCapture(journal: journal, libraryIdentity: "generated-apple-host")
++        XCTAssertTrue(audio.sessionCaptureIsPrepared)
++        XCTAssertNil(audio.captureSnapshot(), "Preparing host ownership never enables capture")
++        try await audio.drainPreparedSessionCapture()
++        let sessions = await journal.all(); XCTAssertTrue(sessions.isEmpty)
++        audio.stopSessionCapture(incomplete: true)
++        XCTAssertFalse(audio.sessionCaptureIsPrepared)
++        XCTAssertThrowsError(try audio.prepareSessionCapture(journal: journal, libraryIdentity: "generated-apple-host"))
++    }
++}
+diff --git a/ios/Packages/ManadjAudio/Package.swift b/ios/Packages/ManadjAudio/Package.swift
+index 74483c55..dfa1923b 100644
+--- a/ios/Packages/ManadjAudio/Package.swift
++++ b/ios/Packages/ManadjAudio/Package.swift
+@@ -7,11 +7,12 @@ let package = Package(
+     name: "ManadjAudio",
+     platforms: [.iOS(.v17), .macOS(.v14)],
+     products: [.library(name: "ManadjAudio", targets: ["ManadjAudio"])],
++    dependencies: [.package(path: "../ManadjCore")],
+     targets: [
+         .target(name: "CEngine", publicHeadersPath: "include", cxxSettings: [
+             .unsafeFlags(["-O3", "-I", sharedHeaders])
+         ]),
+-        .target(name: "ManadjAudio", dependencies: ["CEngine"]),
++        .target(name: "ManadjAudio", dependencies: ["CEngine", "ManadjCore"]),
+         .testTarget(name: "ManadjAudioTests", dependencies: ["ManadjAudio", "CEngine"])
+     ],
+     cxxLanguageStandard: .cxx17
+diff --git a/ios/Packages/ManadjAudio/Sources/CEngine/EngineBridge.cpp b/ios/Packages/ManadjAudio/Sources/CEngine/EngineBridge.cpp
+index efe63d40..d566b9b6 100644
+--- a/ios/Packages/ManadjAudio/Sources/CEngine/EngineBridge.cpp
++++ b/ios/Packages/ManadjAudio/Sources/CEngine/EngineBridge.cpp
+@@ -8,6 +8,38 @@ using namespace manadj;
+ static Engine *E(MDJEngine e) { return static_cast<Engine *>(e); }
+ static bool valid(int d) { return d >= 0 && d < kDeckCount; }
+ extern "C" {
++void mdj_capture_enable(MDJEngine e, bool enabled) { if (e) E(e)->enableCapture(enabled); }
++static void captureConvert(const CaptureSnapshot& snap, MDJCaptureSnapshot* result) {
++    MDJCaptureSnapshot out{};
++    out.frame = snap.frame; out.segmentStart = snap.segmentStart; out.sampleRate = snap.sampleRate; out.crossfade = snap.crossfade;
++    out.fxEffect = snap.fxEffect; out.fxTarget = snap.fxTarget; out.fxHeld = snap.fxHeld;
++    out.fxOn = snap.fxOn; out.fxDepth = snap.fxDepth; out.fxBeats = snap.fxBeats;
++    for (int i = 0; i < 4; ++i) {
++        const auto& c = snap.decks[i]; auto& d = out.decks[i];
++        d.load = c.load; d.transport = c.transport; d.launchFrame = c.launchFrame;
++        d.position = c.position; d.startPosition = c.startPosition; d.bpm = c.bpm; d.loopStart = c.loopStart; d.loopEnd = c.loopEnd;
++        d.fader = c.fader; d.trim = c.trim; d.pitch = c.pitch; d.bend = c.bend; d.filter = c.filter;
++        d.previewSlot = c.previewSlot; d.playing = c.playing; d.preview = c.preview;
++        d.scratching = c.scratching; d.loop = c.loop; d.pfl = c.pfl; d.ready = c.ready;
++        for (int k = 0; k < 3; ++k) d.eq[k] = c.eq[k];
++        for (int k = 0; k < 4; ++k) d.stems[k] = c.stems[k];
++    }
++    *result = out;
++}
++bool mdj_capture_snapshot(MDJEngine e, MDJCaptureSnapshot* result) {
++    if (!e || !result) return false;
++    CaptureSnapshot snap;
++    if (!E(e)->captureSnapshot(snap)) return false;
++    captureConvert(snap, result);
++    return true;
++}
++int mdj_capture_pop(MDJEngine e, MDJCaptureSnapshot* result) {
++    if (!e || !result) return -1;
++    CaptureSnapshot snap;
++    const int status = E(e)->popCapture(snap);
++    if (status == 1) captureConvert(snap, result);
++    return status;
++}
+ MDJEngine mdj_create(int rate) { try { return new Engine(rate); } catch (...) { return nullptr; } }
+ void mdj_destroy(MDJEngine e) { delete E(e); }
+ void mdj_set_rate(MDJEngine e, int r) { E(e)->setOutputRate(r); }
+diff --git a/ios/Packages/ManadjAudio/Sources/CEngine/include/CEngine.h b/ios/Packages/ManadjAudio/Sources/CEngine/include/CEngine.h
+index 0f95c78d..9af99d07 100644
+--- a/ios/Packages/ManadjAudio/Sources/CEngine/include/CEngine.h
++++ b/ios/Packages/ManadjAudio/Sources/CEngine/include/CEngine.h
+@@ -21,6 +21,28 @@ typedef struct {
+     float fader, trim, pitch, bend, filter, eq[3];
+     bool playing, preview, ready, fullyDecoded, keyLock, keyLockActive, pfl, loopActive;
+ } MDJDeck;
++typedef struct {
++    uint64_t load, transport, launchFrame;
++    double position, startPosition, bpm, loopStart, loopEnd;
++    float fader, trim, pitch, bend, filter, eq[3], stems[4];
++    int previewSlot;
++    bool playing, preview, scratching, loop, pfl, ready;
++} MDJCaptureDeck;
++typedef struct {
++    uint64_t frame, segmentStart;
++    int sampleRate;
++    float crossfade;
++    int fxEffect, fxTarget, fxHeld;
++    bool fxOn;
++    double fxDepth, fxBeats;
++    MDJCaptureDeck decks[4];
++} MDJCaptureSnapshot;
++// Returns false before first render or during bounded publication contention.
++// On false the caller keeps its old state and does not invent a new event.
++void mdj_capture_enable(MDJEngine engine, bool enabled);
++bool mdj_capture_snapshot(MDJEngine engine, MDJCaptureSnapshot *result);
++// One consumer, 1=frame, 0=empty, -1=gap. Gap remains latched for this engine.
++int mdj_capture_pop(MDJEngine engine, MDJCaptureSnapshot *result);
+ MDJEngine mdj_create(int rate);
+ void mdj_destroy(MDJEngine engine);
+ void mdj_set_rate(MDJEngine engine, int rate); // output stopped only
+diff --git a/ios/Packages/ManadjAudio/Sources/ManadjAudio/NativeAudio.swift b/ios/Packages/ManadjAudio/Sources/ManadjAudio/NativeAudio.swift
+index 62359c6c..fd38fbf0 100644
+--- a/ios/Packages/ManadjAudio/Sources/ManadjAudio/NativeAudio.swift
++++ b/ios/Packages/ManadjAudio/Sources/ManadjAudio/NativeAudio.swift
+@@ -3,6 +3,7 @@ import AVFoundation
+ import Accelerate
+ import CEngine
+ import Foundation
++import ManadjCore
+ 
+ /// Owned by callback and workers. Destruction happens only after both have released it.
+ final class EngineHandle: @unchecked Sendable {
+@@ -67,6 +68,11 @@ private final class NotificationTokens: @unchecked Sendable {
+     private let graph = AVAudioEngine()
+     private let node: AVAudioSourceNode
+     private var sequence: UInt64 = 0
++    private var captureLoads: SessionCaptureLoads?
++    private var captureRuntime: SessionCaptureRuntime?
++    private var captureTask: Task<Void, Error>?
++    private var captureFailure: String?
++    public var onCaptureFailure: ((String) -> Void)?
+     private let workers = (0..<4).map { DispatchQueue(label: "dev.manadj.decode.\($0)", qos: .userInitiated) }
+     private let observers = NotificationTokens()
+     private var requiresRebuild = false
+@@ -120,6 +126,7 @@ private final class NotificationTokens: @unchecked Sendable {
+         send(MDJHeardLatency, value: session.outputLatency + session.ioBufferDuration)
+     }
+     private func interrupt(_ reason: String) {
++        stopSessionCapture(incomplete: true)
+         for deck in 0..<4 { send(MDJPause, deck: deck); send(MDJBend, deck: deck, value: 0); send(MDJCueUp, deck: deck); for slot in 0..<8 { send(MDJHotCueUp, deck: deck, slot: slot) } }
+         // Output stops immediately. Queued pauses apply at restart, before samples.
+         graph.stop(); running = false
+@@ -129,6 +136,54 @@ private final class NotificationTokens: @unchecked Sendable {
+     @discardableResult public func send(_ op: MDJOp, deck: Int = 0, value: Double = 0, slot: Int = 0) -> Bool {
+         mdj_submit(handle.raw, op, Int32(deck), value, Int32(slot)) != 0
+     }
++    // No app caller invokes this candidate entry point. Explicit arming is
++    // unavailable until Apple and storage/service acceptance is complete.
++    public func prepareSessionCapture(journal: SessionEventJournal, libraryIdentity: String) throws {
++        guard captureRuntime == nil, captureTask == nil, captureFailure == nil,
++              !libraryIdentity.isEmpty, !running else { throw AudioFailure("Capture requires a fresh stopped engine") }
++        captureLoads = SessionCaptureLoads()
++        captureRuntime = SessionCaptureRuntime(journal: journal, libraryIdentity: libraryIdentity)
++        // Deliberately OFF. Candidate compiles host ownership without collecting.
++        mdj_capture_enable(handle.raw, false)
++    }
++    public var sessionCaptureIsPrepared: Bool { captureRuntime != nil }
++    public func stopSessionCapture(incomplete: Bool = true) {
++        mdj_capture_enable(handle.raw, false)
++        let prior = captureTask; captureTask = nil
++        guard let runtime = captureRuntime else { return }
++        captureRuntime = nil
++        let at = Date()
++        // This close task is the barrier for this engine epoch; no rearm exists.
++        captureFailure = "Capture epoch ended. Reopen the audio engine before another capture."
++        Task { [weak self] in
++            do {
++                _ = try? await prior?.value
++                try await runtime.stop(at: at, incomplete: incomplete)
++            }
++            catch { self?.onCaptureFailure?("Session evidence is incomplete: \(error.localizedDescription)") }
++        }
++    }
++    /// Drain is called only by a future single-consumer owner, never UI polling.
++    public func drainPreparedSessionCapture() async throws {
++        guard captureTask == nil, let runtime = captureRuntime, let loads = captureLoads else { return }
++        do {
++            let segments = try SessionCaptureDrain.read(engine: handle.raw, loads: loads)
++            let work = Task {
++                for segment in segments { try await runtime.observe(segment, wallTime: Date()) }
++            }
++            captureTask = work
++            defer { captureTask = nil }
++            try await work.value
++        } catch {
++            stopSessionCapture(incomplete: true)
++            onCaptureFailure?("Session evidence is incomplete: \(error.localizedDescription)")
++            throw error
++        }
++    }
++    public func captureSnapshot() -> MDJCaptureSnapshot? {
++        var value = MDJCaptureSnapshot()
++        return mdj_capture_snapshot(handle.raw, &value) ? value : nil
++    }
+     public var renderedFrames: UInt64 { mdj_frames(handle.raw) }
+     public var starvedFrames: UInt64 { mdj_starved_frames(handle.raw) }
+     public func state(_ deck: Int) -> MDJDeck { mdj_deck(handle.raw, Int32(deck)) }
+@@ -144,11 +199,19 @@ private final class NotificationTokens: @unchecked Sendable {
+     }
+     public func stopRecording() { mdj_record_stop(handle.raw, false) }
+ 
+-    public func load(_ url: URL, deck: Int) async throws -> Double {
++    public func load(_ url: URL, deck: Int, libraryTrackID: Int? = nil) async throws -> Double {
+         guard (0..<4).contains(deck) else { throw AudioFailure("Invalid deck") }
+         try start()
+         sequence += 1
+         let load = sequence, engine = handle
++        if captureRuntime != nil {
++            guard let libraryTrackID else {
++                stopSessionCapture(incomplete: true)
++                throw AudioFailure("Imported audio has no library identity for session capture")
++            }
++            do { try captureLoads?.register(deck: deck, token: load, trackID: libraryTrackID) }
++            catch { stopSessionCapture(incomplete: true); throw error }
++        }
+         guard mdj_prepare(engine.raw, Int32(deck), load) != 0 else { throw AudioFailure("Audio command queue is full") }
+         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Double, Error>) in
+             workers[deck].async {
+diff --git a/ios/Packages/ManadjAudio/Sources/ManadjAudio/SessionCaptureAdapter.swift b/ios/Packages/ManadjAudio/Sources/ManadjAudio/SessionCaptureAdapter.swift
+new file mode 100644
+index 00000000..ce5217ce
+--- /dev/null
++++ b/ios/Packages/ManadjAudio/Sources/ManadjAudio/SessionCaptureAdapter.swift
+@@ -0,0 +1,43 @@
++import Foundation
++import CEngine
++import ManadjCore
++
++public enum CaptureAdapterError: Error, Equatable { case unsupported, unresolvedLoad, invalidSnapshot }
++
++/// Converts callback publication, not UI state. Bindings are exact per-deck load
++/// tokens retained by the load owner until all queued segments are consumed.
++/// No capture enabling/draining or persistence occurs here.
++public enum SessionCaptureAdapter {
++    public static func convert(_ snapshot: MDJCaptureSnapshot,
++        resolve: (_ deck: Int, _ load: UInt64) -> Int?) throws -> AppliedSessionSegment {
++        guard !snapshot.fxOn, snapshot.fxHeld == 0 else { throw CaptureAdapterError.unsupported }
++        guard snapshot.sampleRate > 0, snapshot.segmentStart < snapshot.frame else { throw CaptureAdapterError.invalidSnapshot }
++        var tuple = snapshot.decks
++        let native = withUnsafeBytes(of: &tuple) { Array($0.bindMemory(to: MDJCaptureDeck.self)) }
++        var decks: [AppliedSessionDeck] = []
++        for (index, source) in native.enumerated() {
++            guard !source.preview, !source.scratching, source.previewSlot == -1 else { throw CaptureAdapterError.unsupported }
++            var deck = AppliedSessionDeck()
++            deck.load = source.load
++            if source.load != 0 {
++                guard let identity = resolve(index, source.load), identity > 0 else { throw CaptureAdapterError.unresolvedLoad }
++                deck.trackID = identity
++            }
++            deck.startPosition = source.startPosition; deck.position = source.position
++            deck.bpm = source.bpm > 0 ? source.bpm : nil
++            deck.playing = source.playing; deck.ready = source.ready; deck.launchFrame = source.launchFrame
++            deck.fader = Double(source.fader); deck.trim = Double(source.trim)
++            deck.pitch = Double(source.pitch); deck.bend = Double(source.bend); deck.filter = Double(source.filter)
++            var eq = source.eq, stems = source.stems
++            deck.eq = withUnsafeBytes(of: &eq) { $0.bindMemory(to: Float.self).map(Double.init) }
++            deck.stems = withUnsafeBytes(of: &stems) { $0.bindMemory(to: Float.self).map(Double.init) }
++            deck.pfl = source.pfl
++            if source.loop { deck.loopStart = source.loopStart; deck.loopEnd = source.loopEnd }
++            decks.append(deck)
++        }
++        var segment = AppliedSessionSegment(startFrame: snapshot.segmentStart, endFrame: snapshot.frame,
++            sampleRate: Int(snapshot.sampleRate), crossfade: Double(snapshot.crossfade), decks: decks)
++        segment.fxActive = snapshot.fxOn || snapshot.fxHeld != 0
++        return segment
++    }
++}
+diff --git a/ios/Packages/ManadjAudio/Sources/ManadjAudio/SessionCaptureDrain.swift b/ios/Packages/ManadjAudio/Sources/ManadjAudio/SessionCaptureDrain.swift
+new file mode 100644
+index 00000000..0c8239ef
+--- /dev/null
++++ b/ios/Packages/ManadjAudio/Sources/ManadjAudio/SessionCaptureDrain.swift
+@@ -0,0 +1,25 @@
++import Foundation
++import CEngine
++import ManadjCore
++
++public enum CaptureDrainError: Error, Equatable { case gap }
++
++/// A caller must be the sole consumer for its engine epoch. This does not enable
++/// capture or create a polling timer. It converts at most the128-slot queue size;
++/// caller persists the returned segments sequentially before another drain.
++public enum SessionCaptureDrain {
++    public static func read(engine: MDJEngine, loads: SessionCaptureLoads) throws -> [AppliedSessionSegment] {
++        var result: [AppliedSessionSegment] = []
++        for _ in 0..<128 {
++            var snapshot = MDJCaptureSnapshot()
++            let status = mdj_capture_pop(engine, &snapshot)
++            if status == 0 { return result }
++            guard status == 1 else { throw CaptureDrainError.gap }
++            result.append(try SessionCaptureAdapter.convert(snapshot) { loads.resolve(deck: $0, token: $1) })
++        }
++        // At capacity, do not claim the consumer caught up or spin indefinitely.
++        // The caller can apply this bounded batch then drain again; overflow on
++        // any subsequent read still permanently fails the recording epoch.
++        return result
++    }
++}
+diff --git a/ios/Packages/ManadjAudio/Sources/ManadjAudio/SessionCaptureLoads.swift b/ios/Packages/ManadjAudio/Sources/ManadjAudio/SessionCaptureLoads.swift
+new file mode 100644
+index 00000000..a8c2446e
+--- /dev/null
++++ b/ios/Packages/ManadjAudio/Sources/ManadjAudio/SessionCaptureLoads.swift
+@@ -0,0 +1,25 @@
++import Foundation
++
++public enum CaptureLoadError: Error, Equatable { case invalid, conflict, full }
++
++/// Host-owned exact identity evidence. Tokens are registered before prepare is
++/// submitted, not inferred from a decoder completion or the current UI selection.
++/// No eviction while an engine epoch can still publish queued older loads.
++public struct SessionCaptureLoads: Sendable {
++    private struct Key: Hashable, Sendable { let deck: Int; let token: UInt64 }
++    private var values: [Key: Int] = [:]
++    public static let maximumBindings = 512
++    public init() {}
++
++    public mutating func register(deck: Int, token: UInt64, trackID: Int) throws {
++        guard (0..<4).contains(deck), token > 0, trackID > 0 else { throw CaptureLoadError.invalid }
++        let key = Key(deck: deck, token: token)
++        if let existing = values[key] {
++            guard existing == trackID else { throw CaptureLoadError.conflict }
++            return
++        }
++        guard values.count < Self.maximumBindings else { throw CaptureLoadError.full }
++        values[key] = trackID
++    }
++    public func resolve(deck: Int, token: UInt64) -> Int? { values[Key(deck: deck, token: token)] }
++}
+diff --git a/ios/Packages/ManadjAudio/Tests/CaptureSnapshotBridgeTest.cpp b/ios/Packages/ManadjAudio/Tests/CaptureSnapshotBridgeTest.cpp
+new file mode 100644
+index 00000000..86aeb142
+--- /dev/null
++++ b/ios/Packages/ManadjAudio/Tests/CaptureSnapshotBridgeTest.cpp
+@@ -0,0 +1,16 @@
++#include "CEngine.h"
++#include <cassert>
++int main() {
++    auto e = mdj_create(48000); assert(e);
++    mdj_capture_enable(e, true);
++    MDJCaptureSnapshot s{};
++    assert(!mdj_capture_snapshot(e, &s));
++    assert(!mdj_capture_snapshot(e, nullptr));
++    assert(mdj_submit(e, MDJCrossfade, 0, -.5, 0));
++    assert(mdj_submit(e, MDJFader, 1, .25, 0));
++    float output[192]{}; mdj_render(e, output, 96, 2);
++    assert(mdj_capture_snapshot(e, &s));
++    assert(s.frame == 96 && s.sampleRate == 48000);
++    assert(s.crossfade == -.5f && s.decks[1].fader == .25f);
++    mdj_destroy(e);
++}
+diff --git a/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/EngineBridgeTests.swift b/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/EngineBridgeTests.swift
+index 38461723..432c6504 100644
+--- a/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/EngineBridgeTests.swift
++++ b/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/EngineBridgeTests.swift
+@@ -53,3 +53,22 @@ final class EngineBridgeTests: XCTestCase {
+         XCTAssertFalse(mdj_record_start(engine, url.path))
+     }
+ }
++
++extension EngineBridgeTests {
++    func testSessionCaptureUsesAppliedFrameNotSubmissionReceipt() throws {
++        let engine = try XCTUnwrap(mdj_create(48_000)); defer { mdj_destroy(engine) }
++        var snap = MDJCaptureSnapshot()
++        XCTAssertFalse(mdj_capture_snapshot(engine, &snap))
++        mdj_capture_enable(engine, true)
++        XCTAssertNotEqual(mdj_submit(engine, MDJCrossfade, 0, -0.5, 0), 0)
++        XCTAssertFalse(mdj_capture_snapshot(engine, &snap))
++        var out = [Float](repeating: 0, count: 192)
++        out.withUnsafeMutableBufferPointer { mdj_render(engine, $0.baseAddress!, 96, 2) }
++        XCTAssertTrue(mdj_capture_snapshot(engine, &snap))
++        XCTAssertEqual(snap.frame, 96)
++        XCTAssertEqual(snap.sampleRate, 48_000)
++        XCTAssertEqual(snap.crossfade, -0.5)
++        mdj_capture_enable(engine, false)
++        XCTAssertFalse(mdj_capture_snapshot(engine, &snap))
++    }
++}
+diff --git a/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCaptureAdapterTests.swift b/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCaptureAdapterTests.swift
+new file mode 100644
+index 00000000..b0bc480d
+--- /dev/null
++++ b/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCaptureAdapterTests.swift
+@@ -0,0 +1,37 @@
++import XCTest
++import CEngine
++import ManadjCore
++@testable import ManadjAudio
++
++final class SessionCaptureAdapterTests: XCTestCase {
++    func testExactCallbackLoadBindingRejectsUnknownAndReplacement() throws {
++        let engine = try XCTUnwrap(mdj_create(48000)); defer { mdj_destroy(engine) }
++        mdj_capture_enable(engine, true)
++        var output = [Float](repeating: 0, count: 192)
++        func render() { output.withUnsafeMutableBufferPointer { mdj_render(engine, $0.baseAddress!, 96, 2) } }
++        _ = mdj_prepare(engine, 0, 7); render()
++        var snapshot = MDJCaptureSnapshot()
++        XCTAssertEqual(mdj_capture_pop(engine, &snapshot), 1)
++        XCTAssertThrowsError(try SessionCaptureAdapter.convert(snapshot) { _, _ in nil })
++        let segment = try SessionCaptureAdapter.convert(snapshot) { deck, load in deck == 0 && load == 7 ? 42 : nil }
++        XCTAssertEqual(segment.decks[0].trackID, 42)
++        XCTAssertEqual(segment.decks[0].load, 7)
++        XCTAssertEqual(segment.startFrame, 0); XCTAssertEqual(segment.endFrame, 96)
++        _ = mdj_prepare(engine, 0, 8); render()
++        XCTAssertEqual(mdj_capture_pop(engine, &snapshot), 1)
++        XCTAssertThrowsError(try SessionCaptureAdapter.convert(snapshot) { _, load in load == 7 ? 42 : nil })
++    }
++    func testUnsupportedNativeStateCannotDefaultToSupported() throws {
++        var snapshot = MDJCaptureSnapshot(); snapshot.sampleRate = 48000; snapshot.frame = 96
++        snapshot.fxOn = true
++        XCTAssertThrowsError(try SessionCaptureAdapter.convert(snapshot) { _, _ in nil })
++        snapshot.fxOn = false; snapshot.fxHeld = 1
++        XCTAssertThrowsError(try SessionCaptureAdapter.convert(snapshot) { _, _ in nil })
++        snapshot.fxHeld = 0; snapshot.decks.0.preview = true
++        XCTAssertThrowsError(try SessionCaptureAdapter.convert(snapshot) { _, _ in nil })
++        snapshot.decks.0.preview = false; snapshot.decks.0.scratching = true
++        XCTAssertThrowsError(try SessionCaptureAdapter.convert(snapshot) { _, _ in nil })
++        snapshot.decks.0.scratching = false; snapshot.decks.0.previewSlot = 2
++        XCTAssertThrowsError(try SessionCaptureAdapter.convert(snapshot) { _, _ in nil })
++    }
++}
+diff --git a/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCaptureDrainTests.swift b/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCaptureDrainTests.swift
+new file mode 100644
+index 00000000..7023475b
+--- /dev/null
++++ b/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCaptureDrainTests.swift
+@@ -0,0 +1,26 @@
++import XCTest
++import CEngine
++@testable import ManadjAudio
++
++final class SessionCaptureDrainTests: XCTestCase {
++    func testDisabledEmptyOrderedReplacementAndOverflow() throws {
++        let engine = try XCTUnwrap(mdj_create(48000)); defer { mdj_destroy(engine) }
++        var loads = SessionCaptureLoads(), output = [Float](repeating: 0, count: 192)
++        XCTAssertTrue(try SessionCaptureDrain.read(engine: engine, loads: loads).isEmpty)
++        mdj_capture_enable(engine, true)
++        for (token, identity) in [(UInt64(1), 42), (UInt64(2), 99)] {
++            try loads.register(deck: 0, token: token, trackID: identity)
++            _ = mdj_prepare(engine, 0, token)
++            output.withUnsafeMutableBufferPointer { mdj_render(engine, $0.baseAddress!, 96, 2) }
++        }
++        let result = try SessionCaptureDrain.read(engine: engine, loads: loads)
++        XCTAssertEqual(result.map { $0.decks[0].trackID }, [42, 99])
++        XCTAssertTrue(try SessionCaptureDrain.read(engine: engine, loads: loads).isEmpty)
++        for _ in 0..<129 { output.withUnsafeMutableBufferPointer { mdj_render(engine, $0.baseAddress!, 96, 2) } }
++        XCTAssertThrowsError(try SessionCaptureDrain.read(engine: engine, loads: loads)) {
++            XCTAssertEqual($0 as? CaptureDrainError, .gap)
++        }
++        mdj_capture_enable(engine, false); mdj_capture_enable(engine, true)
++        XCTAssertThrowsError(try SessionCaptureDrain.read(engine: engine, loads: loads))
++    }
++}
+diff --git a/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCaptureLoadTests.swift b/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCaptureLoadTests.swift
+new file mode 100644
+index 00000000..009ea662
+--- /dev/null
++++ b/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCaptureLoadTests.swift
+@@ -0,0 +1,36 @@
++import XCTest
++import CEngine
++@testable import ManadjAudio
++
++final class SessionCaptureLoadTests: XCTestCase {
++    func testQueuedOldAndReplacementLoadsKeepExactTrackIdentity() throws {
++        let engine = try XCTUnwrap(mdj_create(48000)); defer { mdj_destroy(engine) }
++        mdj_capture_enable(engine, true)
++        var bindings = SessionCaptureLoads(), output = [Float](repeating: 0, count: 192)
++        for (token, track) in [(UInt64(7), 42), (UInt64(8), 99)] {
++            try bindings.register(deck: 0, token: token, trackID: track)
++            XCTAssertNotEqual(mdj_prepare(engine, 0, token), 0)
++            output.withUnsafeMutableBufferPointer { mdj_render(engine, $0.baseAddress!, 96, 2) }
++        }
++        // Both render records are drained only after the replacement is queued.
++        // Looking at current UI selection here would incorrectly relabel track42.
++        for track in [42, 99] {
++            var snapshot = MDJCaptureSnapshot()
++            XCTAssertEqual(mdj_capture_pop(engine, &snapshot), 1)
++            let segment = try SessionCaptureAdapter.convert(snapshot) { bindings.resolve(deck: $0, token: $1) }
++            XCTAssertEqual(segment.decks[0].trackID, track)
++        }
++        XCTAssertThrowsError(try bindings.register(deck: 0, token: 7, trackID: 99))
++        XCTAssertNil(bindings.resolve(deck: 1, token: 7))
++        XCTAssertNil(bindings.resolve(deck: 0, token: 9))
++    }
++    func testBindingCapacityNeverSilentlyEvictsPendingEvidence() throws {
++        var bindings = SessionCaptureLoads()
++        for token in 1...SessionCaptureLoads.maximumBindings {
++            try bindings.register(deck: 0, token: UInt64(token), trackID: token)
++        }
++        XCTAssertThrowsError(try bindings.register(deck: 0, token: 999, trackID: 999))
++        XCTAssertEqual(bindings.resolve(deck: 0, token: 1), 1)
++        try bindings.register(deck: 0, token: 1, trackID: 1)
++    }
++}
+diff --git a/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCapturePipelineTests.swift b/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCapturePipelineTests.swift
+new file mode 100644
+index 00000000..748b816c
+--- /dev/null
++++ b/ios/Packages/ManadjAudio/Tests/ManadjAudioTests/SessionCapturePipelineTests.swift
+@@ -0,0 +1,74 @@
++import XCTest
++import CEngine
++import ManadjCore
++@testable import ManadjAudio
++
++final class SessionCapturePipelineTests: XCTestCase {
++    func testGeneratedEngineQueueConversionRuntimeAndJournalRestart() async throws {
++        let engine = try XCTUnwrap(mdj_create(48000)); defer { mdj_destroy(engine) }
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let file = root.appendingPathComponent("manifest.json")
++        let journal = try SessionEventJournal(file: file)
++        let runtime = SessionCaptureRuntime(journal: journal, libraryIdentity: "generated-pipeline")
++        var output = [Float](repeating: 0, count: 960)
++        func render() { output.withUnsafeMutableBufferPointer { mdj_render(engine, $0.baseAddress!, 480, 2) } }
++        _ = mdj_prepare(engine, 0, 7); render()
++        XCTAssertTrue(mdj_track_begin(engine, 0, 7, 96000, 48000))
++        let pcm = (0..<192000).map { Float(sin(Double($0 / 2) * 440 * 2 * .pi / 48000) * 0.2) }
++        pcm.withUnsafeBufferPointer { XCTAssertEqual(mdj_track_write(engine, 0, 7, $0.baseAddress!, 96000), 96000) }
++        XCTAssertTrue(mdj_track_finish(engine, 0, 7))
++        mdj_capture_enable(engine, true)
++        _ = mdj_submit(engine, MDJPlay, 0, 0, 0)
++        let start = Date()
++        var maximum: Float = 0
++        var original: [Float] = []
++        for index in 0..<100 {
++            if index == 50 { _ = mdj_submit(engine, MDJFader, 0, 0.6, 0) }
++            render()
++            maximum = max(maximum, output.map(abs).max() ?? 0)
++            original += output
++            var snapshot = MDJCaptureSnapshot()
++            XCTAssertEqual(mdj_capture_pop(engine, &snapshot), 1)
++            let segment = try SessionCaptureAdapter.convert(snapshot) { deck, load in deck == 0 && load == 7 ? 42 : nil }
++            try await runtime.observe(segment, wallTime: start.addingTimeInterval(Double(index) / 100))
++            XCTAssertEqual(mdj_capture_pop(engine, &snapshot), 0)
++        }
++        XCTAssertGreaterThan(maximum, 0.01)
++        try await runtime.stop(at: start.addingTimeInterval(1), incomplete: false)
++        let reopened = try SessionEventJournal(file: file), saved = await reopened.all()
++        XCTAssertEqual(saved.count, 1); XCTAssertFalse(saved[0].incomplete)
++        XCTAssertEqual(saved[0].libraryIdentity, "generated-pipeline")
++        let events = try saved[0].chunks.flatMap { try JSONSerialization.jsonObject(with: $0.events) as! [[String: Any]] }
++        let load = try XCTUnwrap(events.first { $0["kind"] as? String == "load" && $0["channel"] as? String == "A" })
++        XCTAssertEqual(load["trackId"] as? Int, 42)
++        let play = try XCTUnwrap(events.first { $0["action"] as? String == "play" })
++        XCTAssertEqual(play["t"] as? Double, 0)
++        let fader = try XCTUnwrap(events.first { $0["control"] as? String == "fader" && ($0["value"] as? Double ?? 1) < 0.7 })
++        XCTAssertEqual(fader["t"] as? Double, 0.5)
++        // Narrow replay proof for this generated plain play/fader fixture only.
++        // It is not an implementation of the full capture event grammar.
++        let replay = try XCTUnwrap(mdj_create(48000)); defer { mdj_destroy(replay) }
++        _ = mdj_prepare(replay, 0, 7)
++        output.withUnsafeMutableBufferPointer { mdj_render(replay, $0.baseAddress!, 480, 2) }
++        XCTAssertTrue(mdj_track_begin(replay, 0, 7, 96000, 48000))
++        pcm.withUnsafeBufferPointer { XCTAssertEqual(mdj_track_write(replay, 0, 7, $0.baseAddress!, 96000), 96000) }
++        XCTAssertTrue(mdj_track_finish(replay, 0, 7))
++        var reproduced: [Float] = []
++        let playTime = (play["t"] as! NSNumber).doubleValue
++        let faderTime = (fader["t"] as! NSNumber).doubleValue
++        for index in 0..<100 {
++            if index == Int((playTime * 100).rounded()) { _ = mdj_submit(replay, MDJPlay, 0, 0, 0) }
++            if index == Int((faderTime * 100).rounded()) {
++                _ = mdj_submit(replay, MDJFader, 0, (fader["value"] as! NSNumber).doubleValue, 0)
++            }
++            output.withUnsafeMutableBufferPointer { mdj_render(replay, $0.baseAddress!, 480, 2) }
++            reproduced += output
++        }
++        XCTAssertEqual(original.count, reproduced.count)
++        let error = zip(original, reproduced).map { abs($0 - $1) }.max() ?? 1
++        XCTAssertLessThan(error, 0.000001)
++        let times = events.map { ($0["t"] as! NSNumber).doubleValue }
++        XCTAssertEqual(times, times.sorted())
++    }
++}
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/AppliedSessionRecorder.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/AppliedSessionRecorder.swift
+new file mode 100644
+index 00000000..e9aa2a3c
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/AppliedSessionRecorder.swift
+@@ -0,0 +1,170 @@
++import Foundation
++
++/// Input must be an applied engine segment, never UI state or command receipt.
++/// Track identity must be resolved for the exact engine load token by the host.
++public struct AppliedSessionDeck: Equatable, Sendable {
++    public var load: UInt64 = 0
++    public var trackID: Int?
++    public var position = 0.0
++    public var startPosition = 0.0
++    public var bpm: Double?
++    public var playing = false
++    public var preview = false
++    public var scratching = false
++    public var ready = false
++    public var launchFrame: UInt64 = 0
++    public var fader = 1.0
++    public var trim = 0.5
++    public var pitch = 0.0
++    public var bend = 0.0
++    public var filter = 0.0
++    public var eq = [0.5, 0.5, 0.5]
++    public var stems = [1.0, 1.0, 1.0, 1.0]
++    public var pfl = false
++    public var loopStart: Double?
++    public var loopEnd: Double?
++    public init() {}
++}
++
++public struct AppliedSessionSegment: Equatable, Sendable {
++    public var startFrame: UInt64
++    public var endFrame: UInt64
++    public var sampleRate: Int
++    public var crossfade: Double
++    public var fxActive = false
++    public var decks: [AppliedSessionDeck]
++    public init(startFrame: UInt64, endFrame: UInt64, sampleRate: Int, crossfade: Double, decks: [AppliedSessionDeck]) {
++        self.startFrame = startFrame; self.endFrame = endFrame; self.sampleRate = sampleRate
++        self.crossfade = crossfade; self.decks = decks
++    }
++}
++
++public enum AppliedRecorderError: Error, Equatable {
++    case invalidSegment, discontinuity, unresolvedTrack, contextFull, stopped
++}
++
++public enum SessionRecorderAction: Equatable, Sendable {
++    case open(UUID, Date, Data)
++    case append(UUID, Int, Data)
++    case close(UUID, Date, incomplete: Bool)
++}
++
++/// Pure event/lifecycle mapper. The caller must persist returned actions in order
++/// before processing the next segment. On a persistence failure discard this
++/// mapper and reconcile the durable journal, never continue from advanced memory.
++/// FX/scratch/preview need a richer adapter and are rejected rather than omitted.
++public struct AppliedSessionRecorder: Sendable {
++    public private(set) var session: UUID?
++    private var previous: AppliedSessionSegment?
++    private var context: [Data] = []
++    private var contextBytes = 0
++    private var contextEvents = 0
++    private var baseFrame: UInt64?
++    private var wallBase: Date?
++    private var lastAudible: UInt64?
++    private var nextSequence = 1
++    private var stopped = false
++    private var tickFrame: UInt64?
++    public init() {}
++
++    public mutating func observe(_ segment: AppliedSessionSegment, wallTime: Date) throws -> [SessionRecorderAction] {
++        guard !stopped else { throw AppliedRecorderError.stopped }
++        stopped = true // Any invalid/unsupported segment fails closed until reconciliation.
++        guard segment.sampleRate > 0, segment.startFrame < segment.endFrame, segment.decks.count == 4, !segment.fxActive,
++              wallTime.timeIntervalSince1970.isFinite, segment.crossfade.isFinite, (-1...1).contains(segment.crossfade) else { throw AppliedRecorderError.invalidSegment }
++        if let previous {
++            guard segment.startFrame == previous.endFrame, segment.sampleRate == previous.sampleRate else {
++                stopped = true; throw AppliedRecorderError.discontinuity
++            }
++        }
++        for deck in segment.decks {
++            guard [deck.position, deck.startPosition, deck.fader, deck.trim, deck.pitch, deck.bend, deck.filter].allSatisfy(\.isFinite),
++                  deck.eq.count == 3, deck.stems.count == 4, deck.eq.allSatisfy(\.isFinite), deck.stems.allSatisfy(\.isFinite),
++                  deck.bpm.map({ $0.isFinite }) ?? true,
++                  !deck.preview, !deck.scratching else { throw AppliedRecorderError.invalidSegment }
++            if deck.load != 0 && deck.trackID == nil { throw AppliedRecorderError.unresolvedTrack }
++        }
++        if baseFrame == nil { baseFrame = segment.startFrame; wallBase = wallTime }
++        let t = Double(segment.startFrame - baseFrame!) / Double(segment.sampleRate)
++        let endT = Double(segment.endFrame - baseFrame!) / Double(segment.sampleRate)
++        var events: [[String: Any]] = []
++        func emit(_ event: [String: Any]) { events.append(event) }
++        if previous == nil || previous!.crossfade != segment.crossfade {
++            emit(["t": t, "kind": "control", "channel": NSNull(), "control": "crossfader", "value": segment.crossfade])
++            if previous == nil { emit(["t": t, "kind": "control", "channel": NSNull(), "control": "crossfaderEnabled", "value": 1]) }
++        }
++        for index in 0..<4 {
++            let channel = ["A", "B", "C", "D"][index], deck = segment.decks[index]
++            let old = previous?.decks[index]
++            if old == nil {
++                emit(["t": t, "kind": "control", "channel": channel, "control": "crossfaderAssignment", "value": index % 2 == 0 ? -1 : 1])
++            }
++            var controls: [(String, Double, Double?)] = [
++                ("fader", deck.fader, old?.fader), ("trim", deck.trim, old?.trim),
++                ("filter", deck.filter, old?.filter), ("pfl", deck.pfl ? 1 : 0, old.map { $0.pfl ? 1 : 0 })]
++            for k in 0..<3 { controls.append((["eqLow", "eqMid", "eqHigh"][k], deck.eq[k], old?.eq[k])) }
++            for k in 0..<4 { controls.append((["stemVocals", "stemDrums", "stemBass", "stemOther"][k], deck.stems[k], old?.stems[k])) }
++            for (name, value, oldValue) in controls where oldValue != value {
++                emit(["t": t, "kind": "control", "channel": channel, "control": name, "value": value])
++            }
++            let changedLoad = old == nil || old!.load != deck.load || old!.trackID != deck.trackID
++            if changedLoad {
++                emit(["t": t, "kind": "load", "channel": channel, "trackId": deck.trackID as Any? ?? NSNull(), "bpm": deck.bpm as Any? ?? NSNull()])
++            }
++            if changedLoad || old!.pitch != deck.pitch { emit(["t": t, "kind": "pitch", "channel": channel, "value": deck.pitch]) }
++            if changedLoad || old!.bend != deck.bend { emit(["t": t, "kind": "bend", "channel": channel, "value": deck.bend]) }
++            if changedLoad || old!.loopStart != deck.loopStart || old!.loopEnd != deck.loopEnd {
++                let region: Any = (deck.loopStart != nil && deck.loopEnd != nil) ? ["start": deck.loopStart!, "end": deck.loopEnd!] : NSNull()
++                emit(["t": t, "kind": "loop", "channel": channel, "playhead": deck.startPosition, "region": region])
++            }
++            let playing = deck.playing && deck.launchFrame == 0
++            let wasPlaying = old.map { $0.playing && $0.launchFrame == 0 } ?? false
++            if changedLoad || playing != wasPlaying {
++                emit(["t": t, "kind": "transport", "channel": channel, "action": playing ? "play" : "pause", "playhead": deck.startPosition])
++            } else if let old, abs(deck.startPosition - old.position) > 0.0001 {
++                emit(["t": t, "kind": "transport", "channel": channel, "action": "seek", "playhead": deck.startPosition])
++            }
++        }
++        // Position evidence at segment end is distinct from applied control time.
++        if tickFrame == nil || segment.endFrame - tickFrame! >= UInt64(segment.sampleRate) {
++            emit(["t": endT, "kind": "tick", "playheads": Dictionary(uniqueKeysWithValues: (0..<4).map { (["A", "B", "C", "D"][$0], segment.decks[$0].position) })])
++            tickFrame = segment.endFrame
++        }
++        let data = try JSONSerialization.data(withJSONObject: events, options: [.sortedKeys])
++        let audible = segment.decks.enumerated().contains { index, deck in
++            let xf = index % 2 == 0 ? min(1, 1 - segment.crossfade) : min(1, 1 + segment.crossfade)
++            return deck.trackID != nil && deck.ready && deck.playing && deck.launchFrame == 0 && deck.fader > 0 && deck.trim > 0 && deck.eq.contains(where: { $0 > 0 }) && deck.stems.contains(where: { $0 > 0 }) && xf > 0
++        }
++        if audible { lastAudible = segment.endFrame }
++        var actions: [SessionRecorderAction] = []
++        if let session {
++            if !events.isEmpty { actions.append(.append(session, nextSequence, data)); nextSequence += 1 }
++            if let lastAudible, segment.endFrame - lastAudible >= UInt64(segment.sampleRate) * 600 {
++                actions.append(.close(session, wallBase!.addingTimeInterval(endT), incomplete: false))
++                self.session = nil; context = []; contextBytes = 0; contextEvents = 0
++                baseFrame = nil; wallBase = nil; self.lastAudible = nil
++                previous = nil; tickFrame = nil; stopped = false
++                return actions // Next segment must seed a fresh complete context.
++            }
++        } else {
++            if !events.isEmpty { context.append(data); contextBytes += data.count; contextEvents += events.count }
++            guard contextBytes <= 160 * 1024, contextEvents <= 1024 else { stopped = true; throw AppliedRecorderError.contextFull }
++            if audible {
++                let id = UUID(); session = id; nextSequence = 1
++                let objects = try context.flatMap { try JSONSerialization.jsonObject(with: $0) as! [[String: Any]] }
++                actions.append(.open(id, wallBase!, try JSONSerialization.data(withJSONObject: objects, options: [.sortedKeys])))
++                context = []; contextBytes = 0; contextEvents = 0
++            }
++        }
++        previous = segment
++        stopped = false
++        return actions
++    }
++
++    public mutating func stop(at date: Date, incomplete: Bool) -> [SessionRecorderAction] {
++        stopped = true
++        guard let session else { return [] }
++        self.session = nil
++        return [.close(session, date, incomplete: incomplete)]
++    }
++}
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/SessionCaptureRuntime.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/SessionCaptureRuntime.swift
+new file mode 100644
+index 00000000..63037ce0
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/SessionCaptureRuntime.swift
+@@ -0,0 +1,75 @@
++import Foundation
++
++/// Disabled host integration building block. One caller supplies ordered applied
++/// segments, exact identities and explicit interruption/gap signals. No timers,
++/// engine enabling, network, or lifecycle assumptions are hidden here.
++public actor SessionCaptureRuntime {
++    private let journal: SessionEventJournal
++    private let libraryIdentity: String
++    private var mapper = AppliedSessionRecorder()
++    private var sequence = 1
++    private var pending: [[String: Any]] = []
++    private var pendingBytes = 0
++    private var pendingSession: UUID?
++    private var lastFlushFrame: UInt64?
++    private var failed = false
++    private var busy = false
++
++    public init(journal: SessionEventJournal, libraryIdentity: String) {
++        self.journal = journal; self.libraryIdentity = libraryIdentity
++    }
++
++    /// Pending events are not acknowledged durable until flush. At most one
++    /// rendered second is batched; explicit stop flushes before terminal close.
++    public func observe(_ segment: AppliedSessionSegment, wallTime: Date) async throws {
++        guard !failed, !busy else { throw AppliedRecorderError.stopped }
++        busy = true
++        defer { busy = false }
++        do {
++            let actions = try mapper.observe(segment, wallTime: wallTime)
++            for action in actions {
++                switch action {
++                case .open(let id, let start, let context):
++                    try await flush()
++                    try await journal.open(uuid: id, libraryIdentity: libraryIdentity, startedAt: start, context: context)
++                    sequence = 1; pendingSession = id; lastFlushFrame = segment.endFrame
++                case .append(let id, _, let bytes):
++                    let events = try JSONSerialization.jsonObject(with: bytes) as! [[String: Any]]
++                    if pending.count + events.count > 1024 || pendingBytes + bytes.count > 128 * 1024 { try await flush() }
++                    guard pendingSession == id else { throw SessionJournalError.invalidState }
++                    pending += events; pendingBytes += bytes.count
++                case .close(let id, let date, let incomplete):
++                    try await flush()
++                    try await journal.close(uuid: id, endedAt: date, incomplete: incomplete)
++                    pendingSession = nil
++                }
++            }
++            if let previous = lastFlushFrame, segment.endFrame - previous >= UInt64(segment.sampleRate) {
++                try await flush(); lastFlushFrame = segment.endFrame
++            }
++        } catch {
++            failed = true
++            // Never convert unpersisted or unsupported history to a complete close.
++            if let id = pendingSession { try? await journal.close(uuid: id, endedAt: wallTime, incomplete: true) }
++            throw error
++        }
++    }
++
++    public func stop(at date: Date, incomplete: Bool) async throws {
++        guard !failed, !busy else { throw AppliedRecorderError.stopped }
++        busy = true
++        defer { busy = false }
++        failed = true
++        try await flush()
++        for action in mapper.stop(at: date, incomplete: incomplete) {
++            if case .close(let id, let end, let gap) = action { try await journal.close(uuid: id, endedAt: end, incomplete: gap) }
++        }
++    }
++
++    private func flush() async throws {
++        guard !pending.isEmpty, let id = pendingSession else { return }
++        let data = try JSONSerialization.data(withJSONObject: pending, options: [.sortedKeys])
++        try await journal.append(uuid: id, expectedSequence: sequence, events: data)
++        sequence += 1; pending = []; pendingBytes = 0
++    }
++}
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/SessionEventJournal.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/SessionEventJournal.swift
+new file mode 100644
+index 00000000..04fe4468
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/SessionEventJournal.swift
+@@ -0,0 +1,341 @@
++import Foundation
++import CoreFoundation
++#if canImport(Darwin)
++import Darwin
++#else
++import Glibc
++#endif
++
++public enum SessionJournalError: Error, Equatable {
++    case invalidState, invalidEvents, full, sessionClosed, sequenceMismatch, persistence
++}
++
++public struct SessionEventChunk: Codable, Equatable, Sendable {
++    public let sequence: Int
++    /// Existing capture-events JSON, local IDs still scoped to this journal's library.
++    public let events: Data
++}
++
++public struct JournalSession: Codable, Equatable, Sendable {
++    public let uuid: UUID
++    public let libraryIdentity: String
++    public let startedAt: Date
++    public var endedAt: Date?
++    public var incomplete: Bool
++    public var acknowledgedThrough: Int
++    public var chunks: [SessionEventChunk]
++}
++
++/// Local-only session evidence. One actor owns the manifest and its chunk tree.
++/// Chunks are flushed before the committed-prefix manifest. Unreferenced orphans
++/// are retained, not guessed away. Acknowledgement does not delete evidence.
++/// This test-bounded store still has no qualified long-session retention policy.
++public actor SessionEventJournal {
++    public static let maximumBytes = 8 * 1024 * 1024
++    private struct StoredSession: Codable {
++        let uuid: UUID
++        let libraryIdentity: String
++        let startedAt: Date
++        let endedAt: Date?
++        let incomplete: Bool
++        let acknowledgedThrough: Int
++        let chunkCount: Int
++    }
++    private struct Envelope: Codable { let version: Int; let sessions: [StoredSession] }
++    private let file: URL
++    private var sessions: [JournalSession]
++    private var quarantined: [StoredSession] = []
++    private var storageBlocked = false
++    public private(set) var damagedSessionIDs: [UUID] = []
++    public private(set) var storageBytes = 0
++    public private(set) var storageFiles = 0
++    public static let maximumDiskBytes = 64 * 1024 * 1024
++    public static let maximumFiles = 8192
++    private var uncertainWrite = false
++    private var eventByteCount = 0
++    private let writer: @Sendable (Data, URL) throws -> Void
++
++    public init(file: URL, writer: @escaping @Sendable (Data, URL) throws -> Void = SessionEventJournal.durableWrite) throws {
++        guard file.isFileURL else { throw SessionJournalError.invalidState }
++        self.file = file; self.writer = writer
++        let usage = try Self.diskUsage(file)
++        storageBytes = usage.bytes; storageFiles = usage.files
++        storageBlocked = usage.bytes >= Self.maximumDiskBytes || usage.files >= Self.maximumFiles
++        if FileManager.default.fileExists(atPath: file.path) {
++            let data = try Data(contentsOf: file)
++            guard data.count <= Self.maximumBytes else { throw SessionJournalError.full }
++            let stored = try JSONDecoder().decode(Envelope.self, from: data)
++            guard stored.version == 2, stored.sessions.count <= 512 else { throw SessionJournalError.invalidState }
++            var saved: [JournalSession] = []
++            for entry in stored.sessions {
++                do {
++                guard entry.chunkCount > 0, entry.chunkCount <= Self.maximumBytes / 16 else { throw SessionJournalError.invalidState }
++                var chunks: [SessionEventChunk] = []
++                for sequence in 0..<entry.chunkCount {
++                    let chunkFile = Self.chunkURL(file, entry.uuid, sequence)
++                    let properties = try chunkFile.resourceValues(forKeys: [.fileSizeKey, .isSymbolicLinkKey])
++                    guard properties.isSymbolicLink != true else { throw SessionJournalError.invalidState }
++                    let size = properties.fileSize ?? Self.maximumBytes
++                    guard size <= 160 * 1024 else { throw SessionJournalError.full }
++                    let bytes = try Data(contentsOf: chunkFile, options: [.mappedIfSafe])
++                    guard bytes.count <= 160 * 1024 else { throw SessionJournalError.full }
++                    chunks.append(.init(sequence: sequence, events: bytes))
++                }
++                let session = JournalSession(uuid: entry.uuid, libraryIdentity: entry.libraryIdentity, startedAt: entry.startedAt,
++                    endedAt: entry.endedAt, incomplete: entry.incomplete, acknowledgedThrough: entry.acknowledgedThrough, chunks: chunks)
++                guard !session.libraryIdentity.isEmpty, session.libraryIdentity.utf8.count <= 256,
++                      session.startedAt.timeIntervalSince1970.isFinite,
++                      session.endedAt.map({ $0.timeIntervalSince1970.isFinite && $0 >= session.startedAt }) ?? true,
++                      session.acknowledgedThrough >= -1, session.acknowledgedThrough < chunks.count,
++                      !session.incomplete || session.endedAt != nil else { throw SessionJournalError.invalidState }
++                var previousTime = -Double.infinity
++                for chunk in chunks {
++                    let bounds = try Self.validateEvents(chunk.events)
++                    guard bounds.first >= previousTime else { throw SessionJournalError.invalidEvents }
++                    previousTime = bounds.last
++                }
++                saved.append(session)
++                } catch {
++                    // Preserve original manifest entry and every recoverable byte.
++                    // Never export a silently truncated session as complete.
++                    quarantined.append(entry); damagedSessionIDs.append(entry.uuid)
++                }
++            }
++            guard Set(stored.sessions.map(\.uuid)).count == stored.sessions.count else { throw SessionJournalError.invalidState }
++            // The exact last persisted event is the only supported recovery boundary.
++            // No new mapper may leave a crashed/uncertain prior session open.
++            var recovered = false
++            for i in saved.indices where saved[i].endedAt == nil && usage.bytes < Self.maximumDiskBytes && usage.files < Self.maximumFiles {
++                let last = try Self.validateEvents(saved[i].chunks.last!.events).last
++                let end = saved[i].startedAt.addingTimeInterval(last)
++                guard end.timeIntervalSince1970.isFinite else { throw SessionJournalError.invalidState }
++                saved[i].endedAt = end
++                saved[i].incomplete = true
++                recovered = true
++            }
++            if recovered, usage.bytes < Self.maximumDiskBytes, usage.files < Self.maximumFiles {
++                do { try writer(Self.encodeManifest(saved, preserving: quarantined), file) }
++                catch { throw SessionJournalError.persistence }
++            }
++            sessions = saved
++            eventByteCount = saved.reduce(0) { $0 + $1.chunks.reduce(0) { $0 + $1.events.count } }
++        } else { sessions = [] }
++    }
++
++    public func all() -> [JournalSession] { sessions }
++    public var isReadOnly: Bool { storageBlocked || uncertainWrite }
++
++    /// Local recovery evidence only, not authorization to share or delete it.
++    /// Manifest descriptor preserves identity and committed chunk count. Each
++    /// safely readable original chunk is returned independently, without filling
++    /// a missing/corrupt suffix with invented events.
++    public func damagedEvidence(uuid: UUID) throws -> (descriptor: Data, readableChunks: [SessionEventChunk]) {
++        guard let entry = quarantined.first(where: { $0.uuid == uuid }) else { throw SessionJournalError.invalidState }
++        var chunks: [SessionEventChunk] = []
++        for sequence in 0..<min(entry.chunkCount, Self.maximumFiles) {
++            let source = Self.chunkURL(file, uuid, sequence)
++            guard let properties = try? source.resourceValues(forKeys: [.isSymbolicLinkKey, .fileSizeKey]),
++                  properties.isSymbolicLink != true, let size = properties.fileSize, size <= 160 * 1024,
++                  let bytes = try? Data(contentsOf: source) else { continue }
++            chunks.append(.init(sequence: sequence, events: bytes))
++        }
++        return (try JSONEncoder().encode(entry), chunks)
++    }
++
++    public func open(uuid: UUID, libraryIdentity: String, startedAt: Date, context: Data) throws {
++        guard startedAt.timeIntervalSince1970.isFinite, sessions.count < 512, !libraryIdentity.isEmpty, libraryIdentity.utf8.count <= 256,
++              !sessions.contains(where: { $0.uuid == uuid }), !quarantined.contains(where: { $0.uuid == uuid }) else { throw SessionJournalError.invalidState }
++        try Self.validateEvents(context)
++        let value = JournalSession(uuid: uuid, libraryIdentity: libraryIdentity, startedAt: startedAt,
++            incomplete: false, acknowledgedThrough: -1, chunks: [.init(sequence: 0, events: context)])
++        try replace(sessions + [value])
++    }
++
++    public func append(uuid: UUID, expectedSequence: Int, events: Data) throws {
++        guard let i = sessions.firstIndex(where: { $0.uuid == uuid }) else { throw SessionJournalError.invalidState }
++        guard !storageBlocked else { throw SessionJournalError.full }
++        guard sessions[i].endedAt == nil else { throw SessionJournalError.sessionClosed }
++        guard expectedSequence == sessions[i].chunks.count else { throw SessionJournalError.sequenceMismatch }
++        try Self.validateEvents(events)
++        if let previous = sessions[i].chunks.last {
++            let old = try JSONSerialization.jsonObject(with: previous.events) as! [[String: Any]]
++            let new = try JSONSerialization.jsonObject(with: events) as! [[String: Any]]
++            guard (new.first!["t"] as! NSNumber).doubleValue >= (old.last!["t"] as! NSNumber).doubleValue else {
++                throw SessionJournalError.invalidEvents
++            }
++        }
++        var next = sessions
++        next[i].chunks.append(.init(sequence: expectedSequence, events: events))
++        try replace(next)
++    }
++
++    public func close(uuid: UUID, endedAt: Date, incomplete: Bool = false) throws {
++        guard endedAt.timeIntervalSince1970.isFinite, let i = sessions.firstIndex(where: { $0.uuid == uuid }), endedAt >= sessions[i].startedAt else { throw SessionJournalError.invalidState }
++        if let previous = sessions[i].endedAt {
++            guard previous == endedAt, sessions[i].incomplete == incomplete else { throw SessionJournalError.sessionClosed }
++            return
++        }
++        var next = sessions; next[i].endedAt = endedAt; next[i].incomplete = incomplete
++        try replace(next)
++    }
++
++    /// Only a transport with a verified exact durable receipt should call this.
++    /// Out-of-order or future receipts cannot skip uncommitted local evidence.
++    public func acknowledge(uuid: UUID, libraryIdentity: String, sequence: Int, exactEvents: Data) throws {
++        guard let i = sessions.firstIndex(where: { $0.uuid == uuid }), sessions[i].libraryIdentity == libraryIdentity,
++              sequence >= 0, sequence < sessions[i].chunks.count,
++              sessions[i].chunks[sequence].events == exactEvents,
++              sequence <= sessions[i].acknowledgedThrough + 1 else { throw SessionJournalError.sequenceMismatch }
++        if sequence <= sessions[i].acknowledgedThrough { return }
++        var next = sessions; next[i].acknowledgedThrough = sequence; try replace(next)
++    }
++
++    private func replace(_ next: [JournalSession]) throws {
++        guard !uncertainWrite else { throw SessionJournalError.persistence }
++        // A sole actor owns this tree. Startup reconciles all retained/orphan
++        // entries; subsequent writes update only touched paths, never rescan
++        // historical chunks. External writes require closing and reopening.
++        guard !storageBlocked, storageBytes < Self.maximumDiskBytes - 512 * 1024,
++              storageFiles < Self.maximumFiles - 4 else { storageBlocked = true; throw SessionJournalError.full }
++        let data = try Self.encodeManifest(next, preserving: quarantined)
++        var addedBytes = 0
++        var touched: Set<URL> = [file, file.appendingPathExtension("chunks")]
++        for session in next {
++            let previous = sessions.first { $0.uuid == session.uuid }
++            for chunk in session.chunks.dropFirst(previous?.chunks.count ?? 0) {
++                addedBytes += chunk.events.count
++                let target = Self.chunkURL(file, session.uuid, chunk.sequence)
++                touched.insert(target); touched.insert(target.deletingLastPathComponent())
++            }
++        }
++        guard data.count + eventByteCount + addedBytes <= Self.maximumBytes else { throw SessionJournalError.full }
++        let before = try Self.pathUsage(touched)
++        do {
++            for session in next {
++                let previous = sessions.first { $0.uuid == session.uuid }
++                for chunk in session.chunks.dropFirst(previous?.chunks.count ?? 0) {
++                    // Immutable bytes first. A crash before manifest publication
++                    // leaves an unreferenced orphan, never an advanced prefix.
++                    let destination = Self.chunkURL(file, session.uuid, chunk.sequence)
++                    if FileManager.default.fileExists(atPath: destination.path) {
++                        guard try Data(contentsOf: destination) == chunk.events else { throw SessionJournalError.persistence }
++                    } else { try writer(chunk.events, destination) }
++                }
++            }
++            try writer(data, file)
++        } catch {
++            // Rename may have landed before directory flush failed. Force a
++            // reopen/reconciliation instead of overwriting uncertain disk state.
++            uncertainWrite = true
++            throw SessionJournalError.persistence
++        }
++        sessions = next
++        eventByteCount += addedBytes
++        let after: (bytes: Int, files: Int)
++        do { after = try Self.pathUsage(touched) }
++        catch { uncertainWrite = true; throw SessionJournalError.persistence }
++        storageBytes += after.bytes - before.bytes
++        storageFiles += after.files - before.files
++        storageBlocked = storageBytes >= Self.maximumDiskBytes || storageFiles >= Self.maximumFiles
++    }
++
++    private static func chunkURL(_ file: URL, _ id: UUID, _ sequence: Int) -> URL {
++        file.appendingPathExtension("chunks").appendingPathComponent(id.uuidString)
++            .appendingPathComponent(String(sequence) + ".json")
++    }
++
++    private static func encodeManifest(_ sessions: [JournalSession], preserving damaged: [StoredSession] = []) throws -> Data {
++        try JSONEncoder().encode(Envelope(version: 2, sessions: sessions.map {
++            StoredSession(uuid: $0.uuid, libraryIdentity: $0.libraryIdentity, startedAt: $0.startedAt,
++                endedAt: $0.endedAt, incomplete: $0.incomplete, acknowledgedThrough: $0.acknowledgedThrough,
++                chunkCount: $0.chunks.count)
++        } + damaged))
++    }
++
++    private static func pathUsage(_ paths: Set<URL>) throws -> (bytes: Int, files: Int) {
++        var bytes = 0, files = 0
++        for path in paths where FileManager.default.fileExists(atPath: path.path) {
++            let value = try path.resourceValues(forKeys: [.isSymbolicLinkKey, .fileAllocatedSizeKey, .fileSizeKey])
++            guard value.isSymbolicLink != true else { throw SessionJournalError.invalidState }
++            bytes += max(value.fileAllocatedSize ?? 0, value.fileSize ?? 0); files += 1
++        }
++        return (bytes, files)
++    }
++
++    private static func diskUsage(_ file: URL) throws -> (bytes: Int, files: Int) {
++        var bytes = 0, files = 0
++        let root = file.appendingPathExtension("chunks")
++        if FileManager.default.fileExists(atPath: file.path) {
++            let value = try file.resourceValues(forKeys: [.fileAllocatedSizeKey, .fileSizeKey])
++            bytes += max(value.fileAllocatedSize ?? 0, value.fileSize ?? 0); files += 1
++        }
++        if FileManager.default.fileExists(atPath: root.path) {
++            let rootUsage = try pathUsage([root])
++            bytes += rootUsage.bytes; files += rootUsage.files
++            guard let iterator = FileManager.default.enumerator(at: root,
++                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileAllocatedSizeKey, .fileSizeKey]) else { throw SessionJournalError.persistence }
++            for case let child as URL in iterator {
++                let value = try child.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileAllocatedSizeKey, .fileSizeKey])
++                if value.isSymbolicLink == true {
++                    // Do not follow external content or hide healthy evidence.
++                    // Preserve the entry and freeze writes for host repair.
++                    return (maximumDiskBytes, max(files + 1, 1))
++                }
++                files += 1
++                bytes += max(value.fileAllocatedSize ?? 0, value.fileSize ?? 0)
++                // Bounded enumeration. Saturation blocks writes, preserves reads.
++                if files >= maximumFiles || bytes >= maximumDiskBytes { break }
++            }
++        }
++        return (bytes, files)
++    }
++
++    @discardableResult private static func validateEvents(_ data: Data) throws -> (first: Double, last: Double) {
++        guard data.count <= 160 * 1024,
++              let events = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
++              !events.isEmpty, events.count <= 1024 else { throw SessionJournalError.invalidEvents }
++        var previous = -Double.infinity
++        for event in events {
++            guard let time = event["t"] as? NSNumber, CFGetTypeID(time) != CFBooleanGetTypeID(),
++                  time.doubleValue.isFinite, time.doubleValue >= 0, time.doubleValue >= previous,
++                  event["kind"] is String else { throw SessionJournalError.invalidEvents }
++            previous = time.doubleValue
++        }
++        return ((events.first!["t"] as! NSNumber).doubleValue, previous)
++    }
++
++    /// New bytes are flushed before rename; parent directory is flushed after it.
++    /// Atomic replacement is intended to retain old or complete new JSON. Power-loss
++    /// durability on Apple filesystems is not qualified by Linux tests.
++    public static func durableWrite(_ data: Data, _ file: URL) throws {
++        let parent = file.deletingLastPathComponent()
++        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
++        let temporary = parent.appendingPathComponent(".session-journal-" + UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: temporary) }
++        guard FileManager.default.createFile(atPath: temporary.path, contents: nil,
++              attributes: [.posixPermissions: 0o600]) else { throw SessionJournalError.persistence }
++        let handle = try FileHandle(forWritingTo: temporary)
++        do { try handle.write(contentsOf: data); try handle.synchronize(); try handle.close() }
++        catch { try? handle.close(); throw error }
++        guard rename(temporary.path, file.path) == 0 else { throw SessionJournalError.persistence }
++        let directory = parent.path.withCString { systemOpen($0) }
++        guard directory >= 0 else { throw SessionJournalError.persistence }
++        defer { _ = systemClose(directory) }
++        guard fsync(directory) == 0 else { throw SessionJournalError.persistence }
++    }
++}
++
++private func systemOpen(_ path: UnsafePointer<CChar>) -> Int32 {
++    #if canImport(Darwin)
++    Darwin.open(path, O_RDONLY)
++    #else
++    Glibc.open(path, O_RDONLY | O_DIRECTORY)
++    #endif
++}
++private func systemClose(_ fd: Int32) -> Int32 {
++    #if canImport(Darwin)
++    Darwin.close(fd)
++    #else
++    Glibc.close(fd)
++    #endif
++}
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/AppliedSessionRecorderTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/AppliedSessionRecorderTests.swift
+new file mode 100644
+index 00000000..bf3b1375
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/AppliedSessionRecorderTests.swift
+@@ -0,0 +1,64 @@
++import XCTest
++@testable import ManadjCore
++
++final class AppliedSessionRecorderTests: XCTestCase {
++    func segment(_ start: UInt64, _ end: UInt64, playing: Bool, fader: Double = 1) -> AppliedSessionSegment {
++        var deck = AppliedSessionDeck()
++        deck.load = 7; deck.trackID = 42; deck.ready = true; deck.playing = playing; deck.fader = fader
++        deck.startPosition = Double(start) / 48000; deck.position = Double(end) / 48000
++        return .init(startFrame: start, endFrame: end, sampleRate: 48000, crossfade: 0,
++                     decks: [deck, .init(), .init(), .init()])
++    }
++    func testSilentContextOpensOnlyWhenAudibleAndKeepsSegmentControlTime() throws {
++        var recorder = AppliedSessionRecorder()
++        let date = Date()
++        XCTAssertTrue(try recorder.observe(segment(0, 96, playing: false), wallTime: date).isEmpty)
++        let open = try recorder.observe(segment(96, 192, playing: true), wallTime: date)
++        guard case .open(_, _, let data) = open.first else { return XCTFail() }
++        let events = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
++        let play = events.first { $0["action"] as? String == "play" }!
++        XCTAssertEqual(play["t"] as! Double, 96.0 / 48000)
++        XCTAssertEqual(play["playhead"] as! Double, 96.0 / 48000)
++        let changed = try recorder.observe(segment(192, 288, playing: true, fader: 0.25), wallTime: date)
++        guard case .append(_, 1, let changes) = changed.first else { return XCTFail() }
++        let rows = try JSONSerialization.jsonObject(with: changes) as! [[String: Any]]
++        XCTAssertTrue(rows.contains { $0["control"] as? String == "fader" && $0["t"] as? Double == 192.0 / 48000 })
++        XCTAssertEqual(recorder.stop(at: date.addingTimeInterval(1), incomplete: true).count, 1)
++    }
++    func testGapUnresolvedAndCueOnlyNeverBecomeCompleteSession() throws {
++        var recorder = AppliedSessionRecorder()
++        XCTAssertTrue(try recorder.observe(segment(0, 96, playing: true, fader: 0), wallTime: Date()).isEmpty)
++        XCTAssertThrowsError(try recorder.observe(segment(192, 288, playing: true), wallTime: Date()))
++        XCTAssertNil(recorder.session)
++        var missing = AppliedSessionRecorder()
++        var input = segment(0, 96, playing: true); input.decks[0].trackID = nil
++        XCTAssertThrowsError(try missing.observe(input, wallTime: Date()))
++        XCTAssertNil(missing.session)
++    }
++}
++
++extension AppliedSessionRecorderTests {
++    func testMapperActionsPersistToDurableJournalAndRestart() async throws {
++        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: file) }
++        let journal = try SessionEventJournal(file: file)
++        var recorder = AppliedSessionRecorder()
++        let date = Date()
++        var actions = try recorder.observe(segment(0, 96, playing: true), wallTime: date)
++        actions += try recorder.observe(segment(96, 192, playing: false), wallTime: date)
++        actions += recorder.stop(at: date.addingTimeInterval(1), incomplete: true)
++        for action in actions {
++            switch action {
++            case .open(let id, let at, let events):
++                try await journal.open(uuid: id, libraryIdentity: "generated", startedAt: at, context: events)
++            case .append(let id, let seq, let events): try await journal.append(uuid: id, expectedSequence: seq, events: events)
++            case .close(let id, let at, let incomplete): try await journal.close(uuid: id, endedAt: at, incomplete: incomplete)
++            }
++        }
++        let reopened = try SessionEventJournal(file: file)
++        let saved = await reopened.all()
++        XCTAssertEqual(saved.count, 1)
++        XCTAssertEqual(saved[0].chunks.count, 2)
++        XCTAssertTrue(saved[0].incomplete)
++    }
++}
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/SessionCaptureRuntimeTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/SessionCaptureRuntimeTests.swift
+new file mode 100644
+index 00000000..292673b7
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/SessionCaptureRuntimeTests.swift
+@@ -0,0 +1,43 @@
++import XCTest
++@testable import ManadjCore
++
++final class SessionCaptureRuntimeTests: XCTestCase {
++    func testOneSecondBatchAndExplicitInterruptionKeepOrderedEvidence() async throws {
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let file = root.appendingPathComponent("manifest.json"), journal = try SessionEventJournal(file: file)
++        let runtime = SessionCaptureRuntime(journal: journal, libraryIdentity: "generated"), at = Date()
++        for index in 0..<100 {
++            var deck = AppliedSessionDeck()
++            deck.load = 1; deck.trackID = 42; deck.playing = true; deck.ready = true
++            deck.fader = index % 2 == 0 ? 0.8 : 0.9
++            deck.startPosition = Double(index) / 100; deck.position = Double(index + 1) / 100
++            let segment = AppliedSessionSegment(startFrame: UInt64(index * 480), endFrame: UInt64((index + 1) * 480),
++                sampleRate: 48000, crossfade: 0, decks: [deck, .init(), .init(), .init()])
++            try await runtime.observe(segment, wallTime: at.addingTimeInterval(Double(index) / 100))
++        }
++        //100 changes have not become100 fsync transactions. Explicit stop flushes
++        //the bounded pending batch before a terminal incomplete marker.
++        try await runtime.stop(at: at.addingTimeInterval(1), incomplete: true)
++        let reopened = try SessionEventJournal(file: file), saved = await reopened.all()
++        XCTAssertEqual(saved.count, 1); XCTAssertEqual(saved[0].chunks.count, 2)
++        XCTAssertTrue(saved[0].incomplete)
++        XCTAssertEqual(saved[0].endedAt, at.addingTimeInterval(1))
++        let events = try JSONSerialization.jsonObject(with: saved[0].chunks[1].events) as! [[String: Any]]
++        XCTAssertEqual(events.filter { $0["control"] as? String == "fader" }.count, 99)
++    }
++
++    func testGapCannotProduceCompleteClose() async throws {
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let journal = try SessionEventJournal(file: root.appendingPathComponent("manifest.json"))
++        let runtime = SessionCaptureRuntime(journal: journal, libraryIdentity: "generated"), at = Date()
++        var deck = AppliedSessionDeck(); deck.load = 1; deck.trackID = 42; deck.playing = true; deck.ready = true
++        try await runtime.observe(.init(startFrame: 0, endFrame: 96, sampleRate: 48000, crossfade: 0,
++            decks: [deck, .init(), .init(), .init()]), wallTime: at)
++        do { try await runtime.observe(.init(startFrame: 192, endFrame: 288, sampleRate: 48000, crossfade: 0,
++            decks: [deck, .init(), .init(), .init()]), wallTime: at.addingTimeInterval(1)); XCTFail() } catch {}
++        let saved = await journal.all(); XCTAssertTrue(saved[0].incomplete)
++        XCTAssertNotNil(saved[0].endedAt)
++    }
++}
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/SessionEventJournalTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/SessionEventJournalTests.swift
+new file mode 100644
+index 00000000..bd505387
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/SessionEventJournalTests.swift
+@@ -0,0 +1,222 @@
++import XCTest
++@testable import ManadjCore
++
++final class SessionEventJournalTests: XCTestCase {
++    func testDurableActiveChunksRestartExactAckAndIncompleteClose() async throws {
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let file = root.appendingPathComponent("sessions.json"), id = UUID(), start = Date()
++        let first = Data(#"[{"t":0,"kind":"tick","playheads":{}}]"#.utf8)
++        let second = Data(#"[{"t":1,"kind":"tick","playheads":{"A":1}}]"#.utf8)
++        let journal = try SessionEventJournal(file: file)
++        try await journal.open(uuid: id, libraryIdentity: "generated-library", startedAt: start, context: first)
++        try await journal.append(uuid: id, expectedSequence: 1, events: second)
++        let reopened = try SessionEventJournal(file: file)
++        let active = await reopened.all()
++        XCTAssertEqual(active[0].endedAt, start.addingTimeInterval(1))
++        XCTAssertTrue(active[0].incomplete)
++        XCTAssertEqual(active[0].chunks.count, 2)
++        do { try await reopened.acknowledge(uuid: id, libraryIdentity: "generated-library", sequence: 1, exactEvents: second); XCTFail() }
++        catch { XCTAssertEqual(error as? SessionJournalError, .sequenceMismatch) }
++        do { try await reopened.acknowledge(uuid: id, libraryIdentity: "wrong-library", sequence: 0, exactEvents: first); XCTFail() }
++        catch { XCTAssertEqual(error as? SessionJournalError, .sequenceMismatch) }
++        try await reopened.acknowledge(uuid: id, libraryIdentity: "generated-library", sequence: 0, exactEvents: first)
++        try await reopened.close(uuid: id, endedAt: start.addingTimeInterval(1), incomplete: true)
++        let final = try SessionEventJournal(file: file)
++        let saved = await final.all()
++        XCTAssertTrue(saved[0].incomplete)
++        XCTAssertEqual(saved[0].acknowledgedThrough, 0)
++        XCTAssertEqual(saved[0].chunks[1].events, second)
++    }
++
++    func testWriteFailureDoesNotAdvanceMemoryAndMalformedFileIsNotDiscarded() async throws {
++        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: file) }
++        let journal = try SessionEventJournal(file: file, writer: { _, _ in throw SessionJournalError.persistence })
++        do { try await journal.open(uuid: UUID(), libraryIdentity: "generated", startedAt: Date(),
++            context: Data(#"[{"t":0,"kind":"tick","playheads":{}}]"#.utf8)); XCTFail() }
++        catch { XCTAssertEqual(error as? SessionJournalError, .persistence) }
++        let sessions = await journal.all(); XCTAssertTrue(sessions.isEmpty)
++        try Data("broken envelope".utf8).write(to: file)
++        XCTAssertThrowsError(try SessionEventJournal(file: file))
++        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "broken envelope")
++    }
++}
++
++extension SessionEventJournalTests {
++    func testSequenceTimeAndCloseGuardsKeepLastGoodEvidence() async throws {
++        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: file) }
++        let journal = try SessionEventJournal(file: file), id = UUID(), start = Date()
++        let context = Data(#"[{"t":5,"kind":"tick","playheads":{}}]"#.utf8)
++        try await journal.open(uuid: id, libraryIdentity: "generated", startedAt: start, context: context)
++        do { try await journal.append(uuid: id, expectedSequence: 1, events: Data(#"[{"t":4,"kind":"tick"}]"#.utf8)); XCTFail() }
++        catch { XCTAssertEqual(error as? SessionJournalError, .invalidEvents) }
++        do { try await journal.append(uuid: id, expectedSequence: 2, events: context); XCTFail() }
++        catch { XCTAssertEqual(error as? SessionJournalError, .sequenceMismatch) }
++        try await journal.close(uuid: id, endedAt: start)
++        do { try await journal.append(uuid: id, expectedSequence: 1, events: context); XCTFail() }
++        catch { XCTAssertEqual(error as? SessionJournalError, .sessionClosed) }
++        let saved = await journal.all(); XCTAssertEqual(saved[0].chunks.count, 1)
++    }
++}
++
++extension SessionEventJournalTests {
++    func testRecoveredFileCrossChunkRegressionIsRejectedWithoutRewrite() async throws {
++        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: file) }
++        let journal = try SessionEventJournal(file: file), id = UUID()
++        try await journal.open(uuid: id, libraryIdentity: "generated", startedAt: Date(),
++            context: Data(#"[{"t":5,"kind":"tick"}]"#.utf8))
++        var envelope = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
++        var sessions = envelope["sessions"] as! [[String: Any]]
++        sessions[0]["chunkCount"] = 2; envelope["sessions"] = sessions
++        let second = file.appendingPathExtension("chunks").appendingPathComponent(id.uuidString).appendingPathComponent("1.json")
++        try SessionEventJournal.durableWrite(Data(#"[{"t":4,"kind":"tick"}]"#.utf8), second)
++        let malformed = try JSONSerialization.data(withJSONObject: envelope)
++        try malformed.write(to: file)
++        let isolated = try SessionEventJournal(file: file)
++        let damaged = await isolated.damagedSessionIDs
++        XCTAssertEqual(damaged, [id])
++        XCTAssertEqual(try Data(contentsOf: file), malformed)
++    }
++
++    func testRecoveryPersistenceFailurePreservesEvidenceAndFailsConstruction() async throws {
++        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: file) }
++        let journal = try SessionEventJournal(file: file)
++        try await journal.open(uuid: UUID(), libraryIdentity: "generated", startedAt: Date(),
++            context: Data(#"[{"t":0,"kind":"tick"}]"#.utf8))
++        let before = try Data(contentsOf: file)
++        XCTAssertThrowsError(try SessionEventJournal(file: file, writer: { _, _ in throw SessionJournalError.persistence }))
++        XCTAssertEqual(try Data(contentsOf: file), before)
++        let reopened = try SessionEventJournal(file: file)
++        let recovered = await reopened.all()
++        XCTAssertTrue(recovered[0].incomplete)
++        XCTAssertNotNil(recovered[0].endedAt)
++    }
++}
++
++extension SessionEventJournalTests {
++    func testMeasuredGeneratedTenMinuteChunkBudget() async throws {
++        final class Metrics: @unchecked Sendable {
++            let lock = NSLock(); var bytes = 0; var writes = 0; var maximum = 0.0
++            func record(_ data: Data, _ file: URL) throws {
++                let start = Date()
++                try SessionEventJournal.durableWrite(data, file)
++                lock.lock(); defer { lock.unlock() }
++                bytes += data.count; writes += 1; maximum = max(maximum, Date().timeIntervalSince(start))
++            }
++        }
++        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: file) }
++        let metrics = Metrics()
++        let journal = try SessionEventJournal(file: file, writer: { try metrics.record($0, $1) })
++        let id = UUID()
++        try await journal.open(uuid: id, libraryIdentity: "generated-budget", startedAt: Date(),
++            context: Data(#"[{"t":0,"kind":"tick","playheads":{"A":0,"B":0,"C":0,"D":0}}]"#.utf8))
++        let start = Date()
++        for second in 1...600 {
++            let events = try JSONSerialization.data(withJSONObject: [["t": second, "kind": "tick", "playheads": ["A": second, "B": 0, "C": 0, "D": 0]]], options: [.sortedKeys])
++            try await journal.append(uuid: id, expectedSequence: second, events: events)
++        }
++        print("JOURNAL_BUDGET generated600ticks writes=\(metrics.writes) bytes=\(metrics.bytes) final=\(try Data(contentsOf: file).count) elapsed=\(Date().timeIntervalSince(start)) maxWrite=\(metrics.maximum)")
++        XCTAssertEqual(metrics.writes, 1202)
++        XCTAssertLessThan(metrics.bytes, 400_000)
++    }
++}
++
++extension SessionEventJournalTests {
++    func testChunkLandedManifestFailedReopensOnlyCommittedPrefix() async throws {
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let file = root.appendingPathComponent("manifest.json"), id = UUID(), start = Date()
++        let journal = try SessionEventJournal(file: file, writer: { data, target in
++            if target == file, FileManager.default.fileExists(atPath: file.path) {
++                throw SessionJournalError.persistence
++            }
++            try SessionEventJournal.durableWrite(data, target)
++        })
++        let first = Data(#"[{"t":0,"kind":"tick"}]"#.utf8)
++        let second = Data(#"[{"t":1,"kind":"tick"}]"#.utf8)
++        try await journal.open(uuid: id, libraryIdentity: "generated", startedAt: start, context: first)
++        do { try await journal.append(uuid: id, expectedSequence: 1, events: second); XCTFail() } catch {}
++        do { try await journal.append(uuid: id, expectedSequence: 1, events: second); XCTFail() } catch {}
++        let reopened = try SessionEventJournal(file: file)
++        let saved = await reopened.all()
++        XCTAssertEqual(saved[0].chunks.count, 1); XCTAssertTrue(saved[0].incomplete)
++        let orphan = file.appendingPathExtension("chunks").appendingPathComponent(id.uuidString).appendingPathComponent("1.json")
++        XCTAssertEqual(try Data(contentsOf: orphan), second)
++    }
++}
++
++extension SessionEventJournalTests {
++    func testDamagedOldSessionIsIsolatedAndHealthyEvidenceRemainsWritable() async throws {
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let file = root.appendingPathComponent("manifest.json"), bad = UUID(), good = UUID(), at = Date()
++        let context = Data(#"[{"t":0,"kind":"tick"}]"#.utf8)
++        let journal = try SessionEventJournal(file: file)
++        try await journal.open(uuid: bad, libraryIdentity: "generated", startedAt: at, context: context)
++        try await journal.close(uuid: bad, endedAt: at)
++        try await journal.open(uuid: good, libraryIdentity: "generated", startedAt: at, context: context)
++        let damaged = file.appendingPathExtension("chunks").appendingPathComponent(bad.uuidString).appendingPathComponent("0.json")
++        for corrupt in [false, true] {
++            if corrupt { try Data("corrupt".utf8).write(to: damaged) }
++            else { try FileManager.default.removeItem(at: damaged) }
++            let reopened = try SessionEventJournal(file: file)
++            let healthy = await reopened.all(), ids = await reopened.damagedSessionIDs
++            XCTAssertEqual(healthy.map(\.uuid), [good]); XCTAssertEqual(ids, [bad])
++            try await reopened.acknowledge(uuid: good, libraryIdentity: "generated", sequence: 0, exactEvents: context)
++        }
++        XCTAssertEqual(try Data(contentsOf: damaged), Data("corrupt".utf8))
++        let final = try SessionEventJournal(file: file)
++        let ids = await final.damagedSessionIDs; XCTAssertEqual(ids, [bad])
++        let evidence = try await final.damagedEvidence(uuid: bad)
++        XCTAssertFalse(evidence.descriptor.isEmpty)
++        XCTAssertEqual(evidence.readableChunks.first?.events, Data("corrupt".utf8))
++    }
++
++    func testOrphanDiskBudgetBlocksWritesWithoutDeletingOrHidingHealthyEvidence() async throws {
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let file = root.appendingPathComponent("manifest.json")
++        let journal = try SessionEventJournal(file: file), id = UUID()
++        let context = Data(#"[{"t":0,"kind":"tick"}]"#.utf8)
++        try await journal.open(uuid: id, libraryIdentity: "generated", startedAt: Date(), context: context)
++        let orphan = file.appendingPathExtension("chunks").appendingPathComponent("orphan.bin")
++        try Data(count: 5_000_000).write(to: orphan)
++        let counted = try SessionEventJournal(file: file)
++        let bytes = await counted.storageBytes; XCTAssertGreaterThanOrEqual(bytes, 5_000_000)
++        try Data(count: SessionEventJournal.maximumDiskBytes).write(to: orphan)
++        let saturated = try SessionEventJournal(file: file)
++        let healthy = await saturated.all(), blocked = await saturated.isReadOnly
++        XCTAssertEqual(healthy.count, 1); XCTAssertTrue(blocked)
++        do { try await saturated.open(uuid: UUID(), libraryIdentity: "generated", startedAt: Date(), context: context); XCTFail() }
++        catch { XCTAssertEqual(error as? SessionJournalError, .full) }
++        XCTAssertEqual(try orphan.resourceValues(forKeys: [.fileSizeKey]).fileSize, SessionEventJournal.maximumDiskBytes)
++    }
++}
++
++extension SessionEventJournalTests {
++    func testSymlinkDoesNotHideHealthyAndCountersAdvance() async throws {
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let file = root.appendingPathComponent("manifest.json"), journal = try SessionEventJournal(file: file)
++        let id = UUID(), context = Data(#"[{"t":0,"kind":"tick"}]"#.utf8)
++        try await journal.open(uuid: id, libraryIdentity: "generated", startedAt: Date(), context: context)
++        let count = await journal.storageFiles; XCTAssertGreaterThan(count, 0)
++        let usageBeforeReopen = await journal.storageBytes
++        let checkpoint = try SessionEventJournal(file: file)
++        let scanned = await checkpoint.storageBytes, scannedFiles = await checkpoint.storageFiles
++        // Recovery changes only a small manifest, directory allocation may vary.
++        XCTAssertLessThan(abs(scanned - usageBeforeReopen), 65536)
++        XCTAssertEqual(scannedFiles, count)
++        try FileManager.default.createSymbolicLink(at: file.appendingPathExtension("chunks").appendingPathComponent("stray"), withDestinationURL: root)
++        let reopened = try SessionEventJournal(file: file)
++        let healthy = await reopened.all(), blocked = await reopened.isReadOnly
++        XCTAssertEqual(healthy.count, 1); XCTAssertTrue(blocked); XCTAssertTrue(healthy[0].incomplete)
++        do { try await reopened.append(uuid: id, expectedSequence: 1, events: context); XCTFail() }
++        catch { XCTAssertEqual(error as? SessionJournalError, .full) }
++    }
++}
