@@ -1,0 +1,64 @@
+name: Disabled native sync Apple qualification
+on:
+  push:
+    branches: [instinct/native-sync-apple-disabled]
+  pull_request:
+    branches: [main]
+    paths: [native-sync-apple-candidate.patch, .github/workflows/native-sync-apple-qualification.yml]
+permissions:
+  contents: read
+concurrency:
+  group: native-sync-apple-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  disabled-candidate:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify exact disabled source and apply in disposable CI checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '6c550f229ad8269edde553d0b05e30726b111dc532408f9fb84b7b3173fae932  native-sync-apple-candidate.patch' | shasum -a 256 -c -
+          git apply --check native-sync-apple-candidate.patch
+          git apply native-sync-apple-candidate.patch
+          git diff --stat
+      - name: Select latest production Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_*.app' ! -iname '*beta*' | sort -V | tail -1)
+          test -n "$XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          xcrun swift --version
+      - name: Apple package tests with generated data only
+        shell: bash
+        run: |
+          set -o pipefail
+          (cd ios/Packages/ManadjCore && swift test -j 2) 2>&1 | tee native-core-apple.log
+          (cd ios/Packages/ManadjAudio && swift test -j 2) 2>&1 | tee native-audio-apple.log
+      - name: Compile actual iOS host and AppModel without signing
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/native-device" CODE_SIGNING_ALLOWED=NO ARCHS=arm64 SWIFT_STRICT_CONCURRENCY=complete build 2>&1 | tee native-device.log
+      - name: Test disabled host lifecycle on simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEVICE=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; groups=json.load(sys.stdin)["devices"]; phones=[d for r,ds in sorted(groups.items(),reverse=True) if "iOS" in r for d in ds if d.get("isAvailable") and d["name"].startswith("iPhone")]; assert phones; print(phones[0]["udid"])')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath "$RUNNER_TEMP/native-sim" -parallel-testing-enabled NO -only-testing:ManadjTests/NativeAudioTests/testSessionCaptureCandidateRemainsDisabledAndLifecycleCloses -resultBundlePath NativeSync.xcresult CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$(uname -m)" test 2>&1 | tee native-simulator.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: disabled-native-sync-apple-evidence
+          path: |
+            native-*.log
+            NativeSync.xcresult
+          retention-days: 3
