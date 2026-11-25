@@ -19,6 +19,40 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
+    // Captured by simctl video in the paired baseline/fix CI jobs. Settled
+    // assertions alone do not prove coherent motion; inspect the video frames.
+    @MainActor func testDrawerSingleSurfaceMotionRecording() {
+        defer { captureFailure() }
+        let app = XCUIApplication()
+        app.launchArguments = ["--performance-ui-fixture"]
+        app.launch()
+        let open = app.buttons["browser-open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 20))
+        Thread.sleep(forTimeInterval: 2)
+        for _ in 0..<3 {
+            open.tap()
+            let close = app.buttons["browser-close"]
+            XCTAssertTrue(close.waitForExistence(timeout: 5))
+            let list = app.descendants(matching: .any)["library-track-list"].firstMatch
+            XCTAssertTrue(list.waitForExistence(timeout: 5))
+            Thread.sleep(forTimeInterval: 1)
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "Drawer settled, motion judged separately"
+            shot.lifetime = .keepAlways; add(shot)
+            close.tap()
+            Thread.sleep(forTimeInterval: 1)
+            XCTAssertTrue(open.isHittable)
+        }
+        open.tap()
+        XCTAssertTrue(app.buttons["browser-close"].waitForExistence(timeout: 5))
+        let handle = app.descendants(matching: .any)["browser-drag-handle"].firstMatch
+        XCTAssertTrue(handle.exists)
+        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 80)), withVelocity: .slow, thenHoldForDuration: 0.2)
+        XCTAssertTrue(app.buttons["browser-close"].exists)
+        app.buttons["browser-close"].tap()
+    }
+
     @MainActor func testMetalPrototypeWorkspacePixelsAndFallbackStatus() {
         defer { captureFailure() }
         for metal in [false, true] {
