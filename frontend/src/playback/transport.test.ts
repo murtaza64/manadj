@@ -1256,6 +1256,50 @@ describe('heard quantize (#382 desktop port)', () => {
       expect(effects).toEqual([{ type: 'start', at: expect.closeTo(8 + 0.72 * 2, 6) }]);
     });
 
+    for (const event of [
+      { type: 'play' } as const,
+      { type: 'cue-down' } as const,
+      { type: 'hot-cue-down', slot: 0, time: 8 } as const,
+    ]) {
+      it(`compensates paused ${event.type} with Heard on and Quantize off`, () => {
+        const [, effects] = reduceTransport(
+          state({ playhead: 8, cuePoint: 8 }), event,
+          { quantize: false, beatTimes: grid, launchReference: { beatTimes: grid, playhead: 1.61 }, playRate: 1.2, heardSeconds: 0.35 }
+        );
+        expect(effects).toEqual([{ type: 'start', at: expect.closeTo(8.42, 6) }]);
+      });
+      it(`keeps paused ${event.type} exact without a peer or without Heard`, () => {
+        for (const overrides of [{ launchReference: null, heardSeconds: 0.35 }, { launchReference: { beatTimes: grid, playhead: 1.61 }, heardSeconds: 0 }]) {
+          const [, effects] = reduceTransport(state({ playhead: 8, cuePoint: 8 }), event,
+            { quantize: false, beatTimes: grid, playRate: 1.2, ...overrides });
+          expect(effects).toEqual([{ type: 'start', at: 8 }]);
+        }
+      });
+    }
+
+    for (const quantize of [false, true]) {
+      it(`aligns two audible beat trains after a 201ms headphone delay, Quantize ${quantize}`, () => {
+        const latency = 0.201, pressAt = 10;
+        // A's beat 8 reaches the headphones exactly when B's cue is pressed.
+        const referenceAtPress = 8 + latency;
+        const [, effects] = reduceTransport(
+          state({ playhead: 4, cuePoint: 4 }), { type: 'hot-cue-down', slot: 0, time: 4 },
+          { quantize, beatTimes: Array.from({ length: 40 }, (_, i) => i * 0.5),
+            launchReference: { beatTimes: Array.from({ length: 40 }, (_, i) => i * 0.5), playhead: referenceAtPress },
+            playRate: 1, heardSeconds: latency }
+        );
+        const start = effects.find(effect => effect.type === 'start');
+        expect(start?.type).toBe('start');
+        if (!start || start.type !== 'start') throw new Error('Missing launch');
+        // Both decks pass through the same delayed output. B cannot make the
+        // cue transient audible retroactively, but all following beats align.
+        const bFirstFutureBeatAtSpeaker = pressAt + (start.delaySeconds ?? 0) + (4.5 - start.at) + latency;
+        const aNextBeatAtSpeaker = pressAt + (8.5 - referenceAtPress) + latency;
+        expect(bFirstFutureBeatAtSpeaker).toBeCloseTo(aNextBeatAtSpeaker, 9);
+        expect(bFirstFutureBeatAtSpeaker).toBeCloseTo(pressAt + 0.5, 9);
+      });
+    }
+
     it('leaves launches with no playing reference immediate and exact', () => {
       const [, effects] = reduceTransport(
         state({ playhead: 8 }),
