@@ -53,7 +53,7 @@ wait "$MONITOR_PID" || true
 trap - EXIT
 # Compact-phone support is backlog, not current acceptance. Opt in to its diagnostic explicitly.
 SMALL_STATUS=0
-if [[ "${CHECK_COMPACT_PHONE:-0}" == "1" ]]; then
+if [[ "${CHECK_COMPACT_PHONE:-1}" == "1" ]]; then
   SMALL_UDID=$(xcrun simctl list devices available --json | python3 -c '
 import json,sys
 for group in json.load(sys.stdin)["devices"].values():
@@ -68,7 +68,7 @@ for group in json.load(sys.stdin)["devices"].values():
     xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
       -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
       -destination "platform=iOS Simulator,id=$SMALL_UDID" -derivedDataPath ios/.derived-data \
-      -only-testing:ManadjUITests/WorkspaceUITests/testStandardWorkspaceSettingsAndPitch -only-testing:ManadjUITests/FeedbackUITests/testExplicitNarrationKeepsBrowserLiveAndReviewsRawVoice \
+      -only-testing:ManadjUITests/WorkspaceUITests/testAndroidHeightReferenceKeepsCenterAndTransportReachable -only-testing:ManadjUITests/WorkspaceUITests/testStandardWorkspaceSettingsAndPitch -only-testing:ManadjUITests/FeedbackUITests/testExplicitNarrationKeepsBrowserLiveAndReviewsRawVoice \
       -resultBundlePath ios/.test-results/SmallPhone.xcresult CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$HOST_ARCH" test || SMALL_STATUS=$?
   fi
 fi
