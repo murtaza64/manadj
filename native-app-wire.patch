@@ -817,10 +817,10 @@ index a85e09d1..296d2305 100644
          defer { try? FileManager.default.removeItem(at: root) }
 diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataTransportTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataTransportTests.swift
 new file mode 100644
-index 00000000..c213a8c2
+index 00000000..c7e636a5
 --- /dev/null
 +++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataTransportTests.swift
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,44 @@
 +#if canImport(CryptoKit) && canImport(JavaScriptCore)
 +import XCTest
 +import CryptoKit
@@ -852,7 +852,11 @@ index 00000000..c213a8c2
 +        }
 +        XCTAssertEqual(try b.values(localID:99,field:"title").first?["value"] as? String,"Native URLSession sender")
 +        _=try b.edit(localID:99,value:.mainCue(12.5))
-+        try await syncB.tick();try await syncA.tick()
++        for _ in 0..<150 {
++            try await syncB.tick();try await syncA.tick()
++            if a.cursor(bID)==1 { break }
++            try await Task.sleep(for:.milliseconds(100))
++        }
 +        XCTAssertEqual(try a.values(localID:12,field:"main_cue").first?["value"] as? Double,12.5)
 +        try await syncA.tick();try await syncB.tick()
 +        XCTAssertEqual(a.allPackets().count,2);XCTAssertEqual(b.allPackets().count,2)
