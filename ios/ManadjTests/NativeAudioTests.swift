@@ -317,7 +317,9 @@ final class NativeAudioTests: XCTestCase {
         let model = AppModel(storageRoot: root)
         for _ in 0..<100 { if model.snapshot != nil && model.audio != nil && model.downloaded.contains(track.id) { break }; try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertTrue(model.load(track, deck: 0), model.error ?? "No load error")
-        for _ in 0..<200 { if !model.decks[0].loading { break }; try await Task.sleep(for: .milliseconds(20)) }
+        // Audio decode and offline full-waveform hydration complete separately.
+        // Wait for the actual cache result being asserted, not audio readiness.
+        for _ in 0..<500 { if !model.decks[0].loading && (model.decks[0].waveform?.bandFrames ?? 0) > 256 && model.decks[0].waveformNotice == nil { break }; try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertGreaterThan(model.decks[0].waveform?.bandFrames ?? 0, 256)
         XCTAssertNil(model.decks[0].waveformNotice)
     }
