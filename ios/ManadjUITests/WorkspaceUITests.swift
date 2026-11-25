@@ -19,6 +19,31 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
+    @MainActor func testAndroidHeightReferenceKeepsCenterAndTransportReachable() {
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        XCTAssertTrue(app.buttons["A play pause"].waitForExistence(timeout: 20))
+        let a = app.otherElements["deck-0-detail-wave"], b = app.otherElements["deck-1-detail-wave"]
+        XCTAssertTrue(a.waitForExistence(timeout: 5)); XCTAssertTrue(b.exists)
+        // Android compact portrait uses50dp per deck, not50dp for both.
+        if app.frame.height >= 800 {
+            XCTAssertGreaterThanOrEqual(a.frame.height, 49)
+            XCTAssertGreaterThanOrEqual(b.frame.height, 49)
+        }
+        for name in ["Sessions", "Settings", "Record master", "Saved recordings", "A play pause", "B play pause"] {
+            let button = app.buttons[name]
+            XCTAssertTrue(button.isHittable, name)
+            XCTAssertGreaterThanOrEqual(button.frame.height, 44, name)
+            XCTAssertLessThanOrEqual(button.frame.maxY, app.frame.maxY - 20, name)
+        }
+        let recording = app.buttons["Record master"].frame
+        XCTAssertEqual(recording.minY, app.buttons["Settings"].frame.minY, accuracy: 1)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Wave height preview, Android dimension reference, actual iOS workspace"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["BROWSE"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(a.frame.height, 49)
+        let browse = XCTAttachment(screenshot: app.screenshot()); browse.name = "Wave height preview with browser drawer"; browse.lifetime = .keepAlways; add(browse)
+    }
+
     @MainActor func testMetalPrototypeWorkspacePixelsAndFallbackStatus() {
         defer { captureFailure() }
         for metal in [false, true] {
@@ -169,9 +194,24 @@ final class WorkspaceUITests: XCTestCase {
         for _ in 0..<5 where !address.isHittable { panel.swipeUp(velocity: .slow) }
         XCTAssertTrue(address.isHittable, "Actual pairing address must be reachable inside Sync")
         let pair = app.buttons["PAIR IPHONE"]
-        for _ in 0..<8 where !pair.isHittable { panel.swipeUp(velocity: .slow) }
+        // A full swipe overshoots an 80pt viewport and can put Pair above it.
+        // Move in bounded increments in either direction, keeping the whole
+        // target inside the panel rather than accepting a partial hit region.
+        for _ in 0..<16 {
+            let bounds = panel.frame, target = pair.frame
+            if pair.isHittable && target.minY >= bounds.minY - 1 && target.maxY <= bounds.maxY + 1 { break }
+            let error = target.midY - bounds.midY
+            let distance = min(28.0, max(10.0, abs(error)))
+            let movingUp = error > 0
+            let startY = movingUp ? 0.8 : 0.2
+            let endY = startY + (movingUp ? -distance : distance) / bounds.height
+            let from = panel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
+            let to = panel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY))
+            from.press(forDuration: 0.15, thenDragTo: to)
+        }
         XCTAssertTrue(pair.isHittable, "Pair action must remain reachable inside bounded Sync scroll")
         XCTAssertGreaterThanOrEqual(pair.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(pair.frame.minY, panel.frame.minY - 1, "Whole Pair target must not scroll above panel")
         XCTAssertLessThanOrEqual(pair.frame.maxY, panel.frame.maxY + 1, "Whole Pair target must fit, not merely its center")
         XCTAssertEqual(app.buttons["A play pause"].frame.minY, beforeTransport.minY, accuracy: 2)
         print("PORTRAIT_GEOMETRY app=\(app.frame) window=\(app.windows.firstMatch.frame) panel=\(panel.frame) pair=\(pair.frame) pitch=\(app.buttons["A PITCH panel"].frame)")

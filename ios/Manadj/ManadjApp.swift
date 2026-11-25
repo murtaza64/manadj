@@ -94,16 +94,16 @@ struct WorkspaceView: View {
             let compact = availableHeight < 860
             let gap: CGFloat = compact ? 3 : 8
             let infoHeight: CGFloat = compact ? 36 : 44
-            let mixerFloor: CGFloat = 344
+            let mixerFloor: CGFloat = 272
             // Reserve the full mixer, overview and safe-area-contained transport
             // before allocating flexible loop/jump spacing on shorter phones.
-            let deckHeight: CGFloat = compact ? min(316, max(284, availableHeight - infoHeight - 36 - gap * 5 - mixerFloor - 36)) : 360
+            let deckHeight: CGFloat = compact ? min(316, max(284, availableHeight - infoHeight - 36 - gap * 5 - mixerFloor - 103)) : 360
             // Budget real row heights rather than letting the deck's minimum
             // overflow the viewport. Only waveform height yields on standard phones.
-            let waveHeight: CGFloat = compact ? max(36, min(83, availableHeight - infoHeight - deckHeight - 36 - gap * 5 - mixerFloor)) : 135
+            let waveHeight: CGFloat = compact ? (availableHeight >= 720 ? 103 : max(36, min(103, availableHeight - infoHeight - deckHeight - 36 - gap * 5 - mixerFloor))) : 135
             VStack(spacing: gap) {
                 HStack(spacing: 10) { deckInfo(0); deckInfo(1) }.frame(height: browsing && keyboardOpen ? 36 : infoHeight)
-                if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: waveHeight) }
+                if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: waveHeight).fixedSize(horizontal: false, vertical: true).layoutPriority(1) }
                 ZStack(alignment: .bottom) {
                     if !settings && !browsing { VStack(spacing: gap) {
                         mixer.frame(maxHeight: .infinity)
@@ -299,14 +299,20 @@ HStack(spacing: 0) {
                     Button { model.waveTouchLock.toggle() } label: { Image(systemName: model.waveTouchLock ? "lock.fill" : "lock.open") }.buttonStyle(PerformanceKeyStyle(active: model.waveTouchLock)).frame(width: 44)
                         .accessibilityLabel("Lock playing waveform touch").accessibilityIdentifier("wave-touch-lock").accessibilityValue(model.waveTouchLock ? "Locked while playing" : "Unlocked")
                 }.frame(height: 44)
-                HStack(spacing: 4) {
-                    Button("SESSIONS") { notice = "Session replay is not implemented on iOS yet" }.buttonStyle(PerformanceKeyStyle(color: Ink.muted))
-                    Button { withAnimation { browsing = false; settings.toggle() } } label: { Image(systemName: "gearshape") }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 44).accessibilityLabel("Settings").feedbackTarget("Settings")
-                }.frame(height: 44)
-                recordingBar.frame(height: 44)
+                HStack(spacing: 0) {
+                    Button { notice = "Session replay is not implemented on iOS yet" } label: { Image(systemName: "clock.arrow.circlepath") }
+                        .buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 44).accessibilityLabel("Sessions")
+                    Button { withAnimation { browsing = false; settings.toggle() } } label: { Image(systemName: "gearshape") }
+                        .buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 44).accessibilityLabel("Settings").feedbackTarget("Settings")
+                    Button { model.toggleRecording() } label: { Image(systemName: model.recording ? "stop.fill" : "record.circle") }
+                        .buttonStyle(PerformanceKeyStyle(color: model.recording ? Ink.danger : Ink.text, active: model.recording)).frame(width: 44)
+                        .accessibilityLabel(model.recording ? "Stop master recording" : "Record master").feedbackTarget("Master recording")
+                    Button { saved = true } label: { Image(systemName: "waveform.path") }
+                        .buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 44).accessibilityLabel("Saved recordings").accessibilityValue("\(model.recordings.count)")
+                }.frame(height: 44).accessibilityIdentifier("compact-session-recording-row")
                 Spacer(minLength: 0)
                 centerModePicker
-                contextPanel.frame(height: 96, alignment: .top).clipped()
+                contextPanel.frame(height: 80, alignment: .top).clipped()
                 if xf { PerformanceFader(value: Binding(get: { (model.crossfade + 1) / 2 }, set: { model.crossfade = $0 * 2 - 1; model.set(MDJCrossfade, 0, model.crossfade) }), color: Ink.accent, vertical: false, label: "Crossfader").frame(height: 40).feedbackTarget("Crossfader") }
             }.padding(.horizontal, 3)
             channel(1).frame(width: 42)
