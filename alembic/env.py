@@ -23,6 +23,7 @@ from backend.models import Base
 import backend.acquisition.models  # noqa: F401
 import backend.tasks.models  # noqa: F401
 import backend.peer_sync.models  # noqa: F401
+import backend.continuous_sync.models  # noqa: F401
 
 config = context.config
 
