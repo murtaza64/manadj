@@ -1286,7 +1286,7 @@
 
 .perf-fader.accent .perf-fader-handle {
   color: var(--accent);
-  border-color: var(--accent);
+  /* Neutral handle box; only the label carries the off-zero signal. */
 }
 
 /* Soft-takeover hint (midi-controller 18): a mismatched hardware fader/
@@ -1353,6 +1353,7 @@
 }
 
 .perf-mix-spacer { flex: 1; }
+.perf-mode-cluster + .perf-readout { margin-left: auto; }
 
 .perf-readout {
   display: inline-flex;
@@ -1407,6 +1408,7 @@
 }
 
 .perf-tempo-buttons {
+  margin-left: var(--space-12);
   display: inline-flex;
   flex-shrink: 0;
 }
@@ -1518,18 +1520,19 @@
   background: none;
 }
 
-/* Key Lock toggle (key-lock 03) — padlock glyph leading the foot row,
+/* Key Lock toggle: centered musical sharp with a small lock badge,
    lit while tempo changes leave the Track's Key unchanged */
 .perf-keylock {
-  gap: 3px;
+  width: 26px;
+  padding: 0!important;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 .perf-keylock-icon {
-  width: 12px;
-  height: 12px;
+  width: 20px;
+  height: 20px;
   display: block;
 }
 
@@ -1605,7 +1608,7 @@
   pointer-events: none;
 }
 /* Reserve label space only while this deck's hints are visible. */
-:where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .perf-transport-col > .player-button,
+:where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .perf-transport-col > .player-button:has(> .perf-kbd),
 :where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .perf-padcol .deck-loop-toggle {
   padding-right: 14px;
 }
@@ -1623,7 +1626,7 @@
   bottom: auto;
   transform: translateY(-50%);
 }
-:where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .deck-cuewalk > .player-button {
+:where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .deck-cuewalk > .player-button:has(> .perf-kbd) {
   /* Glyph row + hint space + borders must fit the existing 22px button. */
   font-size: 8px;
   padding-top: 0;
@@ -1637,7 +1640,7 @@
   bottom: 1px;
   transform: translateX(-50%);
 }
-:where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .perf-sync-label {
+:where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .perf-sync:has(> .perf-kbd) .perf-sync-label {
   display: inline-block;
   font-size: 8px;
   transform: translateY(-6px);
