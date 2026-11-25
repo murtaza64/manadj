@@ -5,6 +5,8 @@ import Foundation
 public enum CloudLibraryOAuth {
     /// Closed candidate. No remote configuration can turn this on.
     public static let enabled = false
+    /// Explicit owner sign-in acceptance is available independently of data sync.
+    public static let authenticationTestEnabled = true
     public static let resource = URL(string: "https://manadj-private-library.murtaza-javaid.workers.dev")!
     public static let issuer = "https://frosty-pond-8fd5.cloudflareaccess.com"
     public static let redirect = "earth.murtaza.manadj.ios:/oauth/library/callback"

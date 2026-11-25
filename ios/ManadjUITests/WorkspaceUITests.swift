@@ -9,10 +9,10 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(identity.waitForExistence(timeout: 15))
         XCTAssertTrue(identity.isHittable)
         XCTAssertTrue(app.buttons["IMPORT GROUP"].isHittable)
-        XCTAssertFalse(app.buttons["SIGN IN"].isEnabled)
+        XCTAssertTrue(app.buttons["SIGN IN"].isEnabled)
         XCTAssertFalse(app.buttons["START"].isEnabled)
         let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "Disabled private sync controls, no provisioning or cloud effects"
+        shot.name = "Owner sign-in available, personal data transport disabled"
         shot.lifetime = .keepAlways; add(shot)
     }
 

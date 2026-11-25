@@ -95,7 +95,7 @@ import ManadjCore
     }
 
     func signIn() async {
-        do { try await auth.signIn(); status = "Signed in for private library sync" }
+        do { try await auth.signIn(); try await auth.verifyOwnerResource(); status = "Native owner sign-in verified. Data sync remains disabled pending device acceptance." }
         catch { status = "Sign-in stopped: \(error.localizedDescription)" }
     }
     func start() {

@@ -43,8 +43,20 @@ final class CloudLibrarySession: NSObject, ObservableObject, ASWebAuthentication
     private var refresh: Task<Credentials, Error>?
     private var generation = UUID()
 
+    func verifyOwnerResource() async throws {
+        let value = try await accessToken()
+        var request = URLRequest(url: CloudLibraryOAuth.resource.appendingPathComponent("v1/sync-check/identity"))
+        request.setValue("Bearer " + value, forHTTPHeaderField: "Authorization")
+        let (data, response) = try await http.data(for: request)
+        guard let response = response as? HTTPURLResponse, response.statusCode == 200,
+              data.count <= 4096, let body = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              body["authenticated"] as? Bool == true, let subject = body["subject"] as? String, !subject.isEmpty else {
+            throw FeedbackFailure("Native owner resource check did not pass")
+        }
+    }
+
     func signIn() async throws {
-        guard CloudLibraryOAuth.enabled else { throw FeedbackFailure("Continuous library sync is not enabled") }
+        guard CloudLibraryOAuth.authenticationTestEnabled else { throw FeedbackFailure("Continuous library sync is not enabled") }
         guard !loginInProgress else { throw FeedbackFailure("Cloud sign-in is already open") }
         loginInProgress = true
         generation = UUID()
@@ -78,7 +90,7 @@ final class CloudLibrarySession: NSObject, ObservableObject, ASWebAuthentication
     /// Does not open a browser automatically. A send cannot unexpectedly prompt
     /// for account access or replace the report preview with a login sheet.
     func accessToken() async throws -> String {
-        guard CloudLibraryOAuth.enabled else { throw FeedbackFailure("Continuous library sync is not enabled") }
+        guard CloudLibraryOAuth.authenticationTestEnabled else { throw FeedbackFailure("Continuous library sync is not enabled") }
         guard !loginInProgress else { throw FeedbackFailure("Finish cloud sign-in before sending") }
         let credentials = try storedCredentials()
         if credentials.expiresAt.timeIntervalSinceNow > 45 { return credentials.accessToken }
@@ -104,7 +116,7 @@ final class CloudLibrarySession: NSObject, ObservableObject, ASWebAuthentication
     /// revoking the server grant.
     @discardableResult
     func signOut() async throws -> Bool {
-        guard CloudLibraryOAuth.enabled else { throw FeedbackFailure("Continuous library sync is not enabled") }
+        guard CloudLibraryOAuth.authenticationTestEnabled else { throw FeedbackFailure("Continuous library sync is not enabled") }
         generation = UUID()
         refresh?.cancel(); refresh = nil; browser?.cancel()
         let previous = try? storedCredentials()

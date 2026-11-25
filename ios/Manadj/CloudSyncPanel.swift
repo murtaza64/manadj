@@ -25,10 +25,10 @@ struct CloudSyncPanel: View {
             }
             if !identity.isEmpty { Text(identity).font(Ink.font(10)).textSelection(.enabled) }
             HStack(spacing: 8) {
-                Button("SIGN IN") { Task { await controller.signIn() } }.buttonStyle(FlatButtonStyle()).disabled(!controller.configured).opacity(controller.configured ? 1 : 0.45)
+                Button("SIGN IN") { Task { await controller.signIn() } }.buttonStyle(FlatButtonStyle()).disabled(!CloudLibraryOAuth.authenticationTestEnabled).opacity(CloudLibraryOAuth.authenticationTestEnabled ? 1 : 0.45)
                 Button(controller.running ? "STOP" : "START") {
                     if controller.running { controller.stop() } else { controller.start() }
-                }.buttonStyle(FlatButtonStyle()).disabled(!controller.configured).opacity(controller.configured ? 1 : 0.45)
+                }.buttonStyle(FlatButtonStyle()).disabled(!controller.configured || !CloudLibraryOAuth.enabled).opacity(controller.configured && CloudLibraryOAuth.enabled ? 1 : 0.45)
             }
             if controller.configured {
                 Picker("Selected track", selection: $selectedID) {
