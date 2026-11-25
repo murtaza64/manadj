@@ -31,6 +31,9 @@ jobs:
           echo 'bccfe3f8fd584f05f9220d49cd8e0bd46cc728e01ae2333d6c3ecef94d0a724d  native-review-fixes-auth.patch' | shasum -a 256 -c -
           git apply --check --exclude=backend/continuous_sync/NATIVE_CAPTURE.md native-review-fixes-auth.patch
           git apply --exclude=backend/continuous_sync/NATIVE_CAPTURE.md native-review-fixes-auth.patch
+          echo '17a73a10a68f7790375bf25b14644af342854e580b719551ad5ce6e313dca216  native-isolation-codec.patch' | shasum -a 256 -c -
+          git apply --check --exclude=backend/continuous_sync/NATIVE_CAPTURE.md native-isolation-codec.patch
+          git apply --exclude=backend/continuous_sync/NATIVE_CAPTURE.md native-isolation-codec.patch
           git diff --stat
       - name: Select latest production Xcode
         shell: bash
