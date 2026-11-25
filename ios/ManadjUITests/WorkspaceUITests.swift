@@ -194,7 +194,7 @@ final class WorkspaceUITests: XCTestCase {
         for _ in 0..<5 where !address.isHittable { panel.swipeUp(velocity: .slow) }
         XCTAssertTrue(address.isHittable, "Actual pairing address must be reachable inside Sync")
         let pair = app.buttons["PAIR IPHONE"]
-        for _ in 0..<8 where !pair.isHittable { panel.swipeUp(velocity: .slow) }
+        for _ in 0..<8 where !pair.isHittable || pair.frame.maxY > panel.frame.maxY + 1 { panel.swipeUp(velocity: .slow) }
         XCTAssertTrue(pair.isHittable, "Pair action must remain reachable inside bounded Sync scroll")
         XCTAssertGreaterThanOrEqual(pair.frame.height, 44)
         XCTAssertLessThanOrEqual(pair.frame.maxY, panel.frame.maxY + 1, "Whole Pair target must fit, not merely its center")
