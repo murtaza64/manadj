@@ -40,7 +40,7 @@ jobs:
           echo '9dbbc81c6f640e4208c8000edbd46f4d6a8b3223eab565b4ff50b5742758abbb  native-metadata-wire.patch' | shasum -a 256 -c -
           git apply --check native-metadata-wire.patch
           git apply native-metadata-wire.patch
-          echo '4085bc72d23fc9da5d34f85efa8dc515d39e094c0e95d77aca7cd3a4e90cec65  native-app-wire.patch' | shasum -a 256 -c -
+          echo '5c771dc829194a426a887e5a826bc4f3d7cd9681fa8804ff3570d662ddc31001  native-app-wire.patch' | shasum -a 256 -c -
           git apply --check native-app-wire.patch
           git apply native-app-wire.patch
           git diff --stat
@@ -79,7 +79,7 @@ jobs:
           DEVICE=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; groups=json.load(sys.stdin)["devices"]; phones=[d for r,ds in sorted(groups.items(),reverse=True) if "iOS" in r for d in ds if d.get("isAvailable") and d["name"].startswith("iPhone")]; assert phones; print(phones[0]["udid"])')
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
-          xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath "$RUNNER_TEMP/native-sim" -parallel-testing-enabled NO -only-testing:ManadjTests/NativeAudioTests/testSessionCaptureCandidateRemainsDisabledAndLifecycleCloses -resultBundlePath NativeSync.xcresult CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$(uname -m)" test 2>&1 | tee native-simulator.log
+          xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath "$RUNNER_TEMP/native-sim" -parallel-testing-enabled NO -only-testing:ManadjTests/NativeAudioTests/testSessionCaptureCandidateRemainsDisabledAndLifecycleCloses -only-testing:ManadjUITests/WorkspaceUITests/testPrivateCloudControlsDisabledAndVisible -resultBundlePath NativeSync.xcresult CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$(uname -m)" test 2>&1 | tee native-simulator.log
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
