@@ -48,14 +48,16 @@ index fd4b3cb1..dd50706f 100644
  		};
  		"3D5D06619AD2FD8BA0F34D57" = {
 diff --git a/ios/Manadj/AppModel.swift b/ios/Manadj/AppModel.swift
-index 3a7719a0..698ac958 100644
+index 3a7719a0..a1fdbb90 100644
 --- a/ios/Manadj/AppModel.swift
 +++ b/ios/Manadj/AppModel.swift
-@@ -70,6 +70,30 @@ struct DeckViewState {
+@@ -70,6 +70,35 @@ struct DeckViewState {
      private var liveStream = ""
      private var liveSequence = -1
      private var engineErrors: Set<UInt64> = []
-+    lazy var cloudSync: CloudSyncController = {
++    private var cloudSyncStorage: CloudSyncController?
++    var cloudSync: CloudSyncController {
++        if let controller = cloudSyncStorage { return controller }
 +        let controller = CloudSyncController(root: root.appendingPathComponent("continuous-sync"))
 +        controller.projectionChanged = { [weak self, weak controller] in
 +            Task { @MainActor in
@@ -64,8 +66,11 @@ index 3a7719a0..698ac958 100644
 +                catch { self.error = error.localizedDescription }
 +            }
 +        }
++        cloudSyncStorage = controller
 +        return controller
-+    }()
++    }
++
++    func stopCloudSyncForBackground() { cloudSyncStorage?.stop() }
 +
 +    func configureCloudSync(from url: URL) {
 +        Task {
@@ -300,6 +305,31 @@ index 00000000..424e5c76
 +        }
 +    }
 +}
+diff --git a/ios/Manadj/ManadjApp.swift b/ios/Manadj/ManadjApp.swift
+index 6a406441..90a998f0 100644
+--- a/ios/Manadj/ManadjApp.swift
++++ b/ios/Manadj/ManadjApp.swift
+@@ -11,14 +11,18 @@ import CEngine
+         WindowGroup {
+             Group {
+                 #if DEBUG
+-                if ProcessInfo.processInfo.arguments.contains("--local-live-ui-fixture") { LocalLiveView() }
++                if ProcessInfo.processInfo.arguments.contains("--cloud-sync-ui-fixture") { SettingsView() }
++                else if ProcessInfo.processInfo.arguments.contains("--local-live-ui-fixture") { LocalLiveView() }
+                 else { WorkspaceView() }
+                 #else
+                 WorkspaceView()
+                 #endif
+             }.environmentObject(model)
+                 .onAppear { model.syncWake.setActive(scenePhase == .active) }
+-                .onChange(of: scenePhase) { _, phase in model.syncWake.setActive(phase == .active) }
++                .onChange(of: scenePhase) { _, phase in
++                    model.syncWake.setActive(phase == .active)
++                    if phase != .active { model.stopCloudSyncForBackground() }
++                }
+                 .font(Ink.font()).foregroundStyle(Ink.text)
+                 .tint(Ink.accent).preferredColorScheme(.dark)
+         }
 diff --git a/ios/Manadj/SettingsView.swift b/ios/Manadj/SettingsView.swift
 index ed0e3848..9fb33025 100644
 --- a/ios/Manadj/SettingsView.swift
@@ -312,3 +342,29 @@ index ed0e3848..9fb33025 100644
                  Text(model.status).font(Ink.font(12)).foregroundStyle(Ink.muted)
                  Text("LAN sync uses the desktop's HTTP listener. Audio, library data and pairing credentials are not encrypted in transit on that connection. Use a trusted private network.").font(Ink.font(11)).foregroundStyle(Ink.warning)
                  if let progress = model.syncProgress {
+diff --git a/ios/ManadjUITests/WorkspaceUITests.swift b/ios/ManadjUITests/WorkspaceUITests.swift
+index f03a5d01..d4afca7c 100644
+--- a/ios/ManadjUITests/WorkspaceUITests.swift
++++ b/ios/ManadjUITests/WorkspaceUITests.swift
+@@ -1,6 +1,21 @@
+ import XCTest
+ 
+ final class WorkspaceUITests: XCTestCase {
++    @MainActor func testPrivateCloudControlsDisabledAndVisible() {
++        let app = XCUIApplication()
++        app.launchArguments = ["--cloud-sync-ui-fixture"]
++        app.launch()
++        let identity = app.buttons["DEVICE ID"]
++        XCTAssertTrue(identity.waitForExistence(timeout: 15))
++        XCTAssertTrue(identity.isHittable)
++        XCTAssertTrue(app.buttons["IMPORT GROUP"].isHittable)
++        XCTAssertFalse(app.buttons["SIGN IN"].isEnabled)
++        XCTAssertFalse(app.buttons["START"].isEnabled)
++        let shot = XCTAttachment(screenshot: app.screenshot())
++        shot.name = "Disabled private sync controls, no provisioning or cloud effects"
++        shot.lifetime = .keepAlways; add(shot)
++    }
++
+     @MainActor private func waitForReadyTransport(_ play: XCUIElement, app: XCUIApplication) {
+         let ready = NSPredicate(format: "enabled == true AND hittable == true")
+         let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: play)], timeout: 20)
