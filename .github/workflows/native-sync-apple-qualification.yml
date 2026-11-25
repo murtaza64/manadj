@@ -34,6 +34,9 @@ jobs:
           echo '17a73a10a68f7790375bf25b14644af342854e580b719551ad5ce6e313dca216  native-isolation-codec.patch' | shasum -a 256 -c -
           git apply --check --exclude=backend/continuous_sync/NATIVE_CAPTURE.md native-isolation-codec.patch
           git apply --exclude=backend/continuous_sync/NATIVE_CAPTURE.md native-isolation-codec.patch
+          echo '783fe8a4778c395fe86d8b1d1cf257b5f34984386b5aba5133b506a917eff01c  native-schema-interop.patch' | shasum -a 256 -c -
+          git apply --check --exclude=backend/continuous_sync/NATIVE_CAPTURE.md native-schema-interop.patch
+          git apply --exclude=backend/continuous_sync/NATIVE_CAPTURE.md native-schema-interop.patch
           git diff --stat
       - name: Select latest production Xcode
         shell: bash
@@ -48,8 +51,16 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          export MANADJ_NATIVE_VECTOR_OUTPUT="$GITHUB_WORKSPACE/native-generated"
           (cd ios/Packages/ManadjCore && swift test -j 2) 2>&1 | tee native-core-apple.log
           (cd ios/Packages/ManadjAudio && swift test -j 2) 2>&1 | tee native-audio-apple.log
+      - name: Independent Python verifies generated native signature and tamper denial
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/native-verify"
+          "$RUNNER_TEMP/native-verify/bin/pip" install rfc8785==0.1.4 cryptography==46.0.3
+          "$RUNNER_TEMP/native-verify/bin/python" scripts/qualification/verify-native-signed-vector.py native-generated/native-signed-vector.json | tee native-python-interop.log
       - name: Compile actual iOS host and AppModel without signing
         shell: bash
         run: |
@@ -70,4 +81,5 @@ jobs:
           path: |
             native-*.log
             NativeSync.xcresult
+            native-generated/native-signed-vector.json
           retention-days: 3
