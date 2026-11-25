@@ -678,7 +678,9 @@ extension NativeAudioTests {
         audio.stopSessionCapture(incomplete: true)
         XCTAssertFalse(audio.sessionCaptureIsPrepared)
         XCTAssertThrowsError(try audio.prepareSessionCapture(journal: journal, libraryIdentity: "generated-apple-host"))
-    }    @MainActor func testPreparedCaptureStartsOnRunningEngineAndFencesCompleteClose() async throws {
+    }
+
+    @MainActor func testPreparedCaptureStartsOnRunningEngineAndFencesCompleteClose() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
