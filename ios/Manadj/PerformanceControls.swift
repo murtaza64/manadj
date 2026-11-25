@@ -5,8 +5,19 @@ import UIKit
 struct PerformanceKeyStyle: ButtonStyle {
     var color: Color = Ink.accent
     var active = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
+        PerformanceKeyBody(configuration: configuration, color: color, active: active)
+    }
+}
+
+/// Environment is read by an installed View, even when another ButtonStyle
+/// delegates to PerformanceKeyStyle.makeBody directly.
+private struct PerformanceKeyBody: View {
+    let configuration: ButtonStyleConfiguration
+    let color: Color
+    let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
         configuration.label.font(Ink.font(12, bold: true)).lineLimit(1).minimumScaleFactor(0.75)
             .foregroundStyle(color).frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Capsule().fill(active || configuration.isPressed ? color.opacity(0.2) : Ink.panel))

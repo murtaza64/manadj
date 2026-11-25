@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import CEngine
 import ManadjAudio
 import ManadjCore
@@ -56,6 +57,8 @@ struct DeckViewState {
     private var repository: LibraryRepository?
     private var connection: DesktopConnection?
     private var task: Task<Void, Never>?
+    private var deckLoads: [Task<Void, Never>?] = Array(repeating: nil, count: 4)
+    private var deckLoadIDs: [UUID] = (0..<4).map { _ in UUID() }
     private var clock: Task<Void, Never>?
     @Published var liveListening = false
     @Published var liveStatus = "Local live prototype"
@@ -113,7 +116,7 @@ struct DeckViewState {
         }
         refreshRecordings()
     }
-    deinit { clock?.cancel(); task?.cancel(); liveTask?.cancel() }
+    deinit { clock?.cancel(); task?.cancel(); liveTask?.cancel(); for load in deckLoads { load?.cancel() } }
     private func openCache() async {
         do {
             let repo = try LibraryRepository(root: root.appendingPathComponent("library"))
@@ -467,7 +470,6 @@ struct DeckViewState {
         noteFeedbackAction("load-request", deck: deck, value: Double(track.id))
         guard !liveListening else { error = "Stop local live before loading tracks"; return false }
         guard decks.indices.contains(deck) else { error = "Choose a valid deck"; return false }
-        guard !decks[deck].loading else { error = "This deck is already loading. Wait for it to finish."; return false }
         guard let repository else { error = "The offline library is still opening. Try again shortly."; return false }
         guard let audio else { error = "The audio engine is unavailable. Reopen manaDJ and try again."; return false }
         guard track.audioRev != nil else { error = "Track has no downloadable audio revision. Sync the desktop library again."; return false }
@@ -476,12 +478,18 @@ struct DeckViewState {
             return false
         }
         let previousLoad = audio.state(deck).load
+        deckLoads[deck]?.cancel()
+        let loadID = UUID(); deckLoadIDs[deck] = loadID
         decks[deck].loading = true
-        Task {
-            defer { decks[deck].loading = false }
+        deckLoads[deck] = Task {
+            defer { if deckLoadIDs[deck] == loadID { decks[deck].loading = false; deckLoads[deck] = nil } }
             do {
                 let url = try await repository.audio(track, connection: connection)
+                try Task.checkCancellation()
+                guard deckLoadIDs[deck] == loadID else { return }
                 let duration = try await audio.load(url, deck: deck)
+                try Task.checkCancellation()
+                guard deckLoadIDs[deck] == loadID else { return }
                 let grid = track.grid
                 audio.grid(deck, bpm: grid?.tempoChanges.first?.bpm ?? track.bpm ?? 0, anchor: grid?.anchorTime ?? 0)
                 if let cue = track.mainCue { audio.send(MDJCueSetAt, deck: deck, value: cue) }
@@ -492,22 +500,38 @@ struct DeckViewState {
                 decks[deck].duration = duration // Decoded audio is the authoritative timeline, not stale catalog metadata.
                 decks[deck].waveform = nil
                 decks[deck].waveformNotice = "Loading full waveform"
+                // Audio readiness and its haptic do not wait on remote detail.
+                decks[deck].loading = false
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
                 do {
-                    decks[deck].waveform = try await repository.detail(track, connection: connection)
-                    decks[deck].waveformNotice = decks[deck].waveform == nil ? "Full waveform not generated on desktop" : nil
-                } catch { decks[deck].waveformNotice = "Full waveform unavailable locally. Audio remains playable." }
+                    let detail = try await repository.detail(track, connection: connection)
+                    try Task.checkCancellation()
+                    guard deckLoadIDs[deck] == loadID else { return }
+                    decks[deck].waveform = detail
+                    decks[deck].waveformNotice = detail == nil ? "Full waveform not generated on desktop" : nil
+                } catch {
+                    guard !Task.isCancelled, deckLoadIDs[deck] == loadID else { return }
+                    decks[deck].waveformNotice = "Full waveform unavailable locally. Audio remains playable."
+                }
                 // Never magnify the 256-bin browser preview into a performance lane.
-                downloaded = await repository.downloadedIds()
-            } catch { loadFailed(error, deck: deck, previousLoad: previousLoad) }
+                let ids = await repository.downloadedIds()
+                guard deckLoadIDs[deck] == loadID else { return }
+                downloaded = ids
+            } catch {
+                guard !Task.isCancelled, deckLoadIDs[deck] == loadID else { return }
+                loadFailed(error, deck: deck, previousLoad: previousLoad)
+            }
         }
         return true
     }
     func importFile(_ url: URL, deck: Int, title: String? = nil, artist: String? = nil) {
-        guard !liveListening, let audio, !decks[deck].loading else { return }
+        guard !liveListening, decks.indices.contains(deck), let audio else { return }
         let previousLoad = audio.state(deck).load
+        deckLoads[deck]?.cancel()
+        let loadID = UUID(); deckLoadIDs[deck] = loadID
         decks[deck].loading = true
-        Task {
-            defer { decks[deck].loading = false }
+        deckLoads[deck] = Task {
+            defer { if deckLoadIDs[deck] == loadID { decks[deck].loading = false; deckLoads[deck] = nil } }
             do {
                 // Keep imports app-owned so iCloud/File Provider grants are not needed on every load.
                 let copied = try await Task.detached(priority: .userInitiated) { [root] in
@@ -519,13 +543,22 @@ struct DeckViewState {
                     try FileManager.default.copyItem(at: url, to: target)
                     return target
                 }.value
+                try Task.checkCancellation()
+                guard deckLoadIDs[deck] == loadID else { return }
                 let duration = try await audio.load(copied, deck: deck)
+                try Task.checkCancellation()
+                guard deckLoadIDs[deck] == loadID else { return }
                 decks[deck].title = title ?? url.deletingPathExtension().lastPathComponent
                 decks[deck].artist = artist ?? "Imported from Files · no saved grid"
                 decks[deck].track = nil
                 decks[deck].duration = duration
                 decks[deck].waveform = nil
-            } catch { loadFailed(error, deck: deck, previousLoad: previousLoad) }
+                decks[deck].waveformNotice = nil
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            } catch {
+                guard !Task.isCancelled, deckLoadIDs[deck] == loadID else { return }
+                loadFailed(error, deck: deck, previousLoad: previousLoad)
+            }
         }
     }
     private func loadFailed(_ failure: Error, deck: Int, previousLoad: UInt64) {
