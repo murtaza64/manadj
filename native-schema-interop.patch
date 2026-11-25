@@ -1,0 +1,166 @@
+diff --git a/backend/continuous_sync/NATIVE_CAPTURE.md b/backend/continuous_sync/NATIVE_CAPTURE.md
+index 367ddaa0..09773a53 100644
+--- a/backend/continuous_sync/NATIVE_CAPTURE.md
++++ b/backend/continuous_sync/NATIVE_CAPTURE.md
+@@ -206,3 +206,10 @@ small exponent/decimal/large exponent/rounding; Apple tests verify pinned public
+ and canonical bytes, deny tampering/wronggroup/key. No generic incoming session
+ codec, durable signedoutbox/cursor, trusted heads or transport yet. This codec is
+ not Linuxqualified because Apple modules unavailable, awaiting exact Apple CI.
++
++Journal compatibility follow-up: disposition envelope now writes version3 and
++explicitly reads prior version2 without setAside as an empty disposition list.
++Opening never rewrites prior bytes; next successful append preserves old intents
++and writesv3. Unknown/malformed versions failclosed. Generated migration fixture
++checks originalbytes/id/sequence preservation. Version1 without sourceRevision
++remains explicitly unsupported, not silently converted into invented identity.
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift
+index 741c0677..bf605519 100644
+--- a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift
+@@ -47,6 +47,18 @@ public actor LibraryEditJournal {
+         let libraryIdentity: String
+         let intents: [LibraryEditIntent]
+         let setAside: [UUID]
++        private enum CodingKeys: String, CodingKey { case version, libraryIdentity, intents, setAside }
++        init(version: Int, libraryIdentity: String, intents: [LibraryEditIntent], setAside: [UUID]) {
++            self.version = version; self.libraryIdentity = libraryIdentity; self.intents = intents; self.setAside = setAside
++        }
++        init(from decoder: Decoder) throws {
++            let box = try decoder.container(keyedBy: CodingKeys.self)
++            version = try box.decode(Int.self, forKey: .version)
++            libraryIdentity = try box.decode(String.self, forKey: .libraryIdentity)
++            intents = try box.decode([LibraryEditIntent].self, forKey: .intents)
++            if version == 2 { setAside = try box.decodeIfPresent([UUID].self, forKey: .setAside) ?? [] }
++            else { setAside = try box.decode([UUID].self, forKey: .setAside) }
++        }
+     }
+     public static let maximumBytes = 1024 * 1024
+     public static let maximumIntents = 1024
+@@ -70,14 +82,13 @@ public actor LibraryEditJournal {
+             let bytes = try Data(contentsOf: file)
+             guard bytes.count <= Self.maximumBytes else { throw LibraryEditJournalError.full }
+             let envelope = try JSONDecoder().decode(Envelope.self, from: bytes)
+-            guard envelope.version == 2, envelope.libraryIdentity == libraryIdentity else {
++            guard [2, 3].contains(envelope.version), envelope.libraryIdentity == libraryIdentity else {
+                 throw LibraryEditJournalError.identityMismatch
+             }
+             guard envelope.intents.count <= Self.maximumIntents,
+                   Set(envelope.intents.map(\.id)).count == envelope.intents.count else { throw LibraryEditJournalError.invalid }
+             for (index, intent) in envelope.intents.enumerated() {
+                 guard intent.sequence == index + 1, Self.valid(intent) else { throw LibraryEditJournalError.invalid }
+-
+             }
+             guard Set(envelope.setAside).count == envelope.setAside.count,
+                   Set(envelope.setAside).isSubset(of: Set(envelope.intents.map(\.id))) else { throw LibraryEditJournalError.invalid }
+@@ -93,7 +104,7 @@ public actor LibraryEditJournal {
+     public func setAsideIntents(_ ids: Set<UUID>) throws {
+         guard !frozen, !ids.isEmpty, ids.isSubset(of: Set(intents.map(\.id))) else { throw LibraryEditJournalError.invalid }
+         let next = setAside.union(ids)
+-        let bytes = try JSONEncoder().encode(Envelope(version: 2, libraryIdentity: libraryIdentity, intents: intents, setAside: next.sorted { $0.uuidString < $1.uuidString }))
++        let bytes = try JSONEncoder().encode(Envelope(version: 3, libraryIdentity: libraryIdentity, intents: intents, setAside: next.sorted { $0.uuidString < $1.uuidString }))
+         guard bytes.count <= Self.maximumBytes else { throw LibraryEditJournalError.full }
+         do { try writer(bytes, file) } catch { frozen = true; throw LibraryEditJournalError.persistence }
+         setAside = next
+@@ -116,7 +127,7 @@ public actor LibraryEditJournal {
+         }), previous.newValue != oldValue { throw LibraryEditJournalError.staleValue }
+         guard intents.count < Self.maximumIntents else { throw LibraryEditJournalError.full }
+         let next = intents + [intent]
+-        let bytes = try JSONEncoder().encode(Envelope(version: 2, libraryIdentity: libraryIdentity, intents: next, setAside: setAside.sorted { $0.uuidString < $1.uuidString }))
++        let bytes = try JSONEncoder().encode(Envelope(version: 3, libraryIdentity: libraryIdentity, intents: next, setAside: setAside.sorted { $0.uuidString < $1.uuidString }))
+         guard bytes.count <= Self.maximumBytes else { throw LibraryEditJournalError.full }
+         do { try writer(bytes, file) }
+         catch {
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift
+index 5f524be9..ace459ca 100644
+--- a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift
+@@ -189,6 +189,26 @@ final class LibraryEditJournalTests: XCTestCase, @unchecked Sendable {
+         XCTAssertEqual(next.last?.sequence, 3)
+     }
+ 
++    func testV2NoDispositionReadMigrationRetainsEvidenceAndNextWriteV3() async throws {
++        let file = file(); defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
++        let track = UUID()
++        let journal = try LibraryEditJournal(file: file, libraryIdentity: "migration")
++        let first = try await journal.append(logicalTrackID: track, oldValue: .title("a"), newValue: .title("b"), parents: [])
++        var old = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
++        old["version"] = 2; old.removeValue(forKey: "setAside")
++        try JSONSerialization.data(withJSONObject: old).write(to: file)
++        let original = try Data(contentsOf: file)
++        let reopened = try LibraryEditJournal(file: file, libraryIdentity: "migration")
++        let recovered = await reopened.evidence()
++        XCTAssertEqual(recovered, [first])
++        XCTAssertEqual(try Data(contentsOf: file), original, "Opening legacy journal never rewrites evidence")
++        _ = try await reopened.append(logicalTrackID: track, oldValue: .title("b"), newValue: .title("c"), parents: [])
++        let next = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
++        XCTAssertEqual(next["version"] as? Int, 3)
++        let entries = await reopened.evidence()
++        XCTAssertEqual(entries.first, first)
++    }
++
+     func testCapacityFailureRetainsAllCommittedIntents() async throws {
+         let file = file(); defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+         let journal = try LibraryEditJournal(file: file, libraryIdentity: "capacity")
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeOperationCodecTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeOperationCodecTests.swift
+index c48ee47d..bc7a3310 100644
+--- a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeOperationCodecTests.swift
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeOperationCodecTests.swift
+@@ -26,6 +26,14 @@ final class NativeOperationCodecTests: XCTestCase, @unchecked Sendable {
+         let packet = try NativeOperationCodec.sign(group: group, origin: origin, sequence: 1, id: id, track: track,
+             value: .title("Generated native title"), parents: [], key: key)
+         _ = try NativeOperationCodec.verify(packet, expectedGroup: group, expectedOrigin: origin, pinnedKey: key.publicKey)
++        // Optional generated CI export contains only a new public key and
++        // signed generated packet, never private key or personal music.
++        if let directory = ProcessInfo.processInfo.environment["MANADJ_NATIVE_VECTOR_OUTPUT"] {
++            let result: [String: Any] = ["publicKey": key.publicKey.rawRepresentation.base64EncodedString(),
++                "packet": try JSONSerialization.jsonObject(with: packet)]
++            try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
++            try JSONSerialization.data(withJSONObject: result).write(to: URL(fileURLWithPath: directory).appendingPathComponent("native-signed-vector.json"))
++        }
+         let changed = Data(String(decoding: packet, as: UTF8.self).replacingOccurrences(of: "Generated native title", with: "Changed").utf8)
+         XCTAssertThrowsError(try NativeOperationCodec.verify(changed, expectedGroup: group, expectedOrigin: origin, pinnedKey: key.publicKey))
+         XCTAssertThrowsError(try NativeOperationCodec.body(group: group, origin: origin, sequence: 0, id: id, track: track, value: .mainCue(1), parents: []))
+diff --git a/scripts/qualification/verify-native-signed-vector.py b/scripts/qualification/verify-native-signed-vector.py
+new file mode 100644
+index 00000000..b4d66c1b
+--- /dev/null
++++ b/scripts/qualification/verify-native-signed-vector.py
+@@ -0,0 +1,38 @@
++"""Generated Apple CryptoKit/JavaScriptCore output, checked by Python protocol primitives.
++
++No enrollment, user library, network, private keys, or mutation outside generated
++files. Verifies codec interoperability, not client convergence or durable cursors.
++"""
++import base64
++import json
++import sys
++from uuid import UUID
++
++import rfc8785
++from cryptography.exceptions import InvalidSignature
++from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
++
++value = json.load(open(sys.argv[1]))
++key = Ed25519PublicKey.from_public_bytes(base64.b64decode(value['publicKey'], validate=True))
++p = value['packet']
++b = p['body']
++assert set(p) == {'body', 'signature'}
++assert set(b) == {'entity', 'field', 'format', 'generation', 'group_id', 'operation_id', 'origin_id', 'parents', 'sequence', 'value'}
++for field in ['group_id', 'operation_id', 'origin_id']:
++    assert str(UUID(b[field])) == b[field]
++assert b['entity'].startswith('track:')
++assert str(UUID(b['entity'][6:])) == b['entity'][6:]
++assert b['format'] == 'manadj-continuous-sync/v1' and b['generation'] == 1
++assert b['sequence'] == 1 and b['field'] == 'title' and b['parents'] == []
++assert b['value'] == 'Generated native title'
++sig = base64.b64decode(p['signature'], validate=True)
++domain = b'manadj-continuous-sync/v1\0'
++key.verify(sig, domain + rfc8785.dumps(b))
++b['value'] = 'Changed after signing'
++try:
++    key.verify(sig, domain + rfc8785.dumps(b))
++except InvalidSignature:
++    pass
++else:
++    raise AssertionError('tampered native packet accepted')
++print('APPLE_NATIVE_TO_PYTHON_SIGNATURE_CANONICAL_TYPED_VECTOR_PASS')
