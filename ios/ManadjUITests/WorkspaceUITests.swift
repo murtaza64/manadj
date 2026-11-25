@@ -19,6 +19,31 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
+    @MainActor func testAndroidHeightReferenceKeepsCenterAndTransportReachable() {
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        XCTAssertTrue(app.buttons["A play pause"].waitForExistence(timeout: 20))
+        let a = app.otherElements["deck-0-detail-wave"], b = app.otherElements["deck-1-detail-wave"]
+        XCTAssertTrue(a.waitForExistence(timeout: 5)); XCTAssertTrue(b.exists)
+        // Android compact portrait uses50dp per deck, not50dp for both.
+        if app.frame.height >= 800 {
+            XCTAssertGreaterThanOrEqual(a.frame.height, 49)
+            XCTAssertGreaterThanOrEqual(b.frame.height, 49)
+        }
+        for name in ["Sessions", "Settings", "Record master", "Saved recordings", "A play pause", "B play pause"] {
+            let button = app.buttons[name]
+            XCTAssertTrue(button.isHittable, name)
+            XCTAssertGreaterThanOrEqual(button.frame.height, 44, name)
+            XCTAssertLessThanOrEqual(button.frame.maxY, app.frame.maxY - 20, name)
+        }
+        let recording = app.buttons["Record master"].frame
+        XCTAssertEqual(recording.minY, app.buttons["Settings"].frame.minY, accuracy: 1)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Wave height preview, Android dimension reference, actual iOS workspace"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["BROWSE"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(a.frame.height, 49)
+        let browse = XCTAttachment(screenshot: app.screenshot()); browse.name = "Wave height preview with browser drawer"; browse.lifetime = .keepAlways; add(browse)
+    }
+
     @MainActor func testMetalPrototypeWorkspacePixelsAndFallbackStatus() {
         defer { captureFailure() }
         for metal in [false, true] {
