@@ -45,6 +45,7 @@ def native_configuration(db, group_id, target_origin, local_ids):
         path = Path(track.filename)
         if not path.is_file() or path.is_symlink():
             raise SyncFailure('selected_audio_unavailable')
+        path_before = path.stat()
         digest, length = hashlib.sha256(), 0
         with path.open('rb') as source:
             descriptor = source.fileno()
@@ -54,7 +55,14 @@ def native_configuration(db, group_id, target_origin, local_ids):
             stat_after = os.fstat(descriptor)
         current = path.stat()
         stamp = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
-        if length <= 0 or stamp(stat_before) != stamp(stat_after) or stamp(stat_after) != stamp(current) or length != current.st_size:
+        # Windows descriptor and path stat may use different file identity and
+        # creation-time representations. Compare each source across the read,
+        # not those representations against one another. POSIX also cross-checks
+        # the open descriptor against the path to reject replacement races.
+        changed = stamp(stat_before) != stamp(stat_after) or stamp(path_before) != stamp(current)
+        if os.name != 'nt':
+            changed = changed or stamp(stat_after) != stamp(current)
+        if length <= 0 or changed or length != current.st_size or length != stat_after.st_size:
             raise SyncFailure('selected_audio_changed')
         bindings.append({'logicalID': logical_id, 'localID': phone_id, 'contentSHA256': digest.hexdigest(), 'byteLength': length})
     return {'version': 1, 'group': group_id, 'origin': target_origin, 'members': pins, 'bindings': bindings}
