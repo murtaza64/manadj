@@ -4,6 +4,26 @@ final class FeedbackUITests: XCTestCase {
     @MainActor private func capture(_ name: String, app: XCUIApplication) {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
+    /// Poll an element's value until it has `prefix` or the budget expires.
+    /// An NSPredicate waiter lets one slow accessibility query consume the whole
+    /// window with zero completed evaluations (the watchdog interrupts the query,
+    /// leaving an empty debug capture and no observed value). Direct reads each
+    /// complete on their own, and recorded observations aid diagnosis. The
+    /// deadline is checked between reads; an individual AX read can overrun it.
+    /// Same condition and nominal budget, not a hard query timeout.
+    @MainActor private func expectValuePrefix(_ element: XCUIElement, _ prefix: String, budget: TimeInterval, _ message: String, file: StaticString = #filePath, line: UInt = #line) {
+        let deadline = Date().addingTimeInterval(budget)
+        var observed: String?
+        var reads = 0
+        while true {
+            observed = element.value as? String
+            reads += 1
+            if observed?.hasPrefix(prefix) == true { return }
+            if Date() >= deadline { break }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTFail("\(message); \(reads) reads, last value: \(observed ?? "nil")", file: file, line: line)
+    }
     @MainActor private func field(_ app: XCUIApplication) -> XCUIElement { app.descendants(matching: .any).matching(identifier: "feedback-title").firstMatch }
     @MainActor func testExplicitButtonPicksTargetDrawsAndCancelsWithoutFiling() {
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
@@ -128,8 +148,7 @@ final class FeedbackUITests: XCTestCase {
         wait(for: [ready], timeout: 20)
         app.buttons["deck-0-loop-toggle"].tap(); play.tap()
         let wave = app.otherElements["deck-0-detail-wave"]
-        let playing = expectation(for: NSPredicate(format: "value BEGINSWITH 'playing'"), evaluatedWith: wave)
-        wait(for: [playing], timeout: 5)
+        expectValuePrefix(wave, "playing", budget: 5, "Deck must be playing after play tap")
         rec.tap()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let permission = springboard.alerts.firstMatch
