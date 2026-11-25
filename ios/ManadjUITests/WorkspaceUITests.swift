@@ -194,9 +194,20 @@ final class WorkspaceUITests: XCTestCase {
         for _ in 0..<5 where !address.isHittable { panel.swipeUp(velocity: .slow) }
         XCTAssertTrue(address.isHittable, "Actual pairing address must be reachable inside Sync")
         let pair = app.buttons["PAIR IPHONE"]
-        for _ in 0..<8 where !pair.isHittable || pair.frame.maxY > panel.frame.maxY + 1 { panel.swipeUp(velocity: .slow) }
+        // A full swipe overshoots an 80pt viewport and can put Pair above it.
+        // Move in bounded increments in either direction, keeping the whole
+        // target inside the panel rather than accepting a partial hit region.
+        for _ in 0..<16 {
+            let bounds = panel.frame, target = pair.frame
+            if pair.isHittable && target.minY >= bounds.minY - 1 && target.maxY <= bounds.maxY + 1 { break }
+            let movingUp = target.maxY > bounds.maxY + 1
+            let from = panel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: movingUp ? 0.8 : 0.2))
+            let to = panel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: movingUp ? 0.35 : 0.65))
+            from.press(forDuration: 0.15, thenDragTo: to)
+        }
         XCTAssertTrue(pair.isHittable, "Pair action must remain reachable inside bounded Sync scroll")
         XCTAssertGreaterThanOrEqual(pair.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(pair.frame.minY, panel.frame.minY - 1, "Whole Pair target must not scroll above panel")
         XCTAssertLessThanOrEqual(pair.frame.maxY, panel.frame.maxY + 1, "Whole Pair target must fit, not merely its center")
         XCTAssertEqual(app.buttons["A play pause"].frame.minY, beforeTransport.minY, accuracy: 2)
         print("PORTRAIT_GEOMETRY app=\(app.frame) window=\(app.windows.firstMatch.frame) panel=\(panel.frame) pair=\(pair.frame) pitch=\(app.buttons["A PITCH panel"].frame)")
