@@ -1,0 +1,82 @@
+name: Library bounded stop candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: private-library-worker-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.repository == 'murtaza64/manadj'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cloud/library
+        shell: bash
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - name: Checkout exact cursor-compatible main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 45dce84c7d33aab92fa7a6776e57afde490ed3b4
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13'
+      - name: Verify all 24 source hashes then exact deployment configuration
+        run: |
+          set -euo pipefail
+          sha256sum --check --status <<'SOURCE_HASHES'
+          62c8f951330daf291f3aa76ca3a878d8f4e5a1b28d4a2776d8868a4284c97fde  README.md
+          854fd8fd39ee31003d3d3ffc49827fd18926c9cc7e561337a7ca316a46d228a1  browser/app.js
+          a8699eab26318cbd792beb0de77445d245dbe2c49a650d7b9b4637ddd940ab28  browser_sources.mjs
+          cc93924f442101b0304a88dcf7dc0df213819374a99c92a7ca06a1684ca43733  check_config.py
+          020de6b75bd04fd306dbe5659384e6118ded2c16be6d1356211ef86677e62459  check_config_enabled.py
+          2cd225bcdda25f39ca0e122d58232e2482916f22047ff380ca258522f0eeef6a  check_core.mjs
+          3aebfce27a628d68c8fa192cfa50677b2d12ec2b10f49f1674ff16aa57d97700  check_page.mjs
+          edff65a968e25fc664590602e0dc953fb73660ab154b1cbb7d4f280e3f714568  check_page.test.mjs
+          57235f5f9d9747ef3be09bd246c3f3a76c249de37b32dc3fbb8155c77d891aee  contracts.mjs
+          dc9587b0eb5577d34745ecee407e92e2b14e148b5d116c95cb3824f8a7eb2879  fields.json
+          75a7b04b2d9c03636f2e710b924c313574e33346e792dcf7df659fd82851ee19  ledger.mjs
+          fb90e115285ed576c17f0cec4d61a0e1809230cbc9a59fd51a367798b7b68357  package-lock.json
+          d7d3c1daaf70099aba4e11c629df6d650215e1b2e2b4c9fc98dbcb7e410d7312  package.json
+          b03bbead91bdfe121e0fa3aaa46c20155f22d4d8f6a0dd50ab68ba90861949e2  part.mjs
+          17f4afd430b17c7c53be0e7825ee8fa0e5bdc97e4fcf6f20d3c402e16c2fab99  schema.mjs
+          dc87fbbb8de1d799e303dd4d9498b76e52714ac01b5f1dcd92e0d086cf4c42a2  service_check.mjs
+          8fc3538286b34094a27b9cbea160c0780ccc54297e3b02b4ab2572a66ed3896d  service_check.test.mjs
+          b3f2352b0e69d5820d16e5f0c172b0691fdbd3741e88dac434f4a411c291caeb  sync_check_page.mjs
+          c7dcf18dac0cf2a4460178fcbc09e672f9a1b3d915ca2a2305cb3678367b8ec0  test_bucket.mjs
+          dd0a32b473ea750cee8c84a0ce155d6a6e2772b84b9711c5600a3318a5b318e6  test_config.py
+          8f972197f37d941a752d56c0417cfa71e5c4eea8d554403c00500473f03ca6a2  test_config_enabled.py
+          e99f7c6b7c53d027ff0726172325dcd0057b5cbb5ab06942bd624decc4e409f3  worker.mjs
+          3c0839db327f6adb5374162f04426063b86cea948bf24e39c7b04d4c78328ad0  worker.test.mjs
+          ebf8278959fdd488baf90bcd0ffae3acb31691c3a62df4e47ae3788edbbcb6cd  wrangler.toml
+          SOURCE_HASHES
+          python - <<'DISABLED_CONFIG'
+          import pathlib,base64
+          pathlib.Path('wrangler.toml').write_bytes(base64.b64decode('bmFtZSA9ICJtYW5hZGotcHJpdmF0ZS1saWJyYXJ5IgptYWluID0gIndvcmtlci5tanMiCmNvbXBhdGliaWxpdHlfZGF0ZSA9ICIyMDI2LTExLTAxIgprZWVwX3ZhcnMgPSB0cnVlCnByZXZpZXdfdXJscyA9IGZhbHNlCgojIEZpcnN0IGRlcGxveSBpcyBhdXRoLWNoZWNrLW9ubHkuIE5vIHN0b3JhZ2UgYmluZGluZywgcHVibGljIHJvdXRlLCBxdWV1ZSBvciBjcm9uLgojIE9XTkVSX0VNQUlMIG11c3QgYmUgY29uZmlndXJlZCBwcml2YXRlbHk7IGFic2VuY2UgZmFpbHMgY2xvc2VkLgojIEVuYWJsaW5nIHNuYXBzaG90cyBvciBhZGRpbmcgTElCUkFSWV9CVUNLRVQgcmVxdWlyZXMgdGhlIHJlbWFpbmluZyByZXZpZXcvdGVzdHMuClt2YXJzXQpTTkFQU0hPVFNfRU5BQkxFRCA9ICJmYWxzZSIKTElCUkFSWV9PUklHSU4gPSAiaHR0cHM6Ly9tYW5hZGotcHJpdmF0ZS1saWJyYXJ5Lm11cnRhemEtamF2YWlkLndvcmtlcnMuZGV2IgpBQ0NFU1NfSVNTVUVSID0gImh0dHBzOi8vZnJvc3R5LXBvbmQtOGZkNS5jbG91ZGZsYXJlYWNjZXNzLmNvbSIKQUNDRVNTX0FVRCA9ICI0NDc3MzY1ZWUxMWQ2MTk5ZWVmNmJiNTRhYjZlOTI2MjJmZTU2ZWMwMzliYzdkNjFlYTA1ZWY2YjFiODU3YjhmIgoKW29ic2VydmFiaWxpdHldCmVuYWJsZWQgPSBmYWxzZQoK',validate=True))
+          DISABLED_CONFIG
+          echo 'a116aed9b62e2520387c5eab023edbb89e2f7b511b51ff2e88c64bdd16201a1e  wrangler.toml' | sha256sum --check --status
+          python check_config.py
+          python -m unittest discover -p test_config.py
+      - name: Locked tests and credential-free package
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+          node sync_check_page.mjs --check
+          npx --no-install wrangler deploy --dry-run --outdir "$RUNNER_TEMP/library-bounded-stop"
+      - name: Deploy existing library only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_LIBRARY_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: a4f837dfdb11165a1c1cbbf676db0684
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing scoped library credential'; exit 1; }
+          npm run deploy
