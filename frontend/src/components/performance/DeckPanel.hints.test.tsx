@@ -125,16 +125,20 @@ describe('DeckPanel keyboard hints', () => {
       expect(button!.querySelector('.perf-kbd')!.classList.contains('perf-kbd-offset')).toBe(true);
     }
     hint('[aria-label="Loop 4"]', loop);
-    hint('[aria-label="Match tempo"]', `\u2318${fader}`);
-    hint('[aria-label="Sync tempo"]', `\u2318\u21e7${fader}`);
-    hint('.deck-cuewalk > button:first-child', `\u2318${back}`);
-    hint('.deck-cuewalk > button:last-child', `\u2318${forward}`);
+    for (const selector of ['.perf-match', '.perf-sync', '.deck-cuewalk', '.player-button-cue']) {
+      expect(container.querySelector(`${selector} .perf-kbd`)).toBeNull();
+    }
+    expect(container.querySelector('.perf-match')!.getAttribute('title')).toContain(`Cmd+${fader}`);
+    expect(container.querySelector('.perf-sync')!.getAttribute('title')).toContain(`Cmd+Shift+${fader}`);
+    expect(container.querySelector('.deck-cuewalk > button:first-child')!.getAttribute('title')).toContain(`Cmd+${back}`);
+    expect(container.querySelector('.deck-cuewalk > button:last-child')!.getAttribute('title')).toContain(`Cmd+${forward}`);
     const cueWalkStyle = getComputedStyle(container.querySelector('.deck-cuewalk > button')!);
-    expect(cueWalkStyle.lineHeight).toBe('7px');
+    expect(cueWalkStyle.lineHeight).not.toBe('7px');
     expect(cueWalkStyle.paddingTop).toBe('0px');
-    expect(cueWalkStyle.paddingBottom).toBe('13px');
-    hint('.player-button-cue', deck === 'A' || deck === 'C' ? 'F' : 'J');
-    hint('.player-button-paused', deck === 'A' || deck === 'C' ? 'D' : 'K');
+    expect(cueWalkStyle.paddingBottom).not.toBe('13px');
+    expect(container.querySelector('.player-button-cue')!.getAttribute('title')).toContain(deck === 'A' || deck === 'C' ? 'F' : 'J');
+    expect(container.querySelector('.player-button-paused .perf-kbd')).toBeNull();
+    expect(container.querySelector('.player-button-paused')!.getAttribute('title')).toContain(deck === 'A' || deck === 'C' ? 'D' : 'K');
 
     const nudge = container.querySelector('.perf-nudge')!;
     expect([...nudge.children].map(node => node.tagName)).toEqual(['BUTTON', 'KBD', 'BUTTON']);
@@ -168,10 +172,8 @@ describe('DeckPanel keyboard hints', () => {
       render('A');
       expect(container.querySelector('[title="Halve loop size (Ctrl+Shift+A)"]')).not.toBeNull();
       expect(container.querySelector('[title="Double loop size (Ctrl+Shift+S)"]')).not.toBeNull();
-      const match = container.querySelector('[aria-label="Match tempo"] > .perf-kbd')!;
-      expect(match.textContent).toBe('\u2303G');
-      expect(match.querySelectorAll('.perf-kbd-ctrl > svg')).toHaveLength(1);
-      expect(container.querySelector('[aria-label="Sync tempo"] > .perf-kbd')!.textContent).toBe('\u2303\u21e7G');
+      expect(container.querySelector('.perf-match')!.getAttribute('title')).toContain('Ctrl+G');
+      expect(container.querySelector('.perf-sync')!.getAttribute('title')).toContain('Ctrl+Shift+G');
       expect(container.textContent).not.toContain('\u2318');
     } finally {
       setPlatformOverride('mac');
@@ -180,7 +182,7 @@ describe('DeckPanel keyboard hints', () => {
 
   it('preserves hint visibility gates', () => {
     render('A');
-    const hint = container.querySelector('.perf-match > .perf-kbd')!;
+    const hint = container.querySelector('.perf-pad-wrap > .perf-kbd')!;
     act(() => focusDeck('C'));
     expect(getComputedStyle(hint).display).toBe('none');
     act(() => focusDeck('A'));
@@ -196,10 +198,10 @@ describe('DeckPanel keyboard hints', () => {
     const cueWalk = container.querySelector('.deck-cuewalk > button')!;
     const pad = container.querySelector('.perf-pad-wrap .hot-cue')!;
     const sync = container.querySelector('.perf-sync-label')!;
-    expect(getComputedStyle(play).paddingRight).toBe('14px');
-    expect(getComputedStyle(cueWalk).paddingBottom).toBe('13px');
+    expect(getComputedStyle(play).paddingRight).toBe('0px');
+    expect(getComputedStyle(cueWalk).paddingBottom).toBe('0px');
     expect(getComputedStyle(pad).paddingRight).toBe('12px');
-    expect(getComputedStyle(sync).transform).toBe('translateY(-6px)');
+    expect(getComputedStyle(sync).transform).not.toBe('translateY(-6px)');
     if (reason === 'toggle') container.classList.add('kbd-hints-off');
     if (reason === 'deck focus') act(() => focusDeck('C'));
     expect(getComputedStyle(play).paddingRight).toBe('0px');
@@ -210,7 +212,7 @@ describe('DeckPanel keyboard hints', () => {
 
   it('greys out hints without moving labels during library focus, while KBD off still hides them', () => {
     render('A');
-    const hint = container.querySelector('.perf-sync > .perf-kbd')!;
+    const hint = container.querySelector('.perf-pad-wrap > .perf-kbd')!;
     const play = container.querySelector('.player-button-paused')!;
     const library = document.createElement('div');
     library.className = 'perf-keyboard-scope';
@@ -219,9 +221,9 @@ describe('DeckPanel keyboard hints', () => {
     expect(getComputedStyle(hint).visibility).not.toBe('hidden');
     expect(getComputedStyle(hint).display).not.toBe('none');
     expect(getComputedStyle(hint).getPropertyValue('--perf-kbd-ink')).toBe('var(--overlay1)');
-    expect(getComputedStyle(play).paddingRight).toBe('14px');
-    expect(getComputedStyle(container.querySelector('.deck-cuewalk > button')!).paddingBottom).toBe('13px');
-    expect(getComputedStyle(container.querySelector('.perf-sync-label')!).transform).toBe('translateY(-6px)');
+    expect(getComputedStyle(play).paddingRight).toBe('0px');
+    expect(getComputedStyle(container.querySelector('.deck-cuewalk > button')!).paddingBottom).toBe('0px');
+    expect(getComputedStyle(container.querySelector('.perf-sync-label')!).transform).not.toBe('translateY(-6px)');
     container.classList.add('kbd-hints-off');
     expect(getComputedStyle(hint).display).toBe('none');
     expect(getComputedStyle(play).paddingRight).toBe('0px');
