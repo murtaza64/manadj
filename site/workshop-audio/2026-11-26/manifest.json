@@ -1,0 +1,39 @@
+{
+  "friends.mp3": {
+    "sha256": "71e367f9b4c366188ecd8db594044ae84fee959412590f0abf69e9008f5057bd",
+    "bytes": 224906,
+    "parts": [
+      "friends-0.b64",
+      "friends-1.b64"
+    ]
+  },
+  "religion.mp3": {
+    "sha256": "4122f52b6006f34e99a24b2d162fbc215c15772ef000a58fbc17aa7c7ba6c032",
+    "bytes": 496997,
+    "parts": [
+      "religion-0.b64",
+      "religion-1.b64",
+      "religion-2.b64",
+      "religion-3.b64"
+    ]
+  },
+  "jungle.mp3": {
+    "sha256": "2f32a84c94e8f1ddf1d8ffdaeec1139247f171ca69c0de40eaac15a640c5d008",
+    "bytes": 512879,
+    "parts": [
+      "jungle-0.b64",
+      "jungle-1.b64",
+      "jungle-2.b64",
+      "jungle-3.b64"
+    ]
+  },
+  "planet.mp3": {
+    "sha256": "d9d47d77ea36eb0f102cd003cc2e573f534c79d8c8883a0efd5610921244ec93",
+    "bytes": 305154,
+    "parts": [
+      "planet-0.b64",
+      "planet-1.b64",
+      "planet-2.b64"
+    ]
+  }
+}
