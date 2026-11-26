@@ -18,8 +18,8 @@ function fixture() {
   const call = (verb, ...args) => handlers.get(`library-cloud:${verb}`)(event, ...args);
   return { handlers, events, wc, event, frame, connection, upload, dispose, call };
 }
-test('compiled-in target remains disabled without environment/renderer overrides', () => {
-  assert.equal(target.enabled, false); assert.ok(Object.isFrozen(target));
+test('compiled-in snapshot target is fixed and continuous sync remains disabled', () => {
+  assert.equal(target.enabled, true); assert.equal(target.continuousEnabled, false); assert.ok(Object.isFrozen(target));
   assert.equal(target.resource, 'https://manadj-private-library.murtaza-javaid.workers.dev');
 });
 test('IPC safe state and exact reviewed upload parameters only', async () => {
