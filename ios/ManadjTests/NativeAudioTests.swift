@@ -717,3 +717,29 @@ extension NativeAudioTests {
     }
 
 }
+
+
+extension NativeAudioTests {
+    @MainActor func testBrowserPullUsesOnlyNativeListPanAndDetachesCleanly() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        let host = UIViewController(); window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let list = UIScrollView(frame: window.bounds)
+        list.contentSize = CGSize(width: 393, height: 2000)
+        host.view.addSubview(list)
+        let before = list.gestureRecognizers?.count ?? 0
+        let probe = BrowserTopPull.Probe(frame: .zero)
+        list.addSubview(probe); probe.attach()
+        XCTAssertTrue(probe.scroll === list)
+        XCTAssertEqual(list.gestureRecognizers?.count ?? 0, before,
+            "Drawer must observe the native pan, not compete using a second recognizer")
+        probe.detach()
+        XCTAssertNil(probe.scroll)
+        XCTAssertTrue(list.bounces)
+        probe.attach()
+        XCTAssertTrue(probe.scroll === list)
+        XCTAssertEqual(list.gestureRecognizers?.count ?? 0, before)
+        probe.removeFromSuperview()
+        XCTAssertNil(probe.scroll)
+    }
+}

@@ -125,8 +125,9 @@ private struct HorizontalLoadPan: UIGestureRecognizerRepresentable {
     }
 }
 
-/// Simultaneous top-edge vertical pan. It never cancels row touches and fails
-/// horizontal/upward motion, preserving native list scroll and swipe-to-load.
+/// Observes the actual list pan, rather than competing with it using a second
+/// vertical recognizer. Native scrolling owns the gesture until a downward pan
+/// reaches the top, then the whole drawer owns the remaining travel.
 struct BrowserTopPull: UIViewRepresentable {
     var changed: (CGFloat) -> Void
     var ended: (CGFloat, CGFloat) -> Void
@@ -143,7 +144,7 @@ struct BrowserTopPull: UIViewRepresentable {
     }
     static func dismantleUIView(_ view: Probe, coordinator: ()) { view.detach() }
 
-    final class Probe: UIView, UIGestureRecognizerDelegate {
+    final class Probe: UIView {
         weak var scroll: UIScrollView?
         var changed: (CGFloat) -> Void = { _ in }
         var ended: (CGFloat, CGFloat) -> Void = { _, _ in }
@@ -156,17 +157,15 @@ struct BrowserTopPull: UIViewRepresentable {
         private var anchor: CGFloat?
         private var distance: CGFloat = 0
         private var priorBounces = true
-        private lazy var observerPan: UIPanGestureRecognizer = {
-            let pan = UIPanGestureRecognizer(target: self, action: #selector(pan(_:)))
-            pan.delegate = self; pan.cancelsTouchesInView = false; pan.maximumNumberOfTouches = 1
-            return pan
-        }()
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
-        override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard let scroll, let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
-            let velocity = pan.velocity(in: scroll.window)
-            report("probe=direction velocity=\(velocity) offset=\(scroll.contentOffset.y) content=\(scroll.contentSize.height) bounds=\(scroll.bounds.height)")
-            return velocity.y > 0 && velocity.y > abs(velocity.x) * 1.5 && scroll.contentOffset.y <= -scroll.adjustedContentInset.top + 0.5
+        private var offsetObservation: NSKeyValueObservation?
+        private var pinningOffset = false
+        private func pinListAtTop() {
+            guard anchor != nil, let scroll, !pinningOffset else { return }
+            let top = -scroll.adjustedContentInset.top
+            guard abs(scroll.contentOffset.y - top) > 0.01 else { return }
+            pinningOffset = true
+            scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: top), animated: false)
+            pinningOffset = false
         }
         override func didMoveToWindow() {
             super.didMoveToWindow()
@@ -183,7 +182,15 @@ struct BrowserTopPull: UIViewRepresentable {
             func bind(_ list: UIScrollView) {
                 scroll = list
                 report("probe=bound id=\(list.accessibilityIdentifier ?? "nil") type=\(type(of:list)) size=\(list.bounds.size) content=\(list.contentSize)")
-                list.addGestureRecognizer(observerPan)
+                list.panGestureRecognizer.addTarget(self, action: #selector(pan(_:)))
+                // UIKit may apply its offset after the target callback. Pin both
+                // orderings synchronously so rows cannot rubber-band independently
+                // of their header, transport and enclosing drawer.
+                offsetObservation = list.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in
+                    // UIScrollView's content offset is mutated on UIKit's main
+                    // thread; preserve synchronous ownership, no one-frame hop.
+                    MainActor.assumeIsolated { self?.pinListAtTop() }
+                }
                 #if DEBUG
                 print("BROWSER_PAN_ATTACHED type=\(type(of: list)) frame=\(list.convert(list.bounds, to: nil)) content=\(list.contentSize) bounceY=\(list.alwaysBounceVertical)")
                 #endif
@@ -218,9 +225,10 @@ struct BrowserTopPull: UIViewRepresentable {
         }
         func detach() {
             if let scroll {
-                scroll.removeGestureRecognizer(observerPan)
+                scroll.panGestureRecognizer.removeTarget(self, action: #selector(pan(_:)))
                 if anchor != nil { scroll.bounces = priorBounces }
             }
+            offsetObservation?.invalidate(); offsetObservation = nil
             scroll = nil; anchor = nil; distance = 0
         }
         @objc private func pan(_ pan: UIPanGestureRecognizer) {
@@ -228,24 +236,25 @@ struct BrowserTopPull: UIViewRepresentable {
             let travel = pan.translation(in: scroll.window), top = -scroll.adjustedContentInset.top
             switch pan.state {
             case .began:
-                // This recognizer only begins downward at the top. Preserve
-                // all travel already sampled when UIKit transitions to began.
-                anchor = 0; distance = max(0, travel.y); priorBounces = scroll.bounces
-                scroll.bounces = false
-                changed(distance)
-                report("probe=pan-began offset=\(scroll.contentOffset) top=\(top)")
-                #if DEBUG
-                print("BROWSER_PAN_BEGAN offset=\(scroll.contentOffset) top=\(top) global=\(scroll.convert(scroll.bounds, to: nil))")
-                #endif
+                anchor = nil; distance = 0
+                let velocity = pan.velocity(in: scroll.window)
+                if velocity.y > 0, velocity.y > abs(velocity.x) * 1.5,
+                   scroll.contentOffset.y <= top + 0.5 {
+                    anchor = 0; distance = max(0, travel.y)
+                    priorBounces = scroll.bounces; scroll.bounces = false
+                    pinListAtTop(); changed(distance)
+                    report("probe=native-pan-began distance=\(distance)")
+                }
             case .changed:
                 if anchor == nil, travel.y > 0, travel.y > abs(travel.x) * 1.5, scroll.contentOffset.y <= top + 0.5 {
                     // Include overscroll already delivered in this native pan update.
                     anchor = travel.y - max(0, top - scroll.contentOffset.y)
+                    priorBounces = scroll.bounces
                     scroll.bounces = false
                 }
                 if let anchor {
                     distance = max(0, travel.y - anchor)
-                    scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: top), animated: false)
+                    pinListAtTop()
                     changed(distance)
                     report("probe=handoff distance=\(distance) global=\(scroll.convert(CGPoint(x:0,y:top), to:nil))")
                     #if DEBUG
