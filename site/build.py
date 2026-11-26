@@ -17,6 +17,8 @@ With --output DIR: write deployable files to DIR instead of site/.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import re
 import shutil
@@ -296,6 +298,28 @@ def validate_pages(pages: dict[str, str], root: Path = SITE) -> None:
     _validate_pages({root / name: html for name, html in pages.items()}, root)
 
 
+def stage_workshop_audio(site: Path, stage: Path) -> None:
+    """Decode only approved short excerpts; check hashes before publishing."""
+    root = site / "workshop-audio"
+    if not root.is_dir():
+        return
+    for manifest in root.glob("*/manifest.json"):
+        entries = json.loads(manifest.read_text())
+        out = stage / "media" / "workshops" / manifest.parent.name
+        out.mkdir(parents=True, exist_ok=True)
+        for name, entry in entries.items():
+            if Path(name).name != name or not name.endswith(".mp3"):
+                raise ValueError("invalid workshop audio name")
+            parts = entry["parts"]
+            if any(Path(p).name != p or not p.endswith(".b64") for p in parts):
+                raise ValueError("invalid workshop audio part")
+            encoded = "".join("".join((manifest.parent / p).read_text().split()) for p in parts)
+            data = base64.b64decode(encoded, validate=True)
+            if len(data) != entry["bytes"] or hashlib.sha256(data).hexdigest() != entry["sha256"]:
+                raise ValueError("workshop audio integrity mismatch")
+            (out / name).write_bytes(data)
+
+
 def build(site: Path = SITE, output: Path = SITE, app_public: Path | None = None) -> None:
     if output.is_symlink():
         raise SystemExit(f"refusing symlinked generated directory: {output}")
@@ -316,6 +340,7 @@ def build(site: Path = SITE, output: Path = SITE, app_public: Path | None = None
             page = stage / name
             page.parent.mkdir(parents=True, exist_ok=True)
             page.write_text(html, encoding="utf-8")
+        stage_workshop_audio(site, stage)
         pages = validate_site(stage)
         manifest = [{"slug": a["slug"], "title": a["title"],
                      "anchors": pages[stage / "help" / a["slug"] / "index.html"].ids}
