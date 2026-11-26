@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
-from build import DEPLOYABLE, SITE, build, validate_site
+from build import DEPLOYABLE, SITE, build, load_help, validate_site
 
 
 class HelpBuildTests(unittest.TestCase):
@@ -25,7 +25,7 @@ class HelpBuildTests(unittest.TestCase):
         self.source = self.root / "source"
         # Use the actual pitch, templates, fonts and media. Test articles are
         # isolated from concurrently authored manual content.
-        for name in ("templates", "assets", "shots", "media"):
+        for name in ("templates", "assets", "shots", "media", "workshop-audio"):
             shutil.copytree(SITE / name, self.source / name)
         shutil.copytree(SITE / "content", self.source / "content", ignore=shutil.ignore_patterns("help"))
         shutil.copyfile(SITE / "CNAME", self.source / "CNAME")
@@ -102,6 +102,19 @@ class HelpBuildTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "missing target/media.*stale"):
             build(self.source, self.output)
         self.assertTrue(stale.exists())
+
+    def test_glossary_uses_current_shared_source(self):
+        self.article("glossary", "## App terms\n\n<!-- APP_TERMS -->")
+        source = self.source / "content" / "glossary.yml"
+        source.write_text("- slug: pickup\n  term: Pickup\n  def: Resume from the Deck state.\n")
+        article = next(a for a in load_help(self.source) if a["slug"] == "glossary")
+        self.assertIn('id="term-pickup"', article["body_html"])
+        self.assertIn("Resume from the Deck state.", article["body_html"])
+        self.assertNotIn("APP_TERMS", article["body_html"])
+        source.write_text("- slug: pickup\n  term: Pickup\n  def: Updated definition.\n")
+        updated = next(a for a in load_help(self.source) if a["slug"] == "glossary")
+        self.assertIn("Updated definition.", updated["body_html"])
+        self.assertNotIn("Resume from the Deck state.", updated["body_html"])
 
     def test_missing_glossary_anchor_fails(self):
         self.article("curate", "[Bad](../../index.html#term-nonexistent)")

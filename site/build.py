@@ -161,6 +161,13 @@ def load_help(site: Path) -> list[dict]:
             raise SystemExit(f"{path}: invalid help slug")
         if not isinstance(meta["related"], list) or not all(isinstance(s, str) for s in meta["related"]):
             raise SystemExit(f"{path}: related must be a list of slugs")
+        if meta["slug"] == "glossary":
+            terms = yaml.safe_load((site / "content" / "glossary.yml").read_text(encoding="utf-8"))
+            definitions = "\n\n".join(
+                f"### {term['term']} {{#term-{term['slug']}}}\n\n{term['def']}"
+                for term in terms
+            )
+            body = body.replace("<!-- APP_TERMS -->", definitions)
         md = markdown.Markdown(extensions=["extra", "toc"])
         meta["body_html"] = md.convert(body)
         meta["toc_html"] = md.toc
