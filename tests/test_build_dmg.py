@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_release_generates_and_packages_offline_help(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     site = repo / "site"
-    for name in ("content", "templates", "assets", "shots", "media"):
+    for name in ("content", "templates", "assets", "shots", "media", "workshop-audio"):
         shutil.copytree(ROOT / "site" / name, site / name)
     for name in ("build.py", "CNAME"):
         shutil.copyfile(ROOT / "site" / name, site / name)
@@ -100,6 +100,14 @@ def test_release_generates_and_packages_offline_help(tmp_path, monkeypatch):
         assert (manual / name).is_file(), name
     for name in ("UbuntuMono-Regular.ttf", "UbuntuMono-Bold.ttf", "UFL.txt"):
         assert (manual / "assets" / "fonts" / name).is_file()
+    # Encoded inputs stay out of the app; decoded excerpts survive packaging.
+    audio_manifest = json.loads((ROOT / "site/workshop-audio/2026-11-26/manifest.json").read_text())
+    import hashlib
+    for name, entry in audio_manifest.items():
+        audio = (manual / "media/workshops/2026-11-26" / name).read_bytes()
+        assert len(audio) == entry["bytes"]
+        assert hashlib.sha256(audio).hexdigest() == entry["sha256"]
+    assert not (manual / "workshop-audio").exists()
     assert not (manual / "content").exists()
     assert not (manual / "templates").exists()
     for path in (fe / "public" / "manual").rglob("*"):
