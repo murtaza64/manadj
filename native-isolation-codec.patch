@@ -1,0 +1,408 @@
+diff --git a/backend/continuous_sync/NATIVE_CAPTURE.md b/backend/continuous_sync/NATIVE_CAPTURE.md
+index 339de69e..367ddaa0 100644
+--- a/backend/continuous_sync/NATIVE_CAPTURE.md
++++ b/backend/continuous_sync/NATIVE_CAPTURE.md
+@@ -189,3 +189,20 @@ no AppModel caller. Resource and issuer match existing desktop target; no live
+ native registration/login/refresh has run.7new package auth boundary tests pass,
+ fullCore129 after review fixes. New auth file is in generated Xcode project, team
+ setting preserved. Apple qualification must be extended to this revised source.
++
++Second review isolation: changed/missing bindings no longer disable all edits.
++Only affected pending tracks are withheld; unresolvedEdits and recoveryWarning
++retain visibility while healthy tracks continue. Explicit setAsideEdits preserves
++all evidence and sequence IDs, durably records disposition, allows fresh local
++intent on reviewed new source. No pruning or serverack. Snapshot installation
++uses the edit task lane, preventing revision replacement halfway through append.
++Generated regression proves one changed source, healthy edit, explicit setaside,
++new-source edit and reopen with three retained evidence entries/two pending.
++
++Apple-only native metadata codec candidate uses CryptoKitEd25519 and fixedgrammar
++JavaScriptCore JSON.stringify for ECMAScript numbers, not Swift Double text.
++Eight generated PythonRFC8785 signed vectors cover Unicode/escaping/null/zero/
++small exponent/decimal/large exponent/rounding; Apple tests verify pinned publickey
++and canonical bytes, deny tampering/wronggroup/key. No generic incoming session
++codec, durable signedoutbox/cursor, trusted heads or transport yet. This codec is
++not Linuxqualified because Apple modules unavailable, awaiting exact Apple CI.
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift
+index 74fdc586..741c0677 100644
+--- a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryEditJournal.swift
+@@ -46,12 +46,14 @@ public actor LibraryEditJournal {
+         let version: Int
+         let libraryIdentity: String
+         let intents: [LibraryEditIntent]
++        let setAside: [UUID]
+     }
+     public static let maximumBytes = 1024 * 1024
+     public static let maximumIntents = 1024
+     private let file: URL
+     public let libraryIdentity: String
+     private var intents: [LibraryEditIntent]
++    private var setAside: Set<UUID> = []
+     private var frozen = false
+     private let writer: @Sendable (Data, URL) throws -> Void
+ 
+@@ -75,17 +77,27 @@ public actor LibraryEditJournal {
+                   Set(envelope.intents.map(\.id)).count == envelope.intents.count else { throw LibraryEditJournalError.invalid }
+             for (index, intent) in envelope.intents.enumerated() {
+                 guard intent.sequence == index + 1, Self.valid(intent) else { throw LibraryEditJournalError.invalid }
+-                if let previous = envelope.intents[..<index].last(where: {
+-                    $0.logicalTrackID == intent.logicalTrackID && $0.newValue.field == intent.newValue.field
+-                }) {
+-                    guard previous.newValue == intent.oldValue else { throw LibraryEditJournalError.invalid }
+-                }
++
+             }
+-            intents = envelope.intents
++            guard Set(envelope.setAside).count == envelope.setAside.count,
++                  Set(envelope.setAside).isSubset(of: Set(envelope.intents.map(\.id))) else { throw LibraryEditJournalError.invalid }
++            intents = envelope.intents; setAside = Set(envelope.setAside)
+         } else { intents = [] }
+     }
+ 
+-    public func pending() -> [LibraryEditIntent] { intents }
++    public func pending() -> [LibraryEditIntent] { intents.filter { !setAside.contains($0.id) } }
++    public func evidence() -> [LibraryEditIntent] { intents }
++
++    /// Explicit local disposition, not deletion or a remote acknowledgement.
++    /// Evidence and sequences remain immutable and continue to count toward cap.
++    public func setAsideIntents(_ ids: Set<UUID>) throws {
++        guard !frozen, !ids.isEmpty, ids.isSubset(of: Set(intents.map(\.id))) else { throw LibraryEditJournalError.invalid }
++        let next = setAside.union(ids)
++        let bytes = try JSONEncoder().encode(Envelope(version: 2, libraryIdentity: libraryIdentity, intents: intents, setAside: next.sorted { $0.uuidString < $1.uuidString }))
++        guard bytes.count <= Self.maximumBytes else { throw LibraryEditJournalError.full }
++        do { try writer(bytes, file) } catch { frozen = true; throw LibraryEditJournalError.persistence }
++        setAside = next
++    }
+ 
+     @discardableResult
+     public func append(id: UUID = UUID(), logicalTrackID: UUID, oldValue: LibraryEditValue,
+@@ -99,12 +111,12 @@ public actor LibraryEditJournal {
+         let intent = LibraryEditIntent(id: id, sequence: intents.count + 1, logicalTrackID: logicalTrackID,
+             sourceRevision: sourceRevision, oldValue: oldValue, newValue: newValue, parents: parents)
+         guard Self.valid(intent) else { throw LibraryEditJournalError.invalid }
+-        if let previous = intents.last(where: {
++        if let previous = pending().last(where: {
+             $0.logicalTrackID == logicalTrackID && $0.newValue.field == newValue.field
+         }), previous.newValue != oldValue { throw LibraryEditJournalError.staleValue }
+         guard intents.count < Self.maximumIntents else { throw LibraryEditJournalError.full }
+         let next = intents + [intent]
+-        let bytes = try JSONEncoder().encode(Envelope(version: 2, libraryIdentity: libraryIdentity, intents: next))
++        let bytes = try JSONEncoder().encode(Envelope(version: 2, libraryIdentity: libraryIdentity, intents: next, setAside: setAside.sorted { $0.uuidString < $1.uuidString }))
+         guard bytes.count <= Self.maximumBytes else { throw LibraryEditJournalError.full }
+         do { try writer(bytes, file) }
+         catch {
+@@ -118,7 +130,7 @@ public actor LibraryEditJournal {
+     }
+ 
+     public func project(logicalTrackID: UUID, base: LibraryEditValue) -> LibraryEditProjection {
+-        Self.project(intents, logicalTrackID: logicalTrackID, base: base)
++        Self.project(pending(), logicalTrackID: logicalTrackID, base: base)
+     }
+ 
+     public nonisolated static func project(_ intents: [LibraryEditIntent], logicalTrackID: UUID,
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryRepository.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryRepository.swift
+index 15043842..54ed91ad 100644
+--- a/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryRepository.swift
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/LibraryRepository.swift
+@@ -43,11 +43,8 @@ public actor LibraryRepository {
+             let journal = try LibraryEditJournal(file: store.root.appendingPathComponent("continuous-edits.json"), libraryIdentity: libraryIdentity, writer: editWriter)
+             editBindings = bindings; editLibraryIdentity = libraryIdentity; editJournal = journal
+             let problems = await unresolvedEdits()
+-            guard problems.isEmpty else {
+-                editRecoveryError = "Pending edits have missing or changed source bindings"
+-                throw LibraryEditJournalError.identityMismatch
+-            }
+-            editRecoveryError = nil; editReady = true
++            editRecoveryError = problems.isEmpty ? nil : "Some pending edits need source binding review; healthy tracks remain editable"
++            editReady = true
+         } catch {
+             editRecoveryError = "Edits unavailable; original journal retained: \(error)"
+             throw error
+@@ -105,14 +102,38 @@ public actor LibraryRepository {
+         do {
+             let journal = try LibraryEditJournal(file: store.root.appendingPathComponent("continuous-edits.json"), libraryIdentity: identity, writer: editWriter)
+             editJournal = journal
+-            guard await unresolvedEdits().isEmpty else { throw LibraryEditJournalError.identityMismatch }
+-            editRecoveryError = nil; editReady = true
++            let problems = await unresolvedEdits()
++            editRecoveryError = problems.isEmpty ? nil : "Some pending edits need source binding review; healthy tracks remain editable"
++            editReady = true
+         } catch {
+             editReady = false; editRecoveryError = "Journal reopen failed; original bytes retained: \(error)"
+             throw error
+         }
+     }
+ 
++    /// Explicitly set aside one whole track's pending intent chain. Original
++    /// evidence remains retrievable; this never purges or resolves server state.
++    public func setAsideEdits(logicalTrackID: UUID) async throws {
++        let previous = editTail
++        let token = UUID(); editTailID = token
++        let work = Task { [weak self] in
++            _ = try? await previous?.value
++            guard let self else { throw CancellationError() }
++            try await self.performSetAside(logicalTrackID)
++        }
++        editTail = work
++        defer { if editTailID == token { editTail = nil } }
++        try await work.value
++    }
++
++    private func performSetAside(_ logical: UUID) async throws {
++        guard let journal = editJournal else { throw LibraryEditJournalError.invalid }
++        let ids = Set(await journal.pending().filter { $0.logicalTrackID == logical }.map(\.id))
++        try await journal.setAsideIntents(ids)
++    }
++
++    public func editEvidence() async -> [LibraryEditIntent] { await editJournal?.evidence() ?? [] }
++
+     public func pendingEdits() async -> [LibraryEditIntent] { await editJournal?.pending() ?? [] }
+ 
+     public func unresolvedEdits() async -> [LibraryEditIntent] {
+@@ -169,6 +190,26 @@ public actor LibraryRepository {
+             recoveryWarning = "The offline snapshot was unreadable and was kept separately. Sync again to restore the library."
+         }
+     }
++    /// Snapshot commit uses the same lane as edits, so an edit cannot return
++    /// success against a source revision replaced halfway through its append.
++    private func installSnapshot(_ text: String, snapshot next: Snapshot) async throws {
++        let previous = editTail
++        let token = UUID(); editTailID = token
++        let work = Task { [weak self] in
++            _ = try? await previous?.value
++            guard let self else { throw CancellationError() }
++            try await self.commitSnapshot(text, snapshot: next)
++        }
++        editTail = work
++        defer { if editTailID == token { editTail = nil } }
++        try await work.value
++    }
++
++    private func commitSnapshot(_ text: String, snapshot next: Snapshot) throws {
++        try store.saveSnapshot(text)
++        snapshot = next
++    }
++
+     public func cachedSnapshot() async -> Snapshot? { await projectedSnapshot() }
+     public func sync(_ connection: DesktopConnection, allAudio: Bool = false, progress: (@Sendable (LibrarySyncProgress) async -> Void)? = nil) async throws -> Snapshot {
+         guard !syncing else { throw SyncError("A library sync is already in progress") }
+@@ -179,8 +220,7 @@ public actor LibraryRepository {
+         let text = try await client.snapshotText()
+         try Task.checkCancellation()
+         let next = try SnapshotJson.parse(text)
+-        try store.saveSnapshot(text)
+-        snapshot = next
++        try await installSnapshot(text, snapshot: next)
+         // Preview failure does not erase the last good library. Caller receives the error and can retry.
+         let missing = next.tracks.filter { store.preview($0) == nil && $0.previewRev != nil }
+         await progress?(.init(phase: .previews, total: missing.count))
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/NativeOperationCodec.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeOperationCodec.swift
+new file mode 100644
+index 00000000..1fd20c0e
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeOperationCodec.swift
+@@ -0,0 +1,93 @@
++#if canImport(CryptoKit) && canImport(JavaScriptCore)
++import Foundation
++import CryptoKit
++import CoreFoundation
++import JavaScriptCore
++
++public enum NativeOperationError: Error { case invalid, untrusted, canonicalization }
++
++/// Native Apple codec for the existing protocol. No network or enrollment.
++/// ECMAScript's own JSON number formatter is used rather than assuming Swift's
++/// Double description matches RFC8785. Only fixed ASCII object keys are emitted.
++@MainActor public enum NativeOperationCodec {
++    public static let domain = Data("manadj-continuous-sync/v1\0".utf8)
++
++    public static func body(group: UUID, origin: UUID, sequence: Int, id: UUID,
++                            track: UUID, value: LibraryEditValue, parents: [UUID]) throws -> Data {
++        guard sequence > 0, sequence <= 9_007_199_254_740_991,
++              parents.count <= 32, Set(parents).count == parents.count else { throw NativeOperationError.invalid }
++        let rawValue: Any
++        switch value {
++        case .title(let title):
++            guard title.utf8.count <= 4096 else { throw NativeOperationError.invalid }
++            rawValue = title
++        case .mainCue(let cue):
++            guard cue.map({ $0.isFinite && $0 >= 0 }) ?? true else { throw NativeOperationError.invalid }
++            rawValue = cue.map { $0 as Any } ?? NSNull()
++        }
++        let object: [String: Any] = ["entity": "track:" + track.uuidString.lowercased(), "field": value.field,
++            "format": "manadj-continuous-sync/v1", "generation": 1, "group_id": group.uuidString.lowercased(),
++            "operation_id": id.uuidString.lowercased(), "origin_id": origin.uuidString.lowercased(),
++            "parents": parents.map { $0.uuidString.lowercased() }, "sequence": sequence, "value": rawValue]
++        guard let context = JSContext() else { throw NativeOperationError.canonicalization }
++        // Fixed protocol grammar has no nested objects, all keys ASCII. Native
++        // bridge transfers values as data, never as interpolated JavaScript.
++        let function = context.evaluateScript("(function(o){var r={};Object.keys(o).sort().forEach(function(k){r[k]=o[k]});return JSON.stringify(r)})")
++        guard let result = function?.call(withArguments: [object]), context.exception == nil,
++              let text = result.toString(), let data = text.data(using: .utf8), data.count <= 240 * 1024 else {
++            throw NativeOperationError.canonicalization
++        }
++        return data
++    }
++
++    public static func sign(group: UUID, origin: UUID, sequence: Int, id: UUID, track: UUID,
++                            value: LibraryEditValue, parents: [UUID], key: Curve25519.Signing.PrivateKey) throws -> Data {
++        let raw = try body(group: group, origin: origin, sequence: sequence, id: id, track: track, value: value, parents: parents)
++        let signature = try key.signature(for: domain + raw).base64EncodedString()
++        // body is already canonical JSON. Signature is constrained Base64.
++        return Data(("{\"body\":" + String(decoding: raw, as: UTF8.self) + ",\"signature\":\"" + signature + "\"}").utf8)
++    }
++
++    public static func verify(_ packet: Data, expectedGroup: UUID, expectedOrigin: UUID,
++                              pinnedKey: Curve25519.Signing.PublicKey) throws -> Data {
++        guard packet.count <= 248 * 1024,
++              let envelope = try JSONSerialization.jsonObject(with: packet) as? [String: Any],
++              Set(envelope.keys) == ["body", "signature"],
++              let object = envelope["body"] as? [String: Any],
++              Set(object.keys) == ["entity", "field", "format", "generation", "group_id", "operation_id", "origin_id", "parents", "sequence", "value"],
++              object["format"] as? String == "manadj-continuous-sync/v1",
++              object["group_id"] as? String == expectedGroup.uuidString.lowercased(),
++              object["origin_id"] as? String == expectedOrigin.uuidString.lowercased(),
++              let generation = object["generation"] as? NSNumber, CFGetTypeID(generation) != CFBooleanGetTypeID(), generation.doubleValue == 1,
++              let sequence = object["sequence"] as? NSNumber, CFGetTypeID(sequence) != CFBooleanGetTypeID(),
++              sequence.doubleValue.isFinite, sequence.doubleValue.rounded() == sequence.doubleValue,
++              sequence.doubleValue >= 1, sequence.doubleValue <= 9_007_199_254_740_991,
++              let idText = object["operation_id"] as? String, let id = UUID(uuidString: idText), id.uuidString.lowercased() == idText,
++              let entity = object["entity"] as? String, entity.hasPrefix("track:"),
++              let track = UUID(uuidString: String(entity.dropFirst(6))), entity == "track:" + track.uuidString.lowercased(),
++              let parentTexts = object["parents"] as? [String], parentTexts.count <= 32,
++              let signatureText = envelope["signature"] as? String, let signature = Data(base64Encoded: signatureText), signature.count == 64 else {
++            throw NativeOperationError.invalid
++        }
++        let parents = try parentTexts.map { text -> UUID in
++            guard let id = UUID(uuidString: text), id.uuidString.lowercased() == text else { throw NativeOperationError.invalid }; return id
++        }
++        let value: LibraryEditValue
++        switch object["field"] as? String {
++        case "title":
++            guard let text = object["value"] as? String else { throw NativeOperationError.invalid }; value = .title(text)
++        case "main_cue":
++            if object["value"] is NSNull { value = .mainCue(nil) }
++            else {
++                guard let number = object["value"] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { throw NativeOperationError.invalid }
++                value = .mainCue(number.doubleValue)
++            }
++        default: throw NativeOperationError.invalid
++        }
++        let raw = try body(group: expectedGroup, origin: expectedOrigin, sequence: sequence.intValue,
++                           id: id, track: track, value: value, parents: parents)
++        guard pinnedKey.isValidSignature(signature, for: domain + raw) else { throw NativeOperationError.untrusted }
++        return raw
++    }
++}
++#endif
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift
+index 26bc9f76..5f524be9 100644
+--- a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/LibraryEditJournalTests.swift
+@@ -108,13 +108,13 @@ final class LibraryEditJournalTests: XCTestCase, @unchecked Sendable {
+         try await repository.editTrack(42, to: .title("Rename A"), parents: [])
+         for bindings in [[:], [42: UUID()]] as [[Int: UUID]] {
+             let other = try LibraryRepository(root: root)
+-            do { try await other.prepareEdits(libraryIdentity: "test", bindings: bindings); XCTFail("orphan accepted") } catch { }
++            try await other.prepareEdits(libraryIdentity: "test", bindings: bindings)
+             let unresolved = await other.unresolvedEdits()
+             XCTAssertEqual(unresolved.count, 1)
+         }
+         try store.saveSnapshot(original.replacingOccurrences(of: "revision-a", with: "revision-b").replacingOccurrences(of: "a.wav", with: "b.wav"))
+         let reused = try LibraryRepository(root: root)
+-        do { try await reused.prepareEdits(libraryIdentity: "test", bindings: [42: logical]); XCTFail("reused source accepted") } catch { }
++        try await reused.prepareEdits(libraryIdentity: "test", bindings: [42: logical])
+         let snapshot = await reused.cachedSnapshot()
+         XCTAssertEqual(snapshot?.tracks[0].title, "A")
+         let unresolved = await reused.unresolvedEdits()
+@@ -155,6 +155,40 @@ final class LibraryEditJournalTests: XCTestCase, @unchecked Sendable {
+         do { try await repository.editTrack(1, to: .title("unverified causal parent"), parents: [UUID()]); XCTFail("arbitrary parent accepted") } catch { }
+     }
+ 
++    func testChangedSourceIsolatesPendingTrackNotHealthyLibrary() async throws {
++        let root = file().deletingLastPathComponent(); defer { try? FileManager.default.removeItem(at: root) }
++        let store = try LibraryStore(root: root), first = UUID(), second = UUID()
++        let original = #"{"version":1,"tag_categories":[],"tags":[],"playlists":[],"settings":{},"tracks":[{"id":1,"title":"A","file_name":"a.wav","audio_rev":"a1","filesize_bytes":4},{"id":2,"title":"B","file_name":"b.wav","audio_rev":"b","filesize_bytes":4}]}"#
++        try store.saveSnapshot(original)
++        let repository = try LibraryRepository(root: root)
++        try await repository.prepareEdits(libraryIdentity: "test", bindings: [1: first, 2: second])
++        try await repository.editTrack(1, to: .title("Keep evidence"), parents: [])
++        try store.saveSnapshot(original.replacingOccurrences(of: "a1", with: "a2"))
++        let reopened = try LibraryRepository(root: root)
++        try await reopened.prepareEdits(libraryIdentity: "test", bindings: [1: first, 2: second])
++        try await reopened.editTrack(2, to: .title("Healthy edit"), parents: [])
++        try await reopened.reopenEdits()
++        let unresolved = await reopened.unresolvedEdits()
++        XCTAssertEqual(unresolved.count, 1)
++        XCTAssertEqual(unresolved.first?.newValue, .title("Keep evidence"))
++        let snapshot = await reopened.cachedSnapshot()
++        XCTAssertEqual(snapshot?.tracks[0].title, "A")
++        XCTAssertEqual(snapshot?.tracks[1].title, "Healthy edit")
++        do { try await reopened.editTrack(1, to: .title("Wrong revision"), parents: []); XCTFail("unresolved track edited") } catch { }
++        let pending = await reopened.pendingEdits()
++        XCTAssertEqual(pending.count, 2)
++        try await reopened.setAsideEdits(logicalTrackID: first)
++        let unresolvedAfter = await reopened.unresolvedEdits()
++        XCTAssertTrue(unresolvedAfter.isEmpty)
++        try await reopened.editTrack(1, to: .title("Explicit new-source edit"), parents: [])
++        try await reopened.reopenEdits()
++        let evidence = await reopened.editEvidence()
++        XCTAssertEqual(evidence.count, 3, "Original unresolved edit retained after explicit disposition")
++        let next = await reopened.pendingEdits()
++        XCTAssertEqual(next.count, 2)
++        XCTAssertEqual(next.last?.sequence, 3)
++    }
++
+     func testCapacityFailureRetainsAllCommittedIntents() async throws {
+         let file = file(); defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+         let journal = try LibraryEditJournal(file: file, libraryIdentity: "capacity")
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeOperationCodecTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeOperationCodecTests.swift
+new file mode 100644
+index 00000000..c48ee47d
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeOperationCodecTests.swift
+@@ -0,0 +1,35 @@
++#if canImport(CryptoKit) && canImport(JavaScriptCore)
++import XCTest
++import CryptoKit
++@testable import ManadjCore
++
++final class NativeOperationCodecTests: XCTestCase, @unchecked Sendable {
++    @MainActor func testPythonRFC8785Ed25519VectorsVerifyOnActualAppleCodec() throws {
++        let url = try XCTUnwrap(Bundle.module.url(forResource: "native-operation-vectors", withExtension: "json"))
++        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
++        let key = try Curve25519.Signing.PublicKey(rawRepresentation: XCTUnwrap(Data(base64Encoded: object["publicKey"] as! String)))
++        let vectors = try XCTUnwrap(object["vectors"] as? [[String: Any]])
++        XCTAssertEqual(vectors.count, 8)
++        for vector in vectors {
++            let body = vector["body"] as! [String: Any]
++            let packet = try JSONSerialization.data(withJSONObject: ["body": body, "signature": vector["signature"]!])
++            let group = UUID(uuidString: body["group_id"] as! String)!, origin = UUID(uuidString: body["origin_id"] as! String)!
++            let canonical = try NativeOperationCodec.verify(packet, expectedGroup: group, expectedOrigin: origin, pinnedKey: key)
++            XCTAssertEqual(String(decoding: canonical, as: UTF8.self), vector["canonical"] as? String)
++            XCTAssertThrowsError(try NativeOperationCodec.verify(packet, expectedGroup: UUID(), expectedOrigin: origin, pinnedKey: key))
++            XCTAssertThrowsError(try NativeOperationCodec.verify(packet, expectedGroup: group, expectedOrigin: origin, pinnedKey: Curve25519.Signing.PrivateKey().publicKey))
++        }
++    }
++
++    @MainActor func testNativeSignerRoundTripAndTamperDenial() throws {
++        let key = Curve25519.Signing.PrivateKey(), group = UUID(), origin = UUID(), track = UUID(), id = UUID()
++        let packet = try NativeOperationCodec.sign(group: group, origin: origin, sequence: 1, id: id, track: track,
++            value: .title("Generated native title"), parents: [], key: key)
++        _ = try NativeOperationCodec.verify(packet, expectedGroup: group, expectedOrigin: origin, pinnedKey: key.publicKey)
++        let changed = Data(String(decoding: packet, as: UTF8.self).replacingOccurrences(of: "Generated native title", with: "Changed").utf8)
++        XCTAssertThrowsError(try NativeOperationCodec.verify(changed, expectedGroup: group, expectedOrigin: origin, pinnedKey: key.publicKey))
++        XCTAssertThrowsError(try NativeOperationCodec.body(group: group, origin: origin, sequence: 0, id: id, track: track, value: .mainCue(1), parents: []))
++        XCTAssertThrowsError(try NativeOperationCodec.body(group: group, origin: origin, sequence: 1, id: id, track: track, value: .mainCue(.infinity), parents: []))
++    }
++}
++#endif
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/Resources/native-operation-vectors.json b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/Resources/native-operation-vectors.json
+new file mode 100644
+index 00000000..becc543a
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/Resources/native-operation-vectors.json
+@@ -0,0 +1 @@
++{"publicKey": "tN3Z3pESnAGzQUlxCOzhho7tXVfvsb4gyaRNox964Yg=", "vectors": [{"body": {"entity": "track:44444444-4444-4444-8444-444444444444", "field": "title", "format": "manadj-continuous-sync/v1", "generation": 1, "group_id": "11111111-1111-4111-8111-111111111111", "operation_id": "33333333-3333-4333-8333-333333333333", "origin_id": "22222222-2222-4222-8222-222222222222", "parents": [], "sequence": 1, "value": "quote\"\\\n雪😀"}, "signature": "AtNg0OcP7IwP6eDiN1qumLIhTjF0wOoFQpNHI5bmckV0tiNRwk6zaZc9EACQm9/CIoT9a1Zk3cxDIbsQgIuFAg==", "canonical": "{\"entity\":\"track:44444444-4444-4444-8444-444444444444\",\"field\":\"title\",\"format\":\"manadj-continuous-sync/v1\",\"generation\":1,\"group_id\":\"11111111-1111-4111-8111-111111111111\",\"operation_id\":\"33333333-3333-4333-8333-333333333333\",\"origin_id\":\"22222222-2222-4222-8222-222222222222\",\"parents\":[],\"sequence\":1,\"value\":\"quote\\\"\\\\\\n雪😀\"}"}, {"body": {"entity": "track:44444444-4444-4444-8444-444444444444", "field": "main_cue", "format": "manadj-continuous-sync/v1", "generation": 1, "group_id": "11111111-1111-4111-8111-111111111111", "operation_id": "33333333-3333-4333-8333-333333333333", "origin_id": "22222222-2222-4222-8222-222222222222", "parents": [], "sequence": 2, "value": null}, "signature": "TZahkMpz7PLmJIeFPvBVyz34pGf68R9QZ18piKOQXKaiCOre3J+8YK0M14OqXH7rOToTgvWo+ZTCFJc71w5KAw==", "canonical": "{\"entity\":\"track:44444444-4444-4444-8444-444444444444\",\"field\":\"main_cue\",\"format\":\"manadj-continuous-sync/v1\",\"generation\":1,\"group_id\":\"11111111-1111-4111-8111-111111111111\",\"operation_id\":\"33333333-3333-4333-8333-333333333333\",\"origin_id\":\"22222222-2222-4222-8222-222222222222\",\"parents\":[],\"sequence\":2,\"value\":null}"}, {"body": {"entity": "track:44444444-4444-4444-8444-444444444444", "field": "main_cue", "format": "manadj-continuous-sync/v1", "generation": 1, "group_id": "11111111-1111-4111-8111-111111111111", "operation_id": "33333333-3333-4333-8333-333333333333", "origin_id": "22222222-2222-4222-8222-222222222222", "parents": [], "sequence": 3, "value": 12.5}, "signature": "cc6foNg1SgnHfz4bN+pgh1YSsU53TgFS9BAnVqD7VYF1xkmZizdTTXVZbii07y1BzLW0G/27mtcT9ohIGogwDA==", "canonical": "{\"entity\":\"track:44444444-4444-4444-8444-444444444444\",\"field\":\"main_cue\",\"format\":\"manadj-continuous-sync/v1\",\"generation\":1,\"group_id\":\"11111111-1111-4111-8111-111111111111\",\"operation_id\":\"33333333-3333-4333-8333-333333333333\",\"origin_id\":\"22222222-2222-4222-8222-222222222222\",\"parents\":[],\"sequence\":3,\"value\":12.5}"}, {"body": {"entity": "track:44444444-4444-4444-8444-444444444444", "field": "main_cue", "format": "manadj-continuous-sync/v1", "generation": 1, "group_id": "11111111-1111-4111-8111-111111111111", "operation_id": "33333333-3333-4333-8333-333333333333", "origin_id": "22222222-2222-4222-8222-222222222222", "parents": [], "sequence": 4, "value": -0.0}, "signature": "sD49ZbQxnEtSaLIkJRHAwIECrQQb5wpCOZ2NMlA5CvHkDFW0cfmB6kN9XO1husXHA4rUcjnYSHNg02BQ9f7vBA==", "canonical": "{\"entity\":\"track:44444444-4444-4444-8444-444444444444\",\"field\":\"main_cue\",\"format\":\"manadj-continuous-sync/v1\",\"generation\":1,\"group_id\":\"11111111-1111-4111-8111-111111111111\",\"operation_id\":\"33333333-3333-4333-8333-333333333333\",\"origin_id\":\"22222222-2222-4222-8222-222222222222\",\"parents\":[],\"sequence\":4,\"value\":0}"}, {"body": {"entity": "track:44444444-4444-4444-8444-444444444444", "field": "main_cue", "format": "manadj-continuous-sync/v1", "generation": 1, "group_id": "11111111-1111-4111-8111-111111111111", "operation_id": "33333333-3333-4333-8333-333333333333", "origin_id": "22222222-2222-4222-8222-222222222222", "parents": [], "sequence": 5, "value": 1e-07}, "signature": "/Sqg0E37ok5e2h5UjTUC/nwroMDlkqiAtc7SQPNn6KBazPhAKRMqLfIAsElAZVP08iDkEUHqjEP5aYxvv/hnAA==", "canonical": "{\"entity\":\"track:44444444-4444-4444-8444-444444444444\",\"field\":\"main_cue\",\"format\":\"manadj-continuous-sync/v1\",\"generation\":1,\"group_id\":\"11111111-1111-4111-8111-111111111111\",\"operation_id\":\"33333333-3333-4333-8333-333333333333\",\"origin_id\":\"22222222-2222-4222-8222-222222222222\",\"parents\":[],\"sequence\":5,\"value\":1e-7}"}, {"body": {"entity": "track:44444444-4444-4444-8444-444444444444", "field": "main_cue", "format": "manadj-continuous-sync/v1", "generation": 1, "group_id": "11111111-1111-4111-8111-111111111111", "operation_id": "33333333-3333-4333-8333-333333333333", "origin_id": "22222222-2222-4222-8222-222222222222", "parents": [], "sequence": 6, "value": 1e-06}, "signature": "jKEG4KQf94xH5LfBCu/wh8qmmKeXVVsrllLe5dva+uIifIZyBFsC9P1ilafpFfPjKAJ+qDlbsKXru1XkdQ3qDw==", "canonical": "{\"entity\":\"track:44444444-4444-4444-8444-444444444444\",\"field\":\"main_cue\",\"format\":\"manadj-continuous-sync/v1\",\"generation\":1,\"group_id\":\"11111111-1111-4111-8111-111111111111\",\"operation_id\":\"33333333-3333-4333-8333-333333333333\",\"origin_id\":\"22222222-2222-4222-8222-222222222222\",\"parents\":[],\"sequence\":6,\"value\":0.000001}"}, {"body": {"entity": "track:44444444-4444-4444-8444-444444444444", "field": "main_cue", "format": "manadj-continuous-sync/v1", "generation": 1, "group_id": "11111111-1111-4111-8111-111111111111", "operation_id": "33333333-3333-4333-8333-333333333333", "origin_id": "22222222-2222-4222-8222-222222222222", "parents": [], "sequence": 7, "value": 1e+21}, "signature": "oLCHiSKoWM0UiBVT0VGLyA/nWnDLonBrl2UtvEmFZ73hIluhD5xv+zJmLWbxpCm/7paVgVUnbWMb3iy80cNlCg==", "canonical": "{\"entity\":\"track:44444444-4444-4444-8444-444444444444\",\"field\":\"main_cue\",\"format\":\"manadj-continuous-sync/v1\",\"generation\":1,\"group_id\":\"11111111-1111-4111-8111-111111111111\",\"operation_id\":\"33333333-3333-4333-8333-333333333333\",\"origin_id\":\"22222222-2222-4222-8222-222222222222\",\"parents\":[],\"sequence\":7,\"value\":1e+21}"}, {"body": {"entity": "track:44444444-4444-4444-8444-444444444444", "field": "main_cue", "format": "manadj-continuous-sync/v1", "generation": 1, "group_id": "11111111-1111-4111-8111-111111111111", "operation_id": "33333333-3333-4333-8333-333333333333", "origin_id": "22222222-2222-4222-8222-222222222222", "parents": [], "sequence": 8, "value": 333333333.3333333}, "signature": "MZVtD9lFJBWf5tgZOuZd4t+XieVkC8SBSMEfRbiyEsuUCy2YNOMSIv77Gz4E2avx7DXTWghgep7RUVFCvZWqBg==", "canonical": "{\"entity\":\"track:44444444-4444-4444-8444-444444444444\",\"field\":\"main_cue\",\"format\":\"manadj-continuous-sync/v1\",\"generation\":1,\"group_id\":\"11111111-1111-4111-8111-111111111111\",\"operation_id\":\"33333333-3333-4333-8333-333333333333\",\"origin_id\":\"22222222-2222-4222-8222-222222222222\",\"parents\":[],\"sequence\":8,\"value\":333333333.3333333}"}]}
+\ No newline at end of file

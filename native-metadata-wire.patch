@@ -1,0 +1,387 @@
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataReplica.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataReplica.swift
+new file mode 100644
+index 00000000..0cd2eb96
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataReplica.swift
+@@ -0,0 +1,154 @@
++#if canImport(CryptoKit) && canImport(JavaScriptCore)
++import Foundation
++import CryptoKit
++
++public enum NativeReplicaError: Error { case invalid, full, gap, fork, missingParent, unresolvedBinding, persistence, frozen }
++
++public struct NativeTrackBinding: Codable, Equatable, Sendable {
++    public let logicalID: UUID
++    public let localID: Int
++    public let contentSHA256: String
++    public let byteLength: Int
++    public init(logicalID: UUID, localID: Int, contentSHA256: String, byteLength: Int) {
++        self.logicalID = logicalID; self.localID = localID; self.contentSHA256 = contentSHA256; self.byteLength = byteLength
++    }
++}
++
++/// Exact signed metadata packets plus receive cursors and causal heads commit in
++/// one file transaction. No remote acknowledgement discards original evidence.
++/// Single foreground owner. All identity/key/binding input is local provisioning,
++/// never learned from incoming signed content. Not enabled by app startup.
++@MainActor public final class NativeMetadataReplica {
++    private struct Stored: Codable {
++        let version: Int
++        let group: UUID
++        let origin: UUID
++        let bindings: [NativeTrackBinding]
++        var packets: [Data]
++        var cursors: [String: Int]
++        var heads: [String: [String]]
++    }
++    public static let maximumPackets = 2048
++    public static let maximumBytes = 16 * 1024 * 1024
++    private let file: URL
++    private let key: Curve25519.Signing.PrivateKey
++    private let members: [UUID: Curve25519.Signing.PublicKey]
++    private let writer: (Data, URL) throws -> Void
++    private var stored: Stored
++    private var frozen = false
++
++    public init(file: URL, group: UUID, origin: UUID, key: Curve25519.Signing.PrivateKey,
++                members: [UUID: Curve25519.Signing.PublicKey], bindings: [NativeTrackBinding],
++                writer: @escaping (Data, URL) throws -> Void = SessionEventJournal.durableWrite) throws {
++        guard file.isFileURL, members[origin]?.rawRepresentation == key.publicKey.rawRepresentation,
++              !members.isEmpty, members.count <= 4,
++              Set(bindings.map(\.localID)).count == bindings.count,
++              Set(bindings.map(\.logicalID)).count == bindings.count,
++              bindings.allSatisfy({ $0.localID > 0 && $0.byteLength > 0 && $0.contentSHA256.count == 64 && $0.contentSHA256.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) } }) else { throw NativeReplicaError.invalid }
++        self.file = file; self.key = key; self.members = members; self.writer = writer
++        if FileManager.default.fileExists(atPath: file.path) {
++            let attrs = try file.resourceValues(forKeys: [.fileSizeKey, .isSymbolicLinkKey])
++            guard attrs.isSymbolicLink != true, let size = attrs.fileSize, size <= Self.maximumBytes else { throw NativeReplicaError.full }
++            let bytes = try Data(contentsOf: file)
++            guard bytes.count <= Self.maximumBytes else { throw NativeReplicaError.full }
++            let old = try JSONDecoder().decode(Stored.self, from: bytes)
++            guard old.version == 1, old.group == group, old.origin == origin, old.bindings == bindings,
++                  old.packets.count <= Self.maximumPackets else { throw NativeReplicaError.invalid }
++            stored = Stored(version: 1, group: group, origin: origin, bindings: bindings, packets: [], cursors: [:], heads: [:])
++            // Rebuild from signed evidence instead of trusting serialized cursor
++            // or projection maps that could advance beyond committed packets.
++            var rebuilt = stored
++            for packet in old.packets { try apply(packet, to: &rebuilt) }
++            guard rebuilt.cursors == old.cursors, rebuilt.heads == old.heads else { throw NativeReplicaError.fork }
++            stored = rebuilt
++        } else {
++            stored = Stored(version: 1, group: group, origin: origin, bindings: bindings, packets: [], cursors: [:], heads: [:])
++        }
++    }
++
++    public func cursor(_ origin: UUID) -> Int { stored.cursors[origin.uuidString.lowercased()] ?? 0 }
++    public func allPackets() -> [Data] { stored.packets }
++
++    public func outgoing(after: Int, limit: Int = 4) throws -> [Data] {
++        guard after >= 0, (1...4).contains(limit) else { throw NativeReplicaError.invalid }
++        return try stored.packets.filter { packet in
++            let b = try Self.object(packet)
++            return b["origin_id"] as? String == stored.origin.uuidString.lowercased() && (b["sequence"] as? Int ?? 0) > after
++        }.prefix(limit).map { $0 }
++    }
++
++    @discardableResult public func edit(localID: Int, value: LibraryEditValue) throws -> Data {
++        guard !frozen, let binding = stored.bindings.first(where: { $0.localID == localID }) else { throw NativeReplicaError.unresolvedBinding }
++        let entity = "track:" + binding.logicalID.uuidString.lowercased(), fieldKey = entity + "/" + value.field
++        let parents = try (stored.heads[fieldKey] ?? []).map { text -> UUID in
++            guard let id = UUID(uuidString: text) else { throw NativeReplicaError.invalid }; return id
++        }
++        let packet = try NativeOperationCodec.sign(group: stored.group, origin: stored.origin,
++            sequence: cursor(stored.origin) + 1, id: UUID(), track: binding.logicalID, value: value, parents: parents, key: key)
++        try receive(packet)
++        return packet
++    }
++
++    /// An exact retry is a no-op. Remote write receipt is not required to retain
++    /// local durability. Caller advances its network cursor only after return.
++    public func receive(_ packet: Data) throws {
++        guard !frozen else { throw NativeReplicaError.frozen }
++        var next = stored
++        try apply(packet, to: &next)
++        if next.packets.count == stored.packets.count { return }
++        let bytes = try JSONEncoder().encode(next)
++        guard bytes.count <= Self.maximumBytes else { throw NativeReplicaError.full }
++        do { try writer(bytes, file) }
++        catch { frozen = true; throw NativeReplicaError.persistence }
++        stored = next
++    }
++
++    /// One value means resolved; multiple values are an explicit conflict.
++    /// Values are packet bodies, not auto-applied local Track rows.
++    public func values(localID: Int, field: String) throws -> [[String: Any]] {
++        guard let binding = stored.bindings.first(where: { $0.localID == localID }), ["title", "main_cue"].contains(field) else { throw NativeReplicaError.invalid }
++        let entity = "track:" + binding.logicalID.uuidString.lowercased()
++        let ids = Set(stored.heads[entity + "/" + field] ?? [])
++        return try stored.packets.compactMap { packet in
++            let b = try Self.object(packet)
++            return ids.contains(b["operation_id"] as? String ?? "") ? b : nil
++        }
++    }
++
++    private func apply(_ packet: Data, to next: inout Stored) throws {
++        let body = try Self.object(packet)
++        guard let originText = body["origin_id"] as? String, let origin = UUID(uuidString: originText),
++              let pin = members[origin], let sequence = body["sequence"] as? Int,
++              let operationID = body["operation_id"] as? String,
++              let entity = body["entity"] as? String, let field = body["field"] as? String,
++              let parents = body["parents"] as? [String] else { throw NativeReplicaError.invalid }
++        let canonical = try NativeOperationCodec.verify(packet, expectedGroup: next.group, expectedOrigin: origin, pinnedKey: pin)
++        for old in next.packets {
++            let b = try Self.object(old)
++            if b["operation_id"] as? String == operationID || (b["origin_id"] as? String == originText && b["sequence"] as? Int == sequence) {
++                guard let previousPin = members[origin], try NativeOperationCodec.verify(old, expectedGroup: next.group, expectedOrigin: origin, pinnedKey: previousPin) == canonical else { throw NativeReplicaError.fork }
++                return
++            }
++        }
++        guard sequence == (next.cursors[originText] ?? 0) + 1 else { throw NativeReplicaError.gap }
++        guard next.bindings.contains(where: { entity == "track:" + $0.logicalID.uuidString.lowercased() }) else { throw NativeReplicaError.unresolvedBinding }
++        for parent in parents {
++            guard try next.packets.contains(where: { old in
++                let b = try Self.object(old)
++                return b["operation_id"] as? String == parent && b["entity"] as? String == entity && b["field"] as? String == field
++            }) else { throw NativeReplicaError.missingParent }
++        }
++        guard next.packets.count < Self.maximumPackets else { throw NativeReplicaError.full }
++        let fieldKey = entity + "/" + field
++        let remaining = Set(next.heads[fieldKey] ?? []).subtracting(parents)
++        next.heads[fieldKey] = Array(remaining.union([operationID])).sorted()
++        next.packets.append(packet); next.cursors[originText] = sequence
++    }
++
++    private static func object(_ packet: Data) throws -> [String: Any] {
++        guard packet.count <= 248 * 1024, let envelope = try JSONSerialization.jsonObject(with: packet) as? [String: Any],
++              let body = envelope["body"] as? [String: Any] else { throw NativeReplicaError.invalid }
++        return body
++    }
++}
++#endif
+diff --git a/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataSync.swift b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataSync.swift
+new file mode 100644
+index 00000000..e65f51b0
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Sources/ManadjCore/NativeMetadataSync.swift
+@@ -0,0 +1,155 @@
++#if canImport(CryptoKit) && canImport(JavaScriptCore)
++import Foundation
++
++public enum NativeTransportError: Error { case invalid, http(Int), oversized, quota, expired }
++
++/// A manually started foreground test loop. Owner authentication stays in native
++/// app closure. No cookie auth, redirects, enrollment or background guarantee.
++@MainActor public final class NativeMetadataSync {
++    public private(set) var running = false
++    public private(set) var lastError: String?
++    public private(set) var requests = 0
++    public private(set) var published = 0
++    public private(set) var received = 0
++    private let replica: NativeMetadataReplica
++    private let group: UUID
++    private let origin: UUID
++    private let origins: [UUID]
++    private let token: @MainActor () async throws -> String
++    private let http: URLSession
++    private var task: Task<Void, Never>?
++    private var expiresAt = Date.distantPast
++    private var generation = UUID()
++    private var ticking = false
++    private var verifiedOwnPrefix = 0
++    // Keep fixed resource separate from caller-provided payloads.
++    private let base = CloudLibraryOAuth.resource
++    public static let requestBudget = 1800
++
++    public init(replica: NativeMetadataReplica, group: UUID, origin: UUID, origins: [UUID],
++                token: @escaping @MainActor () async throws -> String) throws {
++        guard origins.contains(origin), Set(origins).count == origins.count, (2...4).contains(origins.count) else { throw NativeTransportError.invalid }
++        self.replica = replica; self.group = group; self.origin = origin; self.origins = origins; self.token = token
++        let config = URLSessionConfiguration.ephemeral
++        config.httpCookieStorage = nil; config.urlCredentialStorage = nil; config.urlCache = nil
++        config.timeoutIntervalForRequest = 15; config.timeoutIntervalForResource = 20
++        http = URLSession(configuration: config, delegate: NativeSyncNoRedirect(), delegateQueue: nil)
++    }
++
++    /// Start only from a user control after owner authorization and provisioning.
++    /// Starting does not reset request count and cannot bypass the process budget.
++    public func start() {
++        guard !running else { return }
++        generation = UUID(); let epoch = generation
++        expiresAt = Date().addingTimeInterval(4 * 3600); running = true; lastError = nil
++        task = Task { [weak self] in
++            var failures = 0
++            while let self, !Task.isCancelled, self.running, self.generation == epoch {
++                do {
++                    try await self.tick()
++                    failures = 0
++                } catch is CancellationError { break }
++                catch {
++                    self.lastError = String(describing: error)
++                    failures += 1
++                    if case NativeTransportError.quota = error { break }
++                    if case NativeTransportError.expired = error { break }
++                    if case NativeTransportError.http(let status) = error, [401,403,409,429].contains(status) { break }
++                }
++                let delay = failures == 0 ? 30 : min(300, 10 * (1 << min(5, failures - 1)))
++                do { try await Task.sleep(for: .seconds(delay)) } catch { break }
++            }
++            guard let self, self.generation == epoch else { return }
++            self.running = false
++        }
++    }
++
++    public func stop() {
++        generation = UUID(); running = false; task?.cancel(); task = nil
++        http.getAllTasks { tasks in tasks.forEach { $0.cancel() } }
++    }
++
++    /// Exposed for explicit Sync now inside an already-started bounded session.
++    public func tick() async throws {
++        guard running, Date() < expiresAt else { throw NativeTransportError.expired }
++        guard !ticking else { return }; ticking = true; defer { ticking = false }
++        let epoch = generation
++        let head = try await call(origin: origin, suffix: "head", epoch: epoch)
++        guard let n = head["sequence"] as? Int, n >= 0, n <= replica.cursor(origin) else { throw NativeTransportError.invalid }
++        // Recheck entire retained own prefix before publishing across a fresh
++        // connection. Bounded page plus stop-on-fork, never trust a bare head.
++        guard n >= verifiedOwnPrefix else { throw NativeReplicaError.fork }
++        var after = max(0, verifiedOwnPrefix - 1)
++        while after < n {
++            let page = try await read(origin: origin, after: after, epoch: epoch)
++            let own = try replica.outgoing(after: after, limit: 4)
++            guard !page.isEmpty, page.count <= own.count else { throw NativeTransportError.invalid }
++            for (remote, expected) in zip(page, own) {
++                guard try JSONSerialization.jsonObject(with: remote) as? NSDictionary == JSONSerialization.jsonObject(with: expected) as? NSDictionary else { throw NativeReplicaError.fork }
++            }
++            guard let last = page.last, let b = (try JSONSerialization.jsonObject(with: last) as? [String: Any])?["body"] as? [String: Any],
++                  let seq = b["sequence"] as? Int, seq > after, seq <= n else { throw NativeTransportError.invalid }
++            after = seq
++        }
++        verifiedOwnPrefix = n
++        for packet in try replica.outgoing(after: n, limit: 4) {
++            let envelope = try JSONSerialization.jsonObject(with: packet) as! [String: Any]
++            let body = envelope["body"] as! [String: Any], seq = body["sequence"] as! Int
++            let bytes = try JSONSerialization.data(withJSONObject: ["packet": envelope, "expectedPreviousSequence": seq - 1])
++            let receipt = try await call(origin: origin, suffix: "operations/\(seq)", method: "PUT", body: bytes, epoch: epoch)
++            guard receipt["sequence"] as? Int == seq, receipt["stored"] as? Bool == true else { throw NativeTransportError.invalid }
++            published += 1
++        }
++        for other in origins where other != origin {
++            for packet in try await read(origin: other, after: replica.cursor(other), epoch: epoch) {
++                try replica.receive(packet); received += 1
++            }
++        }
++        lastError = nil
++    }
++
++    private func read(origin: UUID, after: Int, epoch: UUID) async throws -> [Data] {
++        let page = try await call(origin: origin, suffix: "operations?after=\(after)&limit=4", epoch: epoch)
++        guard let packets = page["operations"] as? [[String: Any]], packets.count <= 4,
++              let next = page["nextAfter"] as? Int, page["more"] is Bool else { throw NativeTransportError.invalid }
++        var expected = after
++        let bytes = try packets.map { packet -> Data in
++            expected += 1
++            guard let b = packet["body"] as? [String: Any], b["sequence"] as? Int == expected,
++                  b["origin_id"] as? String == origin.uuidString.lowercased() else { throw NativeTransportError.invalid }
++            return try JSONSerialization.data(withJSONObject: packet)
++        }
++        guard next == expected else { throw NativeTransportError.invalid }
++        return bytes
++    }
++
++    private func call(origin: UUID, suffix: String, method: String = "GET", body: Data? = nil, epoch: UUID) async throws -> [String: Any] {
++        guard running, generation == epoch, !Task.isCancelled else { throw CancellationError() }
++        guard Date() < expiresAt else { throw NativeTransportError.expired }
++        guard requests < Self.requestBudget else { throw NativeTransportError.quota }
++        let access = try await token()
++        guard generation == epoch, !Task.isCancelled else { throw CancellationError() }
++        guard !access.isEmpty, access.utf8.count <= 16384 else { throw NativeTransportError.invalid }
++        let url = URL(string: base.absoluteString + "/v1/sync/" + group.uuidString.lowercased() + "/origins/" + origin.uuidString.lowercased() + "/" + suffix)!
++        var request = URLRequest(url: url); request.httpMethod = method; request.httpBody = body
++        request.setValue("Bearer " + access, forHTTPHeaderField: "Authorization")
++        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
++        requests += 1
++        let (stream, response) = try await http.bytes(for: request)
++        guard let http = response as? HTTPURLResponse else { throw NativeTransportError.invalid }
++        guard [200,201].contains(http.statusCode) else { throw NativeTransportError.http(http.statusCode) }
++        var data = Data()
++        for try await byte in stream {
++            guard data.count < 256 * 1024 else { throw NativeTransportError.oversized }
++            data.append(byte)
++        }
++        guard generation == epoch, !Task.isCancelled else { throw CancellationError() }
++        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw NativeTransportError.invalid }
++        return object
++    }
++}
++private final class NativeSyncNoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
++    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
++                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) { completionHandler(nil) }
++}
++#endif
+diff --git a/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataReplicaTests.swift b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataReplicaTests.swift
+new file mode 100644
+index 00000000..a85e09d1
+--- /dev/null
++++ b/ios/Packages/ManadjCore/Tests/ManadjCoreTests/NativeMetadataReplicaTests.swift
+@@ -0,0 +1,60 @@
++#if canImport(CryptoKit) && canImport(JavaScriptCore)
++import XCTest
++import CryptoKit
++@testable import ManadjCore
++
++final class NativeMetadataReplicaTests: XCTestCase, @unchecked Sendable {
++    @MainActor func testTwoActualNativeStoresConvergeAfterOfflineRestartRetryAndConflict() throws {
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let group = UUID(), aID = UUID(), bID = UUID(), logical = UUID()
++        let aKey = Curve25519.Signing.PrivateKey(), bKey = Curve25519.Signing.PrivateKey()
++        let members = [aID: aKey.publicKey, bID: bKey.publicKey]
++        let bindingsA = [NativeTrackBinding(logicalID: logical, localID: 42, contentSHA256: String(repeating: "a", count: 64), byteLength: 4096)]
++        let bindingsB = [NativeTrackBinding(logicalID: logical, localID: 99, contentSHA256: String(repeating: "a", count: 64), byteLength: 4096)]
++        func makeA() throws -> NativeMetadataReplica {
++            try NativeMetadataReplica(file: root.appendingPathComponent("a.json"), group: group, origin: aID, key: aKey, members: members, bindings: bindingsA)
++        }
++        func makeB() throws -> NativeMetadataReplica {
++            try NativeMetadataReplica(file: root.appendingPathComponent("b.json"), group: group, origin: bID, key: bKey, members: members, bindings: bindingsB)
++        }
++        var a = try makeA(), b = try makeB()
++        let title = try a.edit(localID: 42, value: .title("From native A"))
++        try b.receive(title); try b.receive(title)
++        XCTAssertEqual(b.cursor(aID), 1)
++        let cue = try b.edit(localID: 99, value: .mainCue(12.5))
++        a = try makeA(); b = try makeB()
++        XCTAssertEqual(try b.outgoing(after: 0), [cue])
++        try a.receive(cue); try a.receive(cue)
++        XCTAssertEqual(try a.values(localID: 42, field: "title").first?["value"] as? String, "From native A")
++        XCTAssertEqual(try b.values(localID: 99, field: "main_cue").first?["value"] as? Double, 12.5)
++        let left = try a.edit(localID: 42, value: .title("Left offline"))
++        let right = try b.edit(localID: 99, value: .title("Right offline"))
++        try a.receive(right); try b.receive(left)
++        XCTAssertEqual(try a.values(localID: 42, field: "title").count, 2)
++        XCTAssertEqual(try b.values(localID: 99, field: "title").count, 2)
++        let chosen = try a.edit(localID: 42, value: .title("Explicit choice"))
++        try b.receive(chosen)
++        a = try makeA(); b = try makeB()
++        XCTAssertEqual(try a.values(localID: 42, field: "title").count, 1)
++        XCTAssertEqual(try b.values(localID: 99, field: "title").first?["value"] as? String, "Explicit choice")
++        XCTAssertEqual(a.allPackets().count, 5); XCTAssertEqual(b.allPackets().count, 5)
++    }
++
++    @MainActor func testFailedCommitDoesNotAdvanceCursorAndUnboundTrackRejected() throws {
++        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: root) }
++        let group = UUID(), aID = UUID(), bID = UUID(), logical = UUID()
++        let aKey = Curve25519.Signing.PrivateKey(), bKey = Curve25519.Signing.PrivateKey()
++        let members = [aID: aKey.publicKey, bID: bKey.publicKey]
++        let binding = NativeTrackBinding(logicalID: logical, localID: 1, contentSHA256: String(repeating: "b", count: 64), byteLength: 8)
++        let store = try NativeMetadataReplica(file: root.appendingPathComponent("failed.json"), group: group, origin: bID, key: bKey, members: members, bindings: [binding], writer: { _, _ in throw NativeReplicaError.persistence })
++        let packet = try NativeOperationCodec.sign(group: group, origin: aID, sequence: 1, id: UUID(), track: logical, value: .title("Generated"), parents: [], key: aKey)
++        XCTAssertThrowsError(try store.receive(packet)); XCTAssertEqual(store.cursor(aID), 0)
++        XCTAssertTrue(store.allPackets().isEmpty)
++        let healthy = try NativeMetadataReplica(file: root.appendingPathComponent("healthy.json"), group: group, origin: bID, key: bKey, members: members, bindings: [binding])
++        let wrong = try NativeOperationCodec.sign(group: group, origin: aID, sequence: 1, id: UUID(), track: UUID(), value: .title("Unknown"), parents: [], key: aKey)
++        XCTAssertThrowsError(try healthy.receive(wrong)); XCTAssertEqual(healthy.cursor(aID), 0)
++    }
++}
++#endif

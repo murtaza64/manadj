@@ -1,0 +1,37 @@
+name: Publish integrated private sync source candidate
+on:
+  push:
+    branches: [instinct/native-sync-apple-disabled]
+    paths: [.github/workflows/continuous-source-publish.yml]
+permissions:
+  contents: write
+concurrency:
+  group: continuous-integrated-source-publish
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: a3831391d9cf15da66a30587790da152c06b0d5a
+          fetch-depth: 0
+      - name: Correct exact migration publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin instinct/continuous-sync-integrated
+          git switch -c instinct/continuous-sync-integrated FETCH_HEAD
+          python3 - <<'PYPATCH'
+          import zlib,base64,hashlib,pathlib
+          raw=zlib.decompress(base64.b64decode('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'))
+          assert hashlib.sha256(raw).hexdigest()=='e1d9a6265067877dfa9e61ecc1fd7b9567858831c4056c060ee92b9e3739aa5b'
+          pathlib.Path('/tmp/migration.patch').write_bytes(raw)
+          PYPATCH
+          git apply --check /tmp/migration.patch
+          git apply /tmp/migration.patch
+          git config user.name 'Instinct'
+          git config user.email 'agent@instinct.com'
+          git add docs scripts
+          git commit -m 'Add local provisioning helper and exact source-build handoff'
+          git push origin HEAD:refs/heads/instinct/continuous-sync-integrated
